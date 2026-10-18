@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-main { max-width: 520px; margin: auto; padding: 7px 10px calc(50px + 28px + env(safe-area-inset-bottom, 0px)); }
+main { max-width: 520px; margin: auto; padding: 7px 10px calc(50px + 20px + env(safe-area-inset-bottom, 0px)); }
 .top { display: flex; justify-content: space-between; align-items: center; }
 .eyebrow { font-size: 9px; font-weight: 750; letter-spacing: .08em; color: #68717b; }
 .brand { font-size: 19px; font-weight: 850; letter-spacing: -.04em; margin: 1px 0; }
@@ -46,20 +46,27 @@ main { max-width: 520px; margin: auto; padding: 7px 10px calc(50px + 28px + env(
 .empty { padding: 12px; background: white; border-radius: 9px; color: #65717c; font-size: 12px; }
 .sectionlabel { font-size: 10px; font-weight: 800; color: #646d77; margin: 7px 3px 4px; }
 button:focus-visible { outline: 2px solid #2f6197; outline-offset: 2px; }
-.ad-placeholder {
+.ad-dock {
   position: fixed;
   z-index: 10;
-  left: 50%;
-  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
+  inset: auto 0 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 12px env(safe-area-inset-bottom, 0px);
+  background: #f8f7f4;
+}
+.ad-placeholder {
   width: min(320px, calc(100vw - 24px));
   height: 50px;
+  flex: 0 1 320px;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #cfd3d6;
-  background: #eceeef;
-  color: #667078;
+  border: 1px solid #3785C9;
+  border-radius: 4px;
+  background: #D8E9F8;
+  color: #245d8c;
   font-size: 12px;
   font-weight: 650;
   letter-spacing: .04em;
