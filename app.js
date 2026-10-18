@@ -8,7 +8,7 @@ const board = document.getElementById('board');
 const directEl = document.getElementById('onlyDirect');
 let mode = 'line';
 
-function card(train, now, bestId) {
+function card(train, now, bestId, lineCount = null) {
   const departure = boot + train.departSec * 1000;
   const arrival = departure + train.travelMin * 60000;
   const left = Math.max(0, Math.ceil((departure - now) / 1000));
@@ -18,7 +18,7 @@ function card(train, now, bestId) {
   const row = document.createElement('article');
   row.className = `train${isBest ? ' best' : ''}`;
   row.style.setProperty('--line-color', train.color);
-  row.innerHTML = `<div class="primary"><div class="train-head"><span class="route">${train.line}</span>${isBest ? '<span class="bestmark">● 最早着</span>' : ''}</div><div class="depart">${hhmm(departure)}発 <span class="minitxt">${train.kind}・${train.destination}行</span></div><div class="sub">${train.transfer ? `小竹向原乗換・待ち約${train.transfer.wait}分` : '直通・乗換なし'}</div></div><div class="countwrap"><div class="count ${left <= 180 ? 'red' : ''}">${minutes}:${seconds}</div><div class="minitxt">発車まで</div></div><div><div class="arrival">${hhmm(arrival)}</div><div class="minitxt" style="text-align:right">氷川台着</div></div>`;
+  row.innerHTML = `<div class="primary"><div class="train-head"><span class="route">${train.line}</span>${lineCount ? `<span class="line-count">${lineCount}本</span>` : ''}${isBest ? '<span class="bestmark">● 最早着</span>' : ''}</div><div class="depart">${hhmm(departure)}発 <span class="minitxt">${train.kind}・${train.destination}行</span></div><div class="sub">${train.transfer ? `小竹向原乗換・待ち約${train.transfer.wait}分` : '直通・乗換なし'}</div></div><div class="countwrap"><div class="count ${left <= 180 ? 'red' : ''}">${minutes}:${seconds}</div><div class="minitxt">発車まで</div></div><div><div class="arrival">${hhmm(arrival)}</div><div class="minitxt" style="text-align:right">氷川台着</div></div>`;
   return row;
 }
 
@@ -34,13 +34,12 @@ function draw() {
   const best = current.reduce((a, b) => a.departSec + a.travelMin * 60 < b.departSec + b.travelMin * 60 ? a : b).id;
   board.replaceChildren();
   if (mode === 'line') {
-    for (const name of ['副都心線', '有楽町線']) {
-      const trains = current.filter(train => train.line === name);
+    for (const name of ['有楽町線', '副都心線']) {
+      const trains = current.filter(train => train.line === name).sort((a, b) => a.departSec - b.departSec);
       if (!trains.length) continue;
       const section = document.createElement('div');
       section.className = 'line';
-      section.innerHTML = `<div class="linehead"><span>${name}</span><span class="line-note">${trains.length}本</span></div>`;
-      trains.forEach(train => section.appendChild(card(train, now, best)));
+      trains.forEach((train, index) => section.appendChild(card(train, now, best, index === 0 ? trains.length : null)));
       board.appendChild(section);
     }
   } else {
