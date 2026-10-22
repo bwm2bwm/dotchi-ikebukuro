@@ -15,6 +15,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 import zipfile
+from odpt_stop_patterns import CRITICAL_STOPS, TypeResolution, classify, event_state, resolve_type
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -77,13 +78,23 @@ class TripInstance:
     origin_event: StopEvent
     events: tuple[StopEvent, ...]
     odpt: OdptEnrichment | None = None
+    type_resolution: TypeResolution | None = None
 
 
 @dataclass(frozen=True)
 class OdptEnrichment:
     status: str  # unique_match | unmatched | ambiguous | unavailable
+    # train_type is a validated Metro-local type; preserve raw and unscoped
+    # through-service codes independently for diagnostics and future UI use.
     train_type: str | None = None
     destination: tuple[str, ...] = ()
+    service_brand: str | None = None
+    raw_train_type_uri: str | None = None
+    reported_train_type: str | None = None
+    other_operator_type: str | None = None
+    unscoped_through_service_type: str | None = None
+    match_method: str | None = None
+    match_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +131,7 @@ class DepartureResult:
     departure_text: str
     headsign: str | None
     odpt: OdptEnrichment
+    type_resolution: TypeResolution
     primary_itinerary: Itinerary | None
     direct_alternative: Itinerary | None
     best_transfer_alternative: Itinerary | None
@@ -263,6 +275,7 @@ class ItineraryGenerator:
         self.calendars: list[dict[str, str]] = []
         self.exceptions: list[dict[str, str]] = []
         self._odpt_cache: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+        self._station_lookup_cache: dict[tuple[str, str], str] | None = None
         self.last_wait_histogram: dict[int, int] = {}
         self.last_raw_transfer_pairs = 0
         self._load()
@@ -324,13 +337,9 @@ class ItineraryGenerator:
             number = record.get("odpt:trainNumber", "")
             if not number:
                 continue
-            objects = record.get("odpt:trainTimetableObject", [])
-            names = [
-                (item.get("odpt:departureStation") or item.get("odpt:arrivalStation", "")).rsplit(".", 1)[-1]
-                for item in objects
-            ]
-            if "Ikebukuro" not in names or "Hikawadai" not in names or names.index("Ikebukuro") >= names.index("Hikawadai"):
-                continue
+            # The first train of a transfer itinerary need not continue to
+            # Hikawadai. Match all ODPT train timetables on identity/calendar;
+            # the exact Ikebukuro departure is checked below before enrichment.
             index[number].append(record)
         normalized = dict(index)
         self._odpt_cache[cache_key] = normalized
@@ -342,31 +351,119 @@ class ItineraryGenerator:
         # the train number. It is applied only to this observed 10-char shape.
         return trip_id[2:-2] if len(trip_id) == 10 else None
 
-    def _enrich(self, trip: TripInstance, calendar: str | None) -> OdptEnrichment:
-        number = self._odpt_number(trip.trip_id)
-        if number is None or calendar is None or self.odpt_dir is None:
+    def _build_odpt_matcher(self, trips: dict[str, TripInstance], calendar: str | None):
+        if calendar is None or self.odpt_dir is None:
+            return None, {}
+        from collections import defaultdict as _defaultdict
+        from odpt_train_matcher import (  # local import avoids the module cycle
+            OdptTrainMatcher,
+            odpt_destinations,
+            odpt_ikebukuro_departure,
+            station_lookup_from_odpt,
+        )
+
+        records_by_line = {}
+        for route_id in ROUTES:
+            records_by_line[LINE_ODPT[route_id]] = [
+                record for values in self._odpt_index(route_id, calendar).values()
+                for record in values
+            ]
+
+        # Build the destination/headsign crosswalk only from the legacy exact
+        # ID+departure matches. The candidate trip cannot teach its own mapping.
+        destination_heads: dict[str, set[str]] = _defaultdict(set)
+        for trip in trips.values():
+            number = self._odpt_number(trip.trip_id)
+            if number is None or not trip.headsign:
+                continue
+            matches = [record for record in self._odpt_index(trip.route_id, calendar).get(number, ())
+                       if odpt_ikebukuro_departure(record) is not None
+                       and odpt_ikebukuro_departure(record) % 86400 == trip.departure_seconds % 86400]
+            if len(matches) == 1:
+                for station_id in odpt_destinations(matches[0]):
+                    destination_heads[station_id].add(trip.headsign)
+
+        if self._station_lookup_cache is None:
+            station_path = self.odpt_dir / "Station_all.json"
+            try:
+                station_rows = json.loads(station_path.read_text(encoding="utf-8"))
+                self._station_lookup_cache = station_lookup_from_odpt(station_rows)
+            except (OSError, json.JSONDecodeError, TypeError):
+                self._station_lookup_cache = {}
+        matcher = OdptTrainMatcher(
+            records_by_line,
+            self._station_lookup_cache,
+            destination_heads,
+            {stop_id: row.get("stop_name", "") for stop_id, row in self.stops.items()},
+        )
+        active_ids = {route_id: [trip_id for trip_id, trip in trips.items()
+                                 if trip.route_id == route_id]
+                      for route_id in ROUTES}
+        return matcher, active_ids
+
+    def _enrich(self, trip: TripInstance, calendar: str | None,
+                matcher=None, active_trip_ids=()) -> OdptEnrichment:
+        if matcher is None:
             return OdptEnrichment("unavailable")
-        matches = self._odpt_index(trip.route_id, calendar).get(number, [])
-        if not matches:
-            return OdptEnrichment("unmatched")
-        if len(matches) != 1:
-            return OdptEnrichment("ambiguous")
-        record = matches[0]
-        objects = record.get("odpt:trainTimetableObject", [])
-        ike_obj = next((obj for obj in objects if
-                        (obj.get("odpt:departureStation") or "").rsplit(".", 1)[-1] == "Ikebukuro"), None)
-        gtfs_time = trip.departure_seconds % 86400
-        odpt_time = parse_gtfs_time((ike_obj or {}).get("odpt:departureTime"))
-        if odpt_time is None or odpt_time % 86400 != gtfs_time:
-            # Keep the evidence-based unique ID match visible, but do not enrich
-            # when its independent Ikebukuro time check disagrees.
-            return OdptEnrichment("unmatched")
-        train_type = record.get("odpt:trainType", "").rsplit(".", 1)[-1] or None
-        destination = record.get("odpt:destinationStation", [])
-        if isinstance(destination, str):
-            destination = [destination]
-        destinations = tuple(str(value).rsplit(".", 1)[-1] for value in destination if value)
-        return OdptEnrichment("unique_match", train_type, destinations)
+        from odpt_train_matcher import odpt_destinations, type_scope
+
+        match = matcher.match(trip, calendar, active_trip_ids)
+        if match.status != "confirmed" or match.odpt_record is None:
+            status = "ambiguous" if match.status == "ambiguous" else (
+                "unavailable" if match.status == "unavailable" else "unmatched")
+            return OdptEnrichment(status, match_method=match.method, match_reason=match.reason)
+
+        record = match.odpt_record
+        raw_type = record.get("odpt:trainType")
+        type_code = (raw_type or "").rsplit(":", 1)[-1].rsplit(".", 1)[-1] or None
+        states = {name: event_state(trip.events, stop_id, trip.origin_event.sequence)
+                  for name, stop_id in CRITICAL_STOPS[trip.route_id].items()}
+        pattern = classify(trip.route_id, states)
+        scope_pattern = pattern
+        if trip.route_id == "6" and self._all_stops_to_kotake(trip):
+            scope_pattern = "all_stops_to_kotake_segment"
+        scope = type_scope(raw_type, trip.route_id, scope_pattern)
+        return OdptEnrichment(
+            status="unique_match",
+            train_type=scope["metro_line_type"],
+            destination=tuple(value.rsplit(".", 1)[-1] for value in odpt_destinations(record)),
+            service_brand=scope["service_brand"],
+            raw_train_type_uri=raw_type,
+            reported_train_type=type_code,
+            other_operator_type=scope["other_operator_type"],
+            unscoped_through_service_type=scope["unscoped_through_service_type"],
+            match_method=match.method,
+            match_reason=match.reason,
+        )
+
+    @staticmethod
+    def _all_stops_to_kotake(trip: TripInstance) -> bool:
+        if trip.route_id != "6":
+            return False
+        kotake = next((event for event in trip.events
+                       if event.stop_id in ROUTE_STOP_IDS["6"]["kotake_mukaihara"]
+                       and event.sequence > trip.origin_event.sequence), None)
+        if kotake is None:
+            return False
+        segment = [event for event in trip.events
+                   if trip.origin_event.sequence <= event.sequence <= kotake.sequence]
+        return bool(segment) and all(
+            (event.arrival_seconds is not None or event.departure_seconds is not None)
+            and (event.can_board or event.can_alight)
+            for event in segment
+        )
+
+    def _resolve_train_type(self, trip: TripInstance) -> TypeResolution:
+        origin_sequence = trip.origin_event.sequence
+        states = {name: event_state(trip.events, stop_id, origin_sequence)
+                  for name, stop_id in CRITICAL_STOPS[trip.route_id].items()}
+        pattern = classify(trip.route_id, states)
+        odpt = trip.odpt or OdptEnrichment("unavailable")
+        if trip.route_id == "6" and odpt.train_type == "Local" and self._all_stops_to_kotake(trip):
+            pattern = "all_stops_to_kotake_segment"
+        return resolve_type(trip.route_id, odpt.status, odpt.train_type,
+                            odpt.service_brand, pattern, states,
+                            odpt.reported_train_type)
 
     def _make_trip(self, trip_id: str, row: dict[str, str], day: date, events: tuple[StopEvent, ...]) -> TripInstance | None:
         route_id = row.get("route_id", "")
@@ -402,8 +499,13 @@ class ItineraryGenerator:
             instance = self._make_trip(trip_id, row, day, self.events.get(trip_id, ()))
             if instance:
                 trips[trip_id] = instance
-        trips = {trip_id: replace(trip, odpt=self._enrich(trip, calendar))
-                 for trip_id, trip in trips.items()}
+        matcher, active_trip_ids = self._build_odpt_matcher(trips, calendar)
+        enriched = {}
+        for trip_id, trip in trips.items():
+            trip = replace(trip, odpt=self._enrich(
+                trip, calendar, matcher, active_trip_ids.get(trip.route_id, ())))
+            enriched[trip_id] = replace(trip, type_resolution=self._resolve_train_type(trip))
+        trips = enriched
 
         direct_by_origin: dict[str, Itinerary] = {}
         transfer_by_origin: dict[str, list[Itinerary]] = defaultdict(list)
@@ -494,10 +596,27 @@ class ItineraryGenerator:
                 service_date=day.isoformat(), origin_trip_id=trip_id, route_id=trip.route_id,
                 route_name=trip.route_name, departure_seconds=trip.departure_seconds,
                 departure_text=trip.departure_text, headsign=trip.headsign, odpt=enrichment,
+                type_resolution=trip.type_resolution or self._resolve_train_type(trip),
                 primary_itinerary=primary, direct_alternative=direct, best_transfer_alternative=best_transfer,
                 transfer_candidates_count=len(transfers), status=status, data_quality=data_quality,
             ))
         return sorted(results, key=lambda result: (result.departure_seconds, result.route_id, result.origin_trip_id))
+
+
+def _type_resolution_dict(resolution: TypeResolution | None) -> dict[str, Any] | None:
+    if resolution is None:
+        return None
+    return {
+        "train_type": resolution.train_type,
+        "reported_train_type": resolution.reported_train_type,
+        "service_brand": resolution.service_brand,
+        "label": resolution.label,
+        "source": resolution.source,
+        "stop_pattern": resolution.stop_pattern,
+        "pattern_states": dict(resolution.pattern_states),
+        "validation": resolution.validation,
+        "diagnostic": resolution.diagnostic,
+    }
 
 
 def to_dict(result: DepartureResult) -> dict[str, Any]:
@@ -529,7 +648,15 @@ def to_dict(result: DepartureResult) -> dict[str, Any]:
                 "status": odpt.status,
                 "train_type": odpt.train_type,
                 "destination": list(odpt.destination),
+                "service_brand": odpt.service_brand,
+                "raw_train_type_uri": odpt.raw_train_type_uri,
+                "reported_train_type": odpt.reported_train_type,
+                "other_operator_type": odpt.other_operator_type,
+                "unscoped_through_service_type": odpt.unscoped_through_service_type,
+                "match_method": odpt.match_method,
+                "match_reason": odpt.match_reason,
             },
+            "type_resolution": _type_resolution_dict(trip.type_resolution),
         }
 
     def leg_dict(leg: Leg | None) -> dict[str, Any] | None:
@@ -572,7 +699,15 @@ def to_dict(result: DepartureResult) -> dict[str, Any]:
             "status": result.odpt.status,
             "train_type": result.odpt.train_type,
             "destination": list(result.odpt.destination),
+            "service_brand": result.odpt.service_brand,
+            "raw_train_type_uri": result.odpt.raw_train_type_uri,
+            "reported_train_type": result.odpt.reported_train_type,
+            "other_operator_type": result.odpt.other_operator_type,
+            "unscoped_through_service_type": result.odpt.unscoped_through_service_type,
+            "match_method": result.odpt.match_method,
+            "match_reason": result.odpt.match_reason,
         },
+        "type_resolution": _type_resolution_dict(result.type_resolution),
         "primary_itinerary": itinerary_dict(result.primary_itinerary),
         "direct_alternative": itinerary_dict(result.direct_alternative),
         "best_transfer_alternative": itinerary_dict(result.best_transfer_alternative),

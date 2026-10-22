@@ -5,6 +5,7 @@ import {
   buildBoard,
   formatTokyoTime,
   PayloadValidationError,
+  prepareTimetablePayload,
   serviceSecondsToEpochMs,
   validateTimetablePayload,
 } from '../scripts/timetable_adapter.mjs';
@@ -59,6 +60,19 @@ function departure({
   bestTransferAlternative = null,
   destination = '和光市',
   trainType = 'Local',
+  reportedTrainType = trainType,
+  serviceBrand = null,
+  typeLabel,
+  typeSource = trainType ? 'odpt_confirmed' : 'unknown',
+  stopPattern = null,
+  typeValidation = 'not_applicable',
+  typeDiagnostic = null,
+  odptMatchStatus = trainType ? 'unique_match' : 'unmatched',
+  odptTrainTypeUri = null,
+  otherOperatorTrainType = null,
+  unscopedTrainType = null,
+  odptMatchMethod = null,
+  odptMatchReason = null,
   dataQuality = [],
 } = {}) {
   return {
@@ -68,9 +82,22 @@ function departure({
     routeName: routeId === '6' ? '有楽町線' : '副都心線',
     headsign: destination,
     trainType,
+    reportedTrainType,
+    serviceBrand,
+    odptTrainTypeUri,
+    otherOperatorTrainType,
+    unscopedTrainType,
+    odptMatchMethod,
+    odptMatchReason,
+    typeLabel,
+    typeSource,
+    stopPattern,
+    stopPatternStates: {},
+    typeValidation,
+    typeDiagnostic,
     destination,
     odptDestinationIds: destination ? ['Wakoshi'] : [],
-    odptMatchStatus: trainType ? 'unique_match' : 'unmatched',
+    odptMatchStatus,
     departureServiceSeconds: serviceSeconds,
     departureText: '06:00:00',
     primary,
@@ -265,6 +292,22 @@ test('earliest arrival marks one card and ties prefer earlier departure', () => 
   assert.equal(board.bestId, board.items.find(item => item.sourceId === 'earlier').id);
 });
 
+test('prepared payload uses cached cards and matches raw adapter output', () => {
+  const source = payload([serviceDay('2026-10-22', [
+    departure({ id: 'cached-a', routeId: '6', serviceSeconds: 7 * 3600,
+      primary: journeyAt(7 * 3600, 7 * 3600 + 600), directAlternative: journeyAt(7 * 3600, 7 * 3600 + 600) }),
+    departure({ id: 'cached-b', routeId: '9', tripId: 'cached-b', serviceSeconds: 7 * 3600 + 120,
+      primary: journeyAt(7 * 3600 + 120, 7 * 3600 + 900), directAlternative: journeyAt(7 * 3600 + 120, 7 * 3600 + 900) }),
+  ])]);
+  const prepared = prepareTimetablePayload(source);
+  for (const mode of ['line', 'departure']) {
+    for (const directOnly of [false, true]) {
+      const options = { nowMs: JST('2026-10-22T06:50:00'), mode, directOnly };
+      assert.deepEqual(buildBoard(prepared, options), buildBoard(source, options));
+    }
+  }
+});
+
 test('missing arrival and unknown labels are preserved without fabricated values', () => {
   const missing = departure({ id: 'missing', primary: null, directAlternative: null,
     dataQuality: ['destination_arrival_missing', 'destination_alighting_prohibited'] });
@@ -280,6 +323,64 @@ test('missing arrival and unknown labels are preserved without fabricated values
   assert.ok(board.excluded.some(item => item.id === 'missing' && item.reason === 'no_valid_arrival'));
   assert.deepEqual(board.excluded.find(item => item.id === 'missing').dataQuality,
     ['destination_arrival_missing', 'destination_alighting_prohibited']);
+});
+
+test('ODPT raw train type maps to Japanese display while F-Liner stays separate from brand', () => {
+  const fLiner = departure({ id: 'f-liner', routeId: '9', trainType: 'F-Liner',
+    reportedTrainType: 'F-Liner', serviceBrand: null });
+  const express = departure({ id: 'express', routeId: '9', trainType: 'Express' });
+  const board = buildBoard(payload([serviceDay('2026-10-22', [fLiner, express])]),
+    { nowMs: JST('2026-10-22T05:00:00') });
+  const fCard = board.items.find(item => item.sourceId === 'f-liner');
+  const eCard = board.items.find(item => item.sourceId === 'express');
+  assert.equal(fCard.kind, 'Fライナー');
+  assert.equal(fCard.kindCode, 'F-Liner');
+  assert.equal(fCard.reportedTrainType, 'F-Liner');
+  assert.equal(fCard.serviceBrand, null);
+  assert.equal(eCard.kind, '急行');
+});
+
+test('confirmed ODPT type provenance and matcher diagnostics survive card conversion', () => {
+  const fLiner = departure({ id: 'scoped-f-liner', routeId: '9', trainType: null,
+    reportedTrainType: 'F-Liner', serviceBrand: 'F-Liner', typeLabel: 'Fライナー',
+    odptTrainTypeUri: 'odpt.TrainType:TokyoMetro.F-Liner',
+    otherOperatorTrainType: null, unscopedTrainType: null,
+    odptMatchMethod: 'normalized_number+exact_time+destination+stop_order',
+    odptMatchReason: 'route_calendar_number_exact_time_destination_and_stop_order_match' });
+  const board = buildBoard(payload([serviceDay('2026-10-22', [fLiner])]),
+    { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(board.items[0].kind, 'Fライナー');
+  assert.equal(board.items[0].serviceBrand, 'F-Liner');
+  assert.equal(board.items[0].odptTrainTypeUri, 'odpt.TrainType:TokyoMetro.F-Liner');
+  assert.equal(board.items[0].odptMatchMethod, 'normalized_number+exact_time+destination+stop_order');
+});
+
+test('stop-pattern labels retain source, avoid assigning F-Liner, and hold conflicts', () => {
+  const inferred = departure({ id: 'pattern-commuter', routeId: '9', trainType: 'CommuterExpress',
+    reportedTrainType: null, typeLabel: '通勤急行', typeSource: 'gtfs_stop_pattern',
+    stopPattern: 'commuter_express', typeValidation: 'consistent' });
+  const expressPattern = departure({ id: 'pattern-express', tripId: 'pattern-express', routeId: '9',
+    trainType: null, reportedTrainType: null, serviceBrand: null, typeLabel: '急行型',
+    typeSource: 'gtfs_stop_pattern', stopPattern: 'express_pattern',
+    typeValidation: 'not_applicable', typeDiagnostic: 'brand_unresolved' });
+  const conflict = departure({ id: 'conflict', tripId: 'conflict', routeId: '9', trainType: null,
+    reportedTrainType: 'F-Liner', typeLabel: '種別不明', typeSource: 'unknown',
+    stopPattern: 'local', typeValidation: 'conflict', typeDiagnostic: 'odpt_stop_pattern_conflict',
+    odptMatchStatus: 'unique_match' });
+  const board = buildBoard(payload([serviceDay('2026-10-22', [inferred, expressPattern, conflict])]),
+    { nowMs: JST('2026-10-22T05:00:00') });
+  const commuterCard = board.items.find(item => item.sourceId === 'pattern-commuter');
+  const expressCard = board.items.find(item => item.sourceId === 'pattern-express');
+  const conflictCard = board.items.find(item => item.sourceId === 'conflict');
+  assert.equal(commuterCard.kind, '通勤急行');
+  assert.equal(commuterCard.typeSource, 'gtfs_stop_pattern');
+  assert.equal(expressCard.kind, '急行型');
+  assert.equal(expressCard.kindCode, null);
+  assert.equal(expressCard.serviceBrand, null);
+  assert.notEqual(expressCard.kind, 'Fライナー');
+  assert.equal(conflictCard.kind, '種別不明');
+  assert.equal(conflictCard.reportedTrainType, 'F-Liner');
+  assert.equal(conflictCard.typeValidation, 'conflict');
 });
 
 test('invalid payloads are rejected with a validation error', () => {

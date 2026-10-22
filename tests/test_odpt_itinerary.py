@@ -19,6 +19,7 @@ from odpt_itinerary import (  # noqa: E402
     parse_gtfs_time,
     to_dict,
 )
+from odpt_stop_patterns import classify, resolve_type  # noqa: E402
 
 
 @unittest.skipUnless(DEFAULT_GTFS.exists(), "local Tokyo Metro GTFS ZIP is not present")
@@ -99,8 +100,57 @@ class LocalFeedItineraryTests(unittest.TestCase):
         results = self.generator.generate("2026-10-22")
         enriched = [result for result in results if result.odpt.status == "unique_match"]
         self.assertTrue(enriched)
-        self.assertTrue(all(result.odpt.train_type for result in enriched))
         self.assertTrue(all(result.odpt.destination for result in enriched))
+        primary = [result for result in results if result.primary_itinerary]
+        self.assertEqual(sum(result.odpt.status == "unique_match" for result in primary), 435)
+        f_liners = [result for result in primary if result.odpt.service_brand == "F-Liner"]
+        self.assertEqual(len(f_liners), 23)
+        self.assertTrue(all(result.odpt.train_type is None for result in f_liners))
+        self.assertTrue(all(result.odpt.reported_train_type == "F-Liner" for result in f_liners))
+        self.assertTrue(all(result.type_resolution.label == "Fライナー" for result in f_liners))
+        self.assertTrue(any(result.route_id == "9" and result.primary_itinerary.kind == "transfer"
+                            for result in f_liners))
+
+    def test_stop_pattern_fallback_counts_and_sources(self):
+        for day, expected in (("2026-10-22", (426, 9, 0)),
+                              ("2026-10-24", (387, 6, 3)),
+                              ("2026-11-03", (387, 6, 3))):
+            primary = [r for r in self.generator.generate(day) if r.primary_itinerary]
+            odpt_count = sum(r.type_resolution.source == "odpt_confirmed" for r in primary)
+            unknown_count = sum(r.type_resolution.label == "種別不明" for r in primary)
+            brand_count = sum(r.odpt.service_brand == "F-Liner" and r.type_resolution.label == "Fライナー"
+                              for r in primary)
+            unresolved_count = sum(r.odpt.status != "unique_match" for r in primary)
+            self.assertEqual(odpt_count, expected[0])
+            self.assertEqual(unknown_count, expected[1])
+            self.assertEqual(unresolved_count, expected[2])
+            self.assertEqual(brand_count, 23 if day == "2026-10-22" else 24)
+            self.assertTrue(all(r.odpt.train_type is None for r in primary
+                                if r.odpt.reported_train_type in {"SemiExpress", "Rapid", "RapidExpress"}))
+
+    def test_odpt_pattern_conflict_is_held_for_diagnosis(self):
+        states = {"kotake": "stop", "hikawadai": "stop", "senkawa": "stop", "kanamecho": "stop"}
+        resolution = resolve_type("9", "unique_match", "F-Liner", None, "local", states)
+        self.assertEqual(resolution.source, "unknown")
+        self.assertEqual(resolution.label, "種別不明")
+        self.assertEqual(resolution.validation, "conflict")
+        self.assertEqual(resolution.reported_train_type, "F-Liner")
+        self.assertEqual(resolution.diagnostic, "odpt_stop_pattern_conflict")
+
+    def test_stop_pattern_fallback_requires_an_unmatched_odpt_record(self):
+        states = {"kotake": "stop", "hikawadai": "stop", "senkawa": "pass", "kanamecho": "pass"}
+        for status in ("ambiguous", "unavailable"):
+            with self.subTest(status=status):
+                resolution = resolve_type("9", status, None, None, "commuter_express", states)
+                self.assertEqual(resolution.source, "unknown")
+                self.assertEqual(resolution.label, "種別不明")
+
+    def test_missing_required_stop_row_is_not_filled_by_pattern_fallback(self):
+        states = {"kotake": "stop", "hikawadai": "missing", "senkawa": "stop", "kanamecho": "stop"}
+        self.assertEqual(classify("9", states), "unclassifiable")
+        resolution = resolve_type("9", "unmatched", None, None, "unclassifiable", states)
+        self.assertEqual(resolution.label, "種別不明")
+        self.assertEqual(resolution.source, "unknown")
 
     def test_compact_json_dto_contains_no_raw_odpt_or_full_stop_list(self):
         result = self.generator.generate("2026-10-22")[0]

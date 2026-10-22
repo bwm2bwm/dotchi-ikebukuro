@@ -138,3 +138,76 @@
 - カード項目にroute color、既知train typeの日本語表記、destination unknown、直通／乗換・待ち時間、arrival/departure epoch、番線unknown・接続非保証を変換。primary到着なしは推測せず除外理由を保持。
 - Node標準 `node:test` で12件実行。日付跨ぎ、feed境界、now前後、24時間窓、service day duplicate、direct/transfer、mode/filter、同着、欠損、不正payloadを確認。通常timezoneと `TZ=UTC` の両方で成功。
 - `docs/ver_0_5_step_2a_ui_integration.md` にadapter動作と返却形式を補足し、project stateを更新。`index.html` / `app.js` / `data.js` / `styles.css`、実payload、取得データを変更・生成せず、外部API・秘密情報に触れず、コミットなし。
+
+## 2026-10-22 — Ver.0.5 Step 2B-2 ローカル実ダイヤUI接続
+
+- `/private/tmp/dotchi-ikebukuro-preview/site` にVer.0.4.2の画面スタイルを引き継いだ隔離previewを作成。preview専用 `index.html` / `app.js` は一時領域にのみ置き、adapterをES moduleとして読み込み、既存カードの路線色・表示順・フィルターを維持した。
+- payload exporterで当日と前後日のサービスデータを生成し、JST基準の時計、絶対発着時刻、1秒更新カウントダウン、直通／乗換待ち、最早着一件を接続。ロード失敗・古いpayloadはメッセージ表示し、架空データへfallbackしない。種別不明・番線未確認・接続非保証も画面に反映。
+- Safariをlocalhost `127.0.0.1:8765` で開き、HTTP 200とカード表示を確認。画面ではGTFS由来の発着時刻・行先、色、カウントダウン、未照合種別、1分乗換注記を確認した。404 faviconは表示データに影響しない。
+- adapterで代表日を固定して集計: 平日2026-10-22は435件（直通287・乗換148・1分接続65）、土曜2026-10-24は396件（240・156・80）、祝日2026-11-03は418件（263・155・79）。各ケースで最早着マークは1件、発車順は昇順。通常・土曜・祝日で日別便数が異なることを確認。
+- preview実データpayloadは一時Web root内の約1.7MBの最小旅程JSONのみ。比較用土曜・祝日payloadとSafari画面captureはWeb root外の同じ一時ディレクトリに保存。GTFS ZIP、ODPT生JSON、認証情報は一切コピーせず、アプリ本体のHTML/CSS/JavaScript、公開配信物、Git管理対象を変更していない。
+- iPhone Safariは未確認。サーバーをloopbackに限定したため別端末から到達できない。実機で確認する場合は制約を維持するUSB等の別経路が必要で、現時点ではMac Safariのレスポンシブ表示確認を案内する。外部通信なし、コミットなし。
+
+## 2026-10-22 — Ver.0.5 Step 2B-2 改善
+
+- preview専用 `preview_selection.mjs` を `/private/tmp/dotchi-ikebukuro-preview/site/` に追加し、路線別は各3件、発車順は全路線6件へ制限。adapterによる未来便・直通filterの後に制限し、見える候補の中で最早着を付け直す。毎秒再評価するため発車後の次候補補充も継続。
+- preview専用Nodeテスト6件を追加し、路線別3+3、全体6、少数候補、表示内best、同着の早発優先、発車後の補充を検証。実payloadを14:00 JSTで再生し、line/departure/directOnlyの各6件・best一件・発車後6件補充を確認。Safariでもroute mode 3+3、mixed departure mode 6件、directOnly ON 6件（全て直通）を視認。14:26発車後に次候補へ補充される挙動も実画面で確認。
+- previewの再確認用URLに `?directOnly=1` と `?mode=departure` を追加。どちらも一時previewのみの初期状態指定で、通常の画面操作も利用できる。画面captureは `/private/tmp/dotchi-ikebukuro-preview/` に保存。
+- 種別の取りこぼし原因は既存ODPT indexが池袋と氷川台を通るODPT停車列に限定していた点。ODPT全便へ広げ、路線・calendar・GTFS trip number・池袋発時刻を照合。valid primaryのID確認率は平日307/435（70.6%）、土休日286/396（72.2%）。増分はすべて乗換旅程の先行便。
+- さらにroute/calendar/発車分/別日ID一致から検証したdestination crosswalkで追加候補を比較。既知ID便のholdout 307/307・286/286で候補が同一train IDを選択。ID未確認の一意候補は平日128、土休日107、土休日3便は候補なし。未知便の直接ID証拠はないため、種別を実装補完せず「候補」として記録。
+- ODPT副都心線 TrainTimetable内に `odpt:trainType=F-Liner` が107件。GTFSには種別・愛称属性がなく、取得済みODPTにも別サービスブランド属性は確認できない。`reportedTrainType` と `serviceBrand` を分離する内部モデル案を `docs/odpt_research.md` に追記。
+- ローカル種別解析器 `scripts/odpt_phase3_train_type_match.py` を追加。GTFS/ODPTのローカルファイルのみ使用。公開HTML/CSS/JavaScript、実データpayload、GitHub Pagesを変更せず、API/秘密情報へアクセスせず、commitなし。
+
+## 2026-10-22 — Ver.0.5 列車種別の確定照合改善
+
+- `scripts/odpt_itinerary.py` のODPT候補索引から氷川台停車条件を外し、列車番号・路線・calendar・池袋発時刻の全一致後に一意性を判定するよう変更。これにより乗換旅程の先行列車も照合対象となる。
+- payloadにODPT原コード `reportedTrainType`、独立した `serviceBrand`、GTFS由来行先の `destinationSource` を追加。F-Linerは原値を保持し、adapterが「Fライナー」と表示する。未照合便の種別補完はしない。
+- 照合結果は平日307/435、土曜286/396、祝日286/396。平日F-Liner 23件、土休日各20件。未照合は各代表日128/110/110件のまま不明表示。
+- Pythonテスト11件、JavaScript adapterテスト13件を通常TZと `TZ=UTC` で実行し成功。preview専用表示件数テスト6件も成功。2026-10-21〜23のpayloadをリポジトリ外で再生成し、路線別3+3・発車順6・直通のみ・各表示内最早着1件・Fライナーラベルをadapter経由で確認。localhostのHTTP応答は200。
+- この実行環境ではSafariアプリを `open -a Safari` で解決できず、Safariの画面確認だけ未実施。ローカルpreviewサーバーは127.0.0.1:8765で起動中。
+- 外部API・秘密情報・公開用UI・リポジトリ内実payloadに触れず、commitなし。
+
+## 2026-10-22 — GTFS停車パターンによる列車種別識別検証
+
+- 東京メトロ公式の副都心線停車駅表と有楽町線駅案内を確認。副都心線は各停／通勤急行／急行の駅パターンを比較できるが、急行とF-Linerは停車パターンで区別できない。有楽町線公式表には種別ごとの通過区分がなく、全駅停車パターンのみ調べた。
+- `scripts/odpt_phase3_stop_pattern_classifier.py` を追加。時刻あり＋少なくとも一方の乗降可を停車根拠、時刻なし＋乗降両方不可の駅行をGTFS上の非旅客停車証拠、駅行なし・その他を判定不能とした。物理的な通過は断定しない。
+- 確定ODPTと比較可能な副都心線パターンは平日104、土休日102件で不一致0。未照合便のうち平日46（各停30、通勤急行16）、土休日34（各停34）を分類可能。急行/F-Liner同型9件（土休日）、有楽町線全駅パターン44/36件は列車種別名へ変換しない。
+- 確定照合だけの不明率29.4%/27.8%から、各停・通勤急行だけを補助分類しても18.9%/19.2%まで下がる見込み。検証を記録し、表示ロジック・preview・payloadには反映していない。
+- 調査記録とproject stateを更新。ローカルGTFS/ODPT以外のデータは解析に使わず、外部API・キー・`.env.local`・公開UIには触れず、commitなし。
+
+## 2026-10-22 — Ver.0.5 停車パターン種別表示をローカルpreviewへ反映
+
+- 停車イベント判定・路線別分類・表示名解決を `scripts/odpt_stop_patterns.py` に共通化し、`odpt_phase3_stop_pattern_classifier.py` と `odpt_itinerary.py` から利用。ODPT一意照合値を優先し、Fukutoshinで検証可能な不一致は `種別不明` と診断属性に保持。停車イベント欠損は分類に使わない。ODPT照合が ambiguous / unavailable の場合はパターンfallbackを行わず、明示的な unmatched のみ分類する。
+- payload exporter とJS adapterを更新し、`typeSource`, `typeValidation`, `typeDiagnostic`, `stopPattern`, raw ODPT typeを保持。F-Linerは確定ODPTのみ「Fライナー」、急行同型は「急行型」、有楽町線全駅停車は正式種別でない「全駅停車」として表示。previewの表示件数制御とカウントダウン実装は変更せずadapterだけ差し替え。
+- 代表日集計: 平日2026-10-22は435 primary便中、ODPT確定307・パターン表示90・種別不明38。土曜2026-10-24と祝日2026-11-03は各396便中、ODPT確定286・パターン表示79・種別不明31。ODPTのみの不明表示128/435 (29.4%)・110/396 (27.8%) から、汎用「種別不明」表示は38/435 (8.7%)・31/396 (7.8%) へ減少。正式種別の不明率は補助表示を除いて82/435 (18.9%)・76/396 (19.2%)。平日パターン表示90件は各停30・通勤急行16・有楽町全停44、土休日79件は各停34・急行型9・有楽町全停36。
+- 分類可能なODPT確定副都心線便との矛盾は平日0/104、土休日0/102。必要イベント不足による分類不能は補完せず。F-Linerを停車駅から断定するケースはなし。
+- Python unittest 15件、Node adapter 14件（通常TZ・`TZ=UTC`）、preview-selection 6件が成功。payloadを `/private/tmp/dotchi-ikebukuro-preview/site/timetable.json` へ再生成し、平日/土曜/祝日代表payloadも一時ディレクトリに生成。adapter結果は路線別3+3、発車順6、直通のみ6、各モード最早着1件。既存カウントダウンおよび日付跨ぎはadapterのテストで検証。
+- Safariの再確認は `http://127.0.0.1:8765/index.html` を開いて強制再読み込み。画面で路線別3+3件、発車順6件、`?directOnly=1` の直通のみ、各カードの種別ラベルと最早着印を確認。Safariの画面自体は今回の更新後に再撮影していないため、手動再確認が必要。
+- 公開HTML/CSS/JS、外部API、資格情報は未変更・未使用。payloadと生GTFS/ODPTはGit管理対象外、commitなし。
+
+## 2026-10-22 — 残存種別不明の全件原因診断
+
+- `scripts/odpt_phase3_unknown_diagnostics.py` を追加し、平日・土曜・祝日の表示可能primary旅程から `typeSource=unknown` を抽出。対象38/31/31便、全件をtrip ID・路線・発時刻・headsign・ODPT状態/候補番号・stop event/時刻/pickup/drop_offと一緒にderived JSONへ出力。ファイルは `/private/tmp` に限定。
+- 原因は100/100件で別trip乗換journeyの第一GTFS tripが小竹向原終端、氷川台がtrip区間外。イベント記録なしを通過とは判断しない。要町・千川は85便で時刻あり・乗降可、15便で時刻なし・pickup/drop_off両方不可の明示通過記録。小竹向原は全件時刻あり・乗降可。平和台も第一trip外でイベントなし。
+- 現行ID切り出しとODPT trainNumberは全件不一致。一方、秒単位発時刻候補、先頭ゼロ/可変末尾を考慮した番号候補、held-out destination-headsign照合は100件すべて一意。タイプ候補内訳は平日Local29/Express3/SemiExpress4/RapidExpress2、土休日各Local23/Express3/F-Liner3/SemiExpress2。候補は独立したID原票ではないので自動補完へは反映せず、採用条件を調査文書に記録。
+- 番号変形の対照879/879が既知ODPT `odpt:train` に一意一致。停車パターンでは、副都心線39便が要町・千川停車から各駅停車候補、15便は通過駅ペアでも氷川台欠落で通勤急行/急行系を分離できない。有楽町線46便は代表駅のみ停車記録で全区間各駅停車とは確定しない。
+- 要求どおり名称変更・表示ロジック・アプリ・previewには手を入れず、research/state/devlogと診断スクリプトのみ更新。外部API/資格情報なし、commitなし。
+
+## 2026-10-22 — GTFS列車番号正規化・ODPT照合器
+
+- `scripts/odpt_train_matcher.py` に限定的なtrip_id parserと照合器を追加。観測した `00` padding、唯一の `20` 末尾例外、数字先頭ゼロを候補化。route、calendar、ODPT train number、池袋発秒、独立destination/headsign対応、GTFS有効停車イベント列とODPT駅順がすべて整合する場合だけ `confirmed` を返す。候補一意と確定を別statusにし、複数候補、番号衝突、行先対応不足、順序矛盾は保留する。
+- 代表日primary 1,227便を実データで照合。旧確定879/1,227（71.6%）から1,221/1,227（99.5%）へ増加。既知879件は全件同じODPT trainを回帰確認。残存unknown100件はweekday38、SaturdayHoliday31（土曜）、SaturdayHoliday31（祝日）で全件確定。ほかの未照合248件中242確定、6件（小川町行の3 tripを土曜/祝日で重複）はdestination crosswalk不在により保留。
+- 種別raw値の対象100件内訳: 有楽町線 Local36 / SemiExpress8 / RapidExpress2、副都心線 Local39 / Express9 / F-Liner6。副都心線の線内種別、他社線種別、F-Liner愛称を独立属性にし、F-Liner raw値をExpressへ機械置換しない。有楽町線のthrough-service raw typeは線内種別とも他社種別とも断定せず未スコープ値で保持。
+- `tests/test_odpt_train_matcher.py` を追加して13件。number形、曜日/路線、衝突、同時刻複数候補、行先/駅順不一致、保留、type scope、879既知対照、100 residual、全primary便の残り6件を確認。`python3 -B -m unittest discover -s tests -v`: 28件成功。
+- 派生検証レポートは `/private/tmp/dotchi-ikebukuro-train-match-report.json` に保存。照合器を`ItineraryGenerator`/exporter/adapter/UIへ接続しておらず、プレビュー・payload・画面表示は変更なし。ローカルデータのみ、外部API・資格情報なし、commitなし。
+
+## 2026-10-22 — 照合器統合とpreview切替応答最適化
+
+- `scripts/odpt_itinerary.py` で運行日別ODPT索引と確認済destination/headsign crosswalkを構築し、`odpt_train_matcher.py` を旅程生成へ統合。raw type URI・報告された種別・メトロ種別・他社/未適用種別・Fライナー愛称・照合方法/理由を内部DTOとexport payloadへ追加。矛盾や根拠不足の候補は未確定を維持。`scripts/timetable_adapter.mjs` にもこれらの属性を保持する変換を追加。
+- 回帰validatorはknown control 879件を維持、residual unknown 100件を確定、その他の未照合248件中242件確定、6件候補未確定。代表日primaryの種別表示は平日各停359・通勤急行30・急行14・Fライナー23・不明9。土曜/祝日は各停335・急行28・Fライナー24・不明6・急行型補助3。FライナーをExpressへ変換せず、急行型補助も正式急行へ昇格しない。through-serviceの有楽町線種別はメトロ線内名へ流用しない。
+- 既存UIの約2秒切替原因は、1,317便すべてのpayload検証・日時formatter/card再生成・候補sortを毎秒繰り返し、全カードDOMを差し替える処理。切替時の再fetchはなかった。adapterに `prepareTimetablePayload` を追加しIntl formatterを共有。全候補の二度sortを一度sort＋reduceへ変更。preview appは操作時にだけ候補生成し、毎秒は時計/カウントダウン文字列のみ更新。発車到達・JST日付変更・payload古さ変更時には再描画する。路線別3+3、発車順6件、filter後に件数制限、最早着マークはpreview_selectionで維持。
+- 実測: Nodeで同一1,317便payloadの15回計測（preview同様onTiming有効）。raw payloadはadapter中央値36.47ms/最大50.10ms、候補走査26.89/39.52ms、sort 0.05/0.34ms。準備済みpayloadはadapter中央値0.88ms/最大4.47ms、候補走査0.57/1.71ms、sort 0.03/0.22ms。過去に採取した旧adapter中央値352–618ms/p95 513–729msと比べ改善。Mac Safariの実ブラウザーevent-to-DOM計測は未実施であり、Node数値をSafari数値として扱わない。ローカルpreviewに `window.__dotchiPreviewPerf` を追加し、fetch回数・候補走査/sort/adapter/selection/DOM/event→DOM/次frameを直近50操作分表示可能。
+- ローカルpreview payloadを `/private/tmp/dotchi-ikebukuro-preview/site/timetable.json` に2026-10-21〜23の1,317便で再生成し、更新adapterを作業コピーへ配置。サーバは起動せず停止状態を維持。
+- 再生成した実payloadをJST 2026-10-22 06:00でadapter+preview selectionへ通し、line mode 3+3、departure mode 6件、直通filter off/on、最早着印各1件を確認。direct-only時は表示6件全て直通。
+- 検証: Python unittest 28件、Node adapter 16件（通常TZ・`TZ=UTC`の両方）、preview selection 6件、Node syntax check、matcher report（879 control + 100 residual + 242 confirmed + 6 held）成功。
+- Safari再確認: `cd /private/tmp/dotchi-ikebukuro-preview/site && python3 -m http.server 8765 --bind 127.0.0.1` でlocalhost限定起動後、Safariで `http://127.0.0.1:8765/index.html` を開く。Consoleで `window.__dotchiPreviewPerf` を確認し、路線別/発車順と直通filterを各10回ほど切替えて、`history` の `eventToDomMs`, `adapterMs`, `candidateMs`, `sortMs`, `selectionMs`, `domMs` を読む。`fetchCount` が1のままかも確認する。発車後の補充、3+3/6件、最早着1件も確認する。終了時にサーバーを停止。preview・payloadは作業コピー/`/private/tmp`のみ、公開UI変更・外部通信・秘密情報参照・commitなし。

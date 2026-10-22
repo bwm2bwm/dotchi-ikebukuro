@@ -29,6 +29,19 @@ class LocalPayloadExportTests(unittest.TestCase):
         self.assertIn("primary", departure)
         self.assertIn("directAlternative", departure)
         self.assertIn("bestTransferAlternative", departure)
+        self.assertIn("reportedTrainType", departure)
+        self.assertIn("serviceBrand", departure)
+        self.assertIn(departure["typeSource"], {"odpt_confirmed", "gtfs_stop_pattern", "unknown"})
+        self.assertIn("stopPatternStates", departure)
+        self.assertIn(departure["typeValidation"],
+                      {"consistent", "unverifiable", "conflict", "not_applicable", "unmatched"})
+        self.assertEqual(departure["serviceBrand"], None)
+        f_liner = next(item for item in payload["serviceDays"][0]["departures"]
+                       if item["reportedTrainType"] == "F-Liner")
+        self.assertEqual(f_liner["serviceBrand"], "F-Liner")
+        self.assertIsNone(f_liner["trainType"])
+        self.assertEqual(f_liner["typeSource"], "odpt_confirmed")
+        self.assertEqual(f_liner["typeLabel"], "Fライナー")
 
     def test_outside_feed_service_dates_are_listed_and_skipped(self):
         generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)

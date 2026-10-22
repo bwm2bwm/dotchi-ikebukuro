@@ -3,6 +3,14 @@
 export const TOKYO_TIME_ZONE = 'Asia/Tokyo';
 export const DEFAULT_HORIZON_MS = 24 * 60 * 60 * 1000;
 
+const TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: TOKYO_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+const DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TOKYO_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+const PREPARED_PAYLOADS = new WeakMap();
+
 const ROUTE_PRESENTATION = Object.freeze({
   '6': Object.freeze({ line: '有楽町線', color: '#c1a026', order: 0 }),
   '9': Object.freeze({ line: '副都心線', color: '#9C5E31', order: 1 }),
@@ -10,8 +18,16 @@ const ROUTE_PRESENTATION = Object.freeze({
 
 const TRAIN_TYPE_LABELS = Object.freeze({
   Local: '各駅停車',
+  Express: '急行',
   CommuterExpress: '通勤急行',
+  SemiExpress: '準急',
+  Rapid: '快速',
+  RapidExpress: '快速急行',
+  'F-Liner': 'Fライナー',
+  'S-TRAIN': 'S-TRAIN',
 });
+const TYPE_SOURCES = new Set(['odpt_confirmed', 'gtfs_stop_pattern', 'unknown']);
+const TYPE_VALIDATIONS = new Set(['consistent', 'unverifiable', 'conflict', 'not_applicable', 'unmatched']);
 
 export class PayloadValidationError extends TypeError {
   constructor(message) {
@@ -79,25 +95,34 @@ export function serviceSecondsToEpochMs(serviceDate, serviceSeconds) {
 
 export function formatTokyoTime(epochMs) {
   if (!Number.isFinite(epochMs)) throw new TypeError('epochMs must be finite');
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: TOKYO_TIME_ZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(epochMs));
+  const parts = TIME_FORMATTER.formatToParts(new Date(epochMs));
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${values.hour}:${values.minute}`;
 }
 
 function tokyoCalendarDate(epochMs) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TOKYO_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(epochMs));
+  const parts = DATE_FORMATTER.formatToParts(new Date(epochMs));
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+/** Validate once and precompute immutable display cards for fast local UI toggles. */
+export function prepareTimetablePayload(payload) {
+  validateTimetablePayload(payload);
+  const entries = [];
+  for (const day of payload.serviceDays) {
+    for (const departure of day.departures) {
+      entries.push({
+        day,
+        departure,
+        primary: departure.primary ? makeCard(day, departure, departure.primary) : null,
+        direct: departure.directAlternative ? makeCard(day, departure, departure.directAlternative) : null,
+      });
+    }
+  }
+  const prepared = Object.freeze({ schemaVersion: payload.schemaVersion });
+  PREPARED_PAYLOADS.set(prepared, { payload, entries });
+  return prepared;
 }
 
 function addCalendarDays(isoDate, days) {
@@ -128,6 +153,24 @@ function validateJourney(value, path, expectedKind = null) {
     requireString(transfer.outgoingRouteName, `${path}.transfer.outgoingRouteName`);
     requireString(transfer.outgoingHeadsign, `${path}.transfer.outgoingHeadsign`, { nullable: true });
     requireString(transfer.outgoingTrainType, `${path}.transfer.outgoingTrainType`, { nullable: true });
+    if (transfer.outgoingReportedTrainType !== undefined) {
+      requireString(transfer.outgoingReportedTrainType, `${path}.transfer.outgoingReportedTrainType`, { nullable: true });
+    }
+    if (transfer.outgoingServiceBrand !== undefined) {
+      requireString(transfer.outgoingServiceBrand, `${path}.transfer.outgoingServiceBrand`, { nullable: true });
+    }
+    for (const key of ['outgoingOdptTrainTypeUri', 'outgoingOtherOperatorType', 'outgoingUnscopedTrainType',
+      'outgoingMatchMethod', 'outgoingMatchReason']) {
+      if (transfer[key] !== undefined) requireString(transfer[key], `${path}.transfer.${key}`, { nullable: true });
+    }
+    if (transfer.outgoingTypeLabel !== undefined) requireString(transfer.outgoingTypeLabel, `${path}.transfer.outgoingTypeLabel`);
+    if (transfer.outgoingTypeSource !== undefined && !TYPE_SOURCES.has(transfer.outgoingTypeSource)) {
+      fail(`${path}.transfer.outgoingTypeSource`, 'unsupported type source');
+    }
+    if (transfer.outgoingStopPattern !== undefined) requireString(transfer.outgoingStopPattern, `${path}.transfer.outgoingStopPattern`, { nullable: true });
+    if (transfer.outgoingTypeValidation !== undefined && !TYPE_VALIDATIONS.has(transfer.outgoingTypeValidation)) {
+      fail(`${path}.transfer.outgoingTypeValidation`, 'unsupported validation state');
+    }
     if (!Array.isArray(transfer.outgoingDestinationIds)
         || transfer.outgoingDestinationIds.some(item => typeof item !== 'string')) {
       fail(`${path}.transfer.outgoingDestinationIds`, 'array of strings required');
@@ -186,7 +229,32 @@ export function validateTimetablePayload(payload) {
       requireString(item.routeName, `${itemPath}.routeName`);
       requireString(item.headsign, `${itemPath}.headsign`, { nullable: true });
       requireString(item.trainType, `${itemPath}.trainType`, { nullable: true });
+      if (item.reportedTrainType !== undefined) {
+        requireString(item.reportedTrainType, `${itemPath}.reportedTrainType`, { nullable: true });
+      }
+      if (item.serviceBrand !== undefined) {
+        requireString(item.serviceBrand, `${itemPath}.serviceBrand`, { nullable: true });
+      }
+      for (const key of ['odptTrainTypeUri', 'otherOperatorTrainType', 'unscopedTrainType', 'odptMatchMethod', 'odptMatchReason']) {
+        if (item[key] !== undefined) requireString(item[key], `${itemPath}.${key}`, { nullable: true });
+      }
+      if (item.typeLabel !== undefined) requireString(item.typeLabel, `${itemPath}.typeLabel`);
+      if (item.typeSource !== undefined && !TYPE_SOURCES.has(item.typeSource)) {
+        fail(`${itemPath}.typeSource`, 'unsupported type source');
+      }
+      if (item.stopPattern !== undefined) requireString(item.stopPattern, `${itemPath}.stopPattern`, { nullable: true });
+      if (item.stopPatternStates !== undefined) {
+        const states = requireObject(item.stopPatternStates, `${itemPath}.stopPatternStates`);
+        for (const [key, value] of Object.entries(states)) requireString(value, `${itemPath}.stopPatternStates.${key}`);
+      }
+      if (item.typeValidation !== undefined && !TYPE_VALIDATIONS.has(item.typeValidation)) {
+        fail(`${itemPath}.typeValidation`, 'unsupported validation state');
+      }
+      if (item.typeDiagnostic !== undefined) requireString(item.typeDiagnostic, `${itemPath}.typeDiagnostic`, { nullable: true });
       requireString(item.destination, `${itemPath}.destination`, { nullable: true });
+      if (item.destinationSource !== undefined) {
+        requireString(item.destinationSource, `${itemPath}.destinationSource`, { nullable: true });
+      }
       if (!Array.isArray(item.odptDestinationIds)
           || item.odptDestinationIds.some(value => typeof value !== 'string')) {
         fail(`${itemPath}.odptDestinationIds`, 'array of strings required');
@@ -247,10 +315,22 @@ function makeCard(day, departure, journey) {
     outgoingRouteId: journey.transfer.outgoingRouteId,
     outgoingRoute: journey.transfer.outgoingRouteName,
     outgoingHeadsign: journey.transfer.outgoingHeadsign,
-    outgoingKind: TRAIN_TYPE_LABELS[journey.transfer.outgoingTrainType] ?? null,
+    outgoingKind: journey.transfer.outgoingTypeLabel
+      ?? TRAIN_TYPE_LABELS[journey.transfer.outgoingTrainType]
+      ?? '種別不明',
+    outgoingReportedTrainType: journey.transfer.outgoingReportedTrainType
+      ?? journey.transfer.outgoingTrainType,
+    outgoingServiceBrand: journey.transfer.outgoingServiceBrand ?? null,
+    outgoingOdptTrainTypeUri: journey.transfer.outgoingOdptTrainTypeUri ?? null,
+    outgoingOtherOperatorType: journey.transfer.outgoingOtherOperatorType ?? null,
+    outgoingUnscopedTrainType: journey.transfer.outgoingUnscopedTrainType ?? null,
+    outgoingMatchMethod: journey.transfer.outgoingMatchMethod ?? null,
+    outgoingMatchReason: journey.transfer.outgoingMatchReason ?? null,
     outgoingDestinationIds: [...journey.transfer.outgoingDestinationIds],
   };
-  const trainType = TRAIN_TYPE_LABELS[departure.trainType] ?? null;
+  const reportedTrainType = departure.reportedTrainType ?? departure.trainType;
+  const effectiveTrainType = departure.trainType;
+  const trainType = TRAIN_TYPE_LABELS[effectiveTrainType ?? reportedTrainType] ?? null;
   const destination = departure.destination?.trim() || null;
 
   return {
@@ -264,11 +344,24 @@ function makeCard(day, departure, journey) {
     routeId: departure.routeId,
     line: route.line,
     color: route.color,
-    kind: trainType ?? '種別不明',
-    kindCode: departure.trainType,
+    kind: departure.typeLabel ?? trainType ?? '種別不明',
+    kindCode: effectiveTrainType,
+    reportedTrainType,
+    serviceBrand: departure.serviceBrand ?? null,
+    odptTrainTypeUri: departure.odptTrainTypeUri ?? null,
+    otherOperatorTrainType: departure.otherOperatorTrainType ?? null,
+    unscopedTrainType: departure.unscopedTrainType ?? null,
+    odptMatchMethod: departure.odptMatchMethod ?? null,
+    odptMatchReason: departure.odptMatchReason ?? null,
+    typeSource: departure.typeSource ?? (reportedTrainType ? 'odpt_confirmed' : 'unknown'),
+    stopPattern: departure.stopPattern ?? null,
+    stopPatternStates: departure.stopPatternStates ? { ...departure.stopPatternStates } : null,
+    typeValidation: departure.typeValidation ?? 'not_applicable',
+    typeDiagnostic: departure.typeDiagnostic ?? null,
     destination: destination ?? '行き先不明',
     destinationLabel: destination ?? '行き先不明',
     destinationIsKnown: destination !== null,
+    destinationSource: departure.destinationSource ?? (departure.headsign ? 'gtfs_headsign' : null),
     headsign: departure.headsign,
     departureAtMs,
     arrivalAtMs,
@@ -305,12 +398,15 @@ export function buildBoard(payload, {
   horizonMs = DEFAULT_HORIZON_MS,
   directOnly = false,
   mode = 'departure',
+  onTiming = null,
 } = {}) {
-  validateTimetablePayload(payload);
+  const prepared = PREPARED_PAYLOADS.get(payload);
+  if (!prepared) validateTimetablePayload(payload);
   if (!Number.isFinite(nowMs)) throw new TypeError('nowMs must be finite');
   if (!Number.isFinite(horizonMs) || horizonMs <= 0) throw new TypeError('horizonMs must be positive');
   if (typeof directOnly !== 'boolean') throw new TypeError('directOnly must be boolean');
   if (!['line', 'departure'].includes(mode)) throw new TypeError("mode must be 'line' or 'departure'");
+  if (onTiming !== null && typeof onTiming !== 'function') throw new TypeError('onTiming must be a function or null');
 
   const endMs = nowMs + horizonMs;
   const todayTokyo = tokyoCalendarDate(nowMs);
@@ -323,9 +419,13 @@ export function buildBoard(payload, {
   const deduplicated = new Map();
   let duplicateCount = 0;
 
-  for (const day of payload.serviceDays) {
-    const inFeed = day.serviceDate >= payload.feed.validFrom && day.serviceDate <= payload.feed.validThrough;
-    for (const departure of day.departures) {
+  const sourceEntries = prepared?.entries ?? payload.serviceDays.flatMap(day =>
+    day.departures.map(departure => ({ day, departure, primary: null, direct: null })));
+  const sourcePayload = prepared?.payload ?? payload;
+  const candidateStarted = onTiming ? performance.now() : 0;
+  for (const entry of sourceEntries) {
+    const { day, departure } = entry;
+    const inFeed = day.serviceDate >= sourcePayload.feed.validFrom && day.serviceDate <= sourcePayload.feed.validThrough;
       if (!inFeed) {
         excluded.push({ id: departure.id, reason: 'outside_feed_validity' });
         continue;
@@ -347,7 +447,9 @@ export function buildBoard(payload, {
       if (journey.departureServiceSeconds !== departure.departureServiceSeconds) {
         fail(`departure ${departure.id}`, 'journey departure does not match origin departure');
       }
-      const card = makeCard(day, departure, journey);
+      const card = prepared
+        ? (directOnly ? entry.direct : entry.primary)
+        : makeCard(day, departure, journey);
       if (card.departureAtMs <= nowMs) {
         excluded.push({ id: departure.id, reason: 'already_departed' });
         continue;
@@ -365,11 +467,16 @@ export function buildBoard(payload, {
       } else {
         deduplicated.set(identity, card);
       }
-    }
   }
 
+  const candidateMs = onTiming ? performance.now() - candidateStarted : null;
+  const sortStarted = onTiming ? performance.now() : 0;
   const candidates = [...deduplicated.values()].sort(compareDeparture);
-  const earliest = [...candidates].sort((a, b) => a.arrivalAtMs - b.arrivalAtMs || compareDeparture(a, b))[0] ?? null;
+  const earliest = candidates.reduce((best, card) => !best
+    || card.arrivalAtMs < best.arrivalAtMs
+    || (card.arrivalAtMs === best.arrivalAtMs && compareDeparture(card, best) < 0)
+    ? card : best, null);
+  const sortMs = onTiming ? performance.now() - sortStarted : null;
   const items = candidates.map(card => ({ ...card, isBest: earliest?.id === card.id }));
   let groups;
   if (mode === 'line') {
@@ -381,6 +488,7 @@ export function buildBoard(payload, {
   } else {
     groups = [{ line: null, items }];
   }
+  if (onTiming) onTiming({ candidateMs, sortMs });
 
   return {
     mode,
@@ -393,12 +501,12 @@ export function buildBoard(payload, {
     diagnostics: {
       duplicateCount,
       excludedCount: excluded.length,
-      feedVersion: payload.feed.version,
-      feedValidFrom: payload.feed.validFrom,
-      feedValidThrough: payload.feed.validThrough,
-      generatedAt: payload.generatedAt,
-      dataScope: payload.dataScope,
-      connectionPolicy: { ...payload.connectionPolicy },
+      feedVersion: sourcePayload.feed.version,
+      feedValidFrom: sourcePayload.feed.validFrom,
+      feedValidThrough: sourcePayload.feed.validThrough,
+      generatedAt: sourcePayload.generatedAt,
+      dataScope: sourcePayload.dataScope,
+      connectionPolicy: { ...sourcePayload.connectionPolicy },
     },
   };
 }
