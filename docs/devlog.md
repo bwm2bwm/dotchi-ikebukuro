@@ -123,3 +123,11 @@
 - `scripts/validate_odpt_itineraries.py` と `tests/test_odpt_itinerary.py` を追加。代表日と期間外日を検証し、0/1/2分、60〜600秒条件、複数接続集約、日付跨ぎ、祝日例外、欠損・降車不可、ODPT照合を確認。自動テスト8件すべて成功。
 - 実績: 平日439発便、直通287、乗換候補を持つ便417、primaryは直通287・乗換148・有効到着なし4。土曜／祝日各405発便、直通240、乗換候補366、primaryは直通240・乗換156・有効到着なし9。既存Phase 3の60秒以上ペア622／490と整合。0分候補は集計に残るが生成旅程には採用しない。
 - `docs/project_state.md` を更新。GTFS/ODPTの生データ、`.env.local`、APIキーに触れず、外部通信なし。アプリHTML/CSS/JavaScriptと公開用データは変更せず、コミットなし。
+
+## 2026-10-22 — Ver.0.5 Step 2A Web UI接続設計
+
+- `app.js` / `data.js` / `index.html` / `styles.css` と製品・UI仕様を読み、現行の相対秒・仮所要分モデルとStep 1のservice-date付き旅程モデルの差を整理。
+- `docs/ver_0_5_step_2a_ui_integration.md` にUI項目対応、最小payload、日付・24時超・現在時刻処理、候補選択、欠損表示、local preview分離、Step 2Bの作業順を記録。
+- `scripts/export_local_timetable_payload.py` を追加。必要なカードデータと内部metadataだけをJSON化し、repository内への書き出しを拒否する。外部APIやキーを参照しない。
+- payload exporterのインメモリ出力検証を追加。HTML/CSS/JavaScriptは変更せず、実payloadをrepositoryやpublicへ配置せず、コミットなし。
+- `python3 -B -m unittest discover -s tests -v` は計11件成功。exporterのrepository内出力拒否、repository外出力制約のCLI helpと `git diff --check` も確認。GTFS/ODPTのpayloadファイルは生成していない。

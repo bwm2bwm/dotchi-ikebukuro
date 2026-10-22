@@ -49,9 +49,9 @@
 
 ## 次のタスク
 
-1. Step 2で生成器の結果を画面用adapterへ渡す項目と、到着不可便・不明種別の表示を決める。
-2. 池袋発便ごとのprimary候補とdirect alternativeを既存カードへ接続し、直通フィルター・最早着表示との整合を確認する。
-3. GTFS更新・有効期間切れの運用を決めてからアプリへ接続し、実データ利用の注意表示とiPhone Safari表示を確認する。
+1. Step 2Bでlocal preview専用の作業コピーと画面adapterを組み合わせ、実時刻・日付跨ぎを確認する。
+2. Step 2Bで到着時刻なし、種別・行先不明、最早着同着、直通フィルターの表示規則を固定する。
+3. previewが安定してからアプリ本体のadapter接続案を評価する。公開・配信変更は別途扱う。
 
 ## Phase 3旅程最適化の更新（2026-10-22）
 
@@ -69,6 +69,13 @@
 - 保存済みODPT JSONは便番号・路線・calendar区分と池袋発時刻の一意一致時だけ、両区間tripに種別／行先を補完。未一致・曖昧・不一致は状態のみ保持し、生JSONを返さない。
 - [validate_odpt_itineraries.py](../scripts/validate_odpt_itineraries.py) で検証: 平日池袋発439便（直通287、乗換候補417、primary:直通287／乗換148／到着不可4）、土曜・祝日各405便（直通240、乗換候補366、primary:直通240／乗換156／到着不可9）。10分以内の接続は平日645組（うち60〜600秒622）、土休日504組（うち490）。0/1/2分は平日23/66/60組、土休日14/80/29組。期間外はFeedDateErrorで候補生成を止める。
 - `tests/test_odpt_itinerary.py` の8テスト通過。現UI・HTML/CSS/JavaScript、GTFS ZIP、ODPT JSON、公開用データは変更していない。Step 2はこのPython出力から画面データadapterを設計し、欠損表示と便ごとのprimary/direct alternativeをUIへ接続する。
+
+## Ver.0.5 Step 2A — Web UI接続設計（2026-10-22）
+
+- [Web UI接続仕様案](ver_0_5_step_2a_ui_integration.md) を作成。現行UIの相対 `departSec` / 仮 `travelMin` と、Step 1のサービス日・24時超秒・primary/direct alternativeを対応づけ、カード表示、路線別／発車順、フィルター、最早着、深夜運行日を設計した。
+- [export_local_timetable_payload.py](../scripts/export_local_timetable_payload.py) を追加。最小限のカード用JSONにschema version、生成時刻、GTFS版・有効期間、運行日、暫定接続条件を付け、リポジトリ内の出力先を拒否する。書き出しコマンドは用意したが、本番UI・公開用データへは接続していない。
+- Step 2Bはリポジトリ外の一時staging copyをローカルHTTP配信し、そこだけにpreview用loader/adapterを置く案。現行HTML/CSS/JavaScriptの表示と動作は未変更。詳細な未決事項は設計書参照。
+- `python3 -B -m unittest discover -s tests -v` は11テスト通過。payload exporterの期間外日skip、repository内出力拒否、必須metadata、最小項目と生データ非出力を検証。payloadファイル自体は出力していない。
 
 ## 計画中・未決定の企画
 
