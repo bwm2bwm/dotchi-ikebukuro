@@ -131,3 +131,10 @@
 - `scripts/export_local_timetable_payload.py` を追加。必要なカードデータと内部metadataだけをJSON化し、repository内への書き出しを拒否する。外部APIやキーを参照しない。
 - payload exporterのインメモリ出力検証を追加。HTML/CSS/JavaScriptは変更せず、実payloadをrepositoryやpublicへ配置せず、コミットなし。
 - `python3 -B -m unittest discover -s tests -v` は計11件成功。exporterのrepository内出力拒否、repository外出力制約のCLI helpと `git diff --check` も確認。GTFS/ODPTのpayloadファイルは生成していない。
+
+## 2026-10-22 — Ver.0.5 Step 2B-1 JavaScript adapter
+
+- 独立ES module `scripts/timetable_adapter.mjs` を追加。payload schema検証、Asia/Tokyo service-second→epoch変換、未来24時間候補、前日／当日／翌日service day、重複排除、直通filter、路線別・発車順、最早着単一選択を実装。
+- カード項目にroute color、既知train typeの日本語表記、destination unknown、直通／乗換・待ち時間、arrival/departure epoch、番線unknown・接続非保証を変換。primary到着なしは推測せず除外理由を保持。
+- Node標準 `node:test` で12件実行。日付跨ぎ、feed境界、now前後、24時間窓、service day duplicate、direct/transfer、mode/filter、同着、欠損、不正payloadを確認。通常timezoneと `TZ=UTC` の両方で成功。
+- `docs/ver_0_5_step_2a_ui_integration.md` にadapter動作と返却形式を補足し、project stateを更新。`index.html` / `app.js` / `data.js` / `styles.css`、実payload、取得データを変更・生成せず、外部API・秘密情報に触れず、コミットなし。

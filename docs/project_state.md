@@ -49,9 +49,9 @@
 
 ## 次のタスク
 
-1. Step 2Bでlocal preview専用の作業コピーと画面adapterを組み合わせ、実時刻・日付跨ぎを確認する。
-2. Step 2Bで到着時刻なし、種別・行先不明、最早着同着、直通フィルターの表示規則を固定する。
-3. previewが安定してからアプリ本体のadapter接続案を評価する。公開・配信変更は別途扱う。
+1. Step 2B-2でadapterをlocal preview用のコピーUIに接続し、カード・時計・カウントダウンを確認する。
+2. 到着時刻なし便の表示、最早着同着、行先不明表示、現在から24時間の時間窓をpreview上で確認する。
+3. 接続結果をレビューしてから、アプリ本体に取り込む範囲を決める。公開・配信変更は別途扱う。
 
 ## Phase 3旅程最適化の更新（2026-10-22）
 
@@ -76,6 +76,14 @@
 - [export_local_timetable_payload.py](../scripts/export_local_timetable_payload.py) を追加。最小限のカード用JSONにschema version、生成時刻、GTFS版・有効期間、運行日、暫定接続条件を付け、リポジトリ内の出力先を拒否する。書き出しコマンドは用意したが、本番UI・公開用データへは接続していない。
 - Step 2Bはリポジトリ外の一時staging copyをローカルHTTP配信し、そこだけにpreview用loader/adapterを置く案。現行HTML/CSS/JavaScriptの表示と動作は未変更。詳細な未決事項は設計書参照。
 - `python3 -B -m unittest discover -s tests -v` は11テスト通過。payload exporterの期間外日skip、repository内出力拒否、必須metadata、最小項目と生データ非出力を検証。payloadファイル自体は出力していない。
+
+## Ver.0.5 Step 2B-1 — JavaScript adapter（2026-10-22）
+
+- [timetable_adapter.mjs](../scripts/timetable_adapter.mjs) を追加。DOMに依存せずStep 2A payloadを検証し、路線色・種別ラベル・行先不明・東京時間の絶対発着時刻をカードview modelへ変換する。
+- 東京時間の前日／当日／翌日service dayを対象にし、nowより後かつ24時間以内・feed有効期間内の便を抽出。24時超時刻、service day違いの同一route/trip/絶対発車の重複、到着時刻欠損、directOnly、路線別／発車順、最早着1件・同着時の早発優先を扱う。
+- 不確実性は `platformStatus=unknown`, `connectionGuaranteed=false` をview modelに保持。未対応train typeは「種別不明」、destination欠損は「行き先不明」。到着を推測せず除外理由・dataQualityを返す。
+- [timetable_adapter.test.mjs](../tests/timetable_adapter.test.mjs) の12件をNode標準test runnerで実行し全件通過。通常TZと `TZ=UTC` の双方で実行。UIファイル・payload・生データは変更／生成していない。
+- Step 2B-2はローカル一時previewへadapterを接続し、カードDOMへのマッピング、時計、カウントダウン、filter・mode動作を確認する。
 
 ## 計画中・未決定の企画
 

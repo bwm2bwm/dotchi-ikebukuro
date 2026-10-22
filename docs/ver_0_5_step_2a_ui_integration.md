@@ -114,14 +114,34 @@ payload exporterの既定出力はOS一時ディレクトリの `dotchi-ikebukur
 5. 路線別／発車順、最早着、直通のみ、同一trip重複防止、候補なしの回帰確認。公開用HTML/APIデータへの実payload参照がないことを確認する。
 6. ローカルpreviewを閉じ、生成payload/stagingを削除またはOS一時領域に留める。公開・配信変更は別作業とする。
 
+## 7. Step 2B-1 adapter実装（2026-10-22）
+
+`scripts/timetable_adapter.mjs` はDOMや既存 `app.js` に依存しないES module。`validateTimetablePayload(payload)` でversion、scope、Asia/Tokyo、feed期間、serviceDays、便・旅程、接続条件を検証し、`buildBoard(payload, options)` が表示候補を返す。オプションは `nowMs`, `horizonMs`（既定24時間）, `directOnly`, `mode`（`line` / `departure`）。
+
+返却 `items` はカード用view model。既存表示に合わせた `line`, `color`, `kind`, `destination`, `transfer.station`, `transfer.wait` に、実時刻用の `departureAtMs`, `arrivalAtMs`, `departureText`, `arrivalText` を加える。serviceDate、origin/destination/arrival station ID、GTFS trip ID、ODPT照合状態、platform unknown、connection guarantee falseも保持する。カウントダウンは `max(0, ceil((departureAtMs-nowMs)/1000))` で画面側から算出できる。発車／到着表示時刻は絶対時刻からAsia/Tokyoで生成する。`departSec` と `travelMin` は返さず、従来の相対・仮所要モデルへ誤接続できないようにする。
+
+- 表示対象は `nowMs < departureAtMs <= nowMs + horizonMs`。serviceDateがfeed有効期間に含まれない便は除外理由 `outside_feed_validity` を返し、東京時間の前日・当日・翌日以外のservice dayは `outside_service_date_window` で除外する。service dateの午前0時JSTにservice secondsを足すので、前日24:xxと当日00:xxを正しい暦時刻へ変換する。
+- 同一実列車の重複判定keyは `routeId + originTripId + absolute departureAtMs`。同一tripが別service dateから同一epochへ現れたら一件にする。GTFS trip_idが異なるものは、時刻一致だけで同一列車とみなさない。
+- directOnlyは `directAlternative` がある便を選び、表示旅程を直通へ切り替える。なければ `direct_unavailable` として除外する。通常表示は `primary` を使う。
+- 路線別は有楽町線→副都心線、発車時刻順は全路線混在。最早着は現在時刻・24時間窓・直通フィルターを適用した後に、モード共通の全候補から一件選ぶ。同着なら発車時刻が早い便、なお同値ならroute/serviceDate/trip ID順。`bestId` / `isBest` は常に一件のみ。
+- `primary` なし、arrival seconds null、直通なし等は通常候補にせず、`excluded` に理由とdataQualityを残す。種別は `Local`→「各駅停車」、`CommuterExpress`→「通勤急行」の既知値だけ変換し、それ以外は「種別不明」。行先はpayloadのGTFS headsign由来文字列のみを表示し、欠落時は「行き先不明」。ODPT destination IDから推測しない。
+- 不正構造、サービス秒、路線、日付、旅程整合、接続条件違反は `PayloadValidationError`。欠損到着そのものは旅程を除外し、推測値を作らない。
+
+テストはNode標準 `node:test` を用い、npm依存を追加しない。
+
+```sh
+node --test tests/timetable_adapter.test.mjs
+TZ=UTC node --test tests/timetable_adapter.test.mjs
+```
+
+いずれも12件通過。これはadapter単体検証であり、既存UIへの接続・画面表示確認ではない。Step 2B-2ではlocal preview専用stagingへこのmoduleをコピーし、既存mockと並行するadapter data sourceからカードview modelをUIへ渡す。`index.html` / `app.js` / `data.js` / `styles.css` は今回変更していない。
+
 ## 未解決事項
 
-1. 最早着が同時刻の複数カードにマークを付けるか、同着全てをマークするか。
-2. primaryなし4便（平日）／9便（土曜・祝日）を画面で「到着時刻不明」と表示するか、通常候補から除外して件数だけ通知するか。
-3. 画面の行き先はGTFS `trip_headsign` を第一選択にしてよいか。ODPTの行先IDを日本語駅名へ変換するローカルstation辞書の維持元。
-4. プレビュー候補を現在から24時間以内に限定するか、別の時間窓にするか。
-5. payloadを毎回起動時に生成するか、日付単位で作り置きするか。Step 2Bのローカル起動は毎回生成を推奨し、生成時刻の期限をどの程度にするか。
-6. 最早着は直通のみfilter適用後に再計算する（本案）ことをUI仕様に追記するか。
+1. primaryなし4便（平日）／9便（土曜・祝日）を画面で「到着時刻不明」と表示するか、通常候補から除外して件数だけ通知するか。
+2. GTFS `trip_headsign` を第一行先表示にしてよいか。ODPT行先IDを日本語駅名へ変換するstation辞書の維持元。
+3. Step 2B-2 local previewで現行mock data sourceと実ダイヤdata sourceをどう切り替えるか。公開版へlocal payloadを参照させない構成。
+4. payloadを毎回起動時に生成するか、日付単位で作り置きするか。preview起動時再生成を推奨し、生成時刻の鮮度上限を決める。
 
 ## 再現用ローカル検証
 
