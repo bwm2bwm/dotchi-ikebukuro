@@ -115,3 +115,11 @@
 - GTFSの路線名・方面・時刻・途中停車順・運行日と、列車種別がGTFSにない点を整理。種別・ODPT行先は一意一致した便だけ補完し、それ以外は推測しない仕様案をまとめた。
 - `docs/odpt_research.md` に結果、例、内部データモデル、Ver.0.5実装順序・未決事項を追記し、`docs/project_state.md` と本記録を更新。
 - 取得済みローカルデータだけを使用。外部API・`.env.local`・APIキーへのアクセスなし。HTML/CSS/JavaScriptと取得済み生データは変更せず、コミットなし。
+
+## 2026-10-22 — Ver.0.5 Step 1 実ダイヤ旅程生成
+
+- `scripts/odpt_itinerary.py` にオフライン再利用モジュールを実装。GTFS ZIPからcalendar/calendar_dates、feed期間、路線別駅ID、stop_timesを正規化し、同一trip直通・別trip小竹向原乗換、欠損・乗降不可、24時超時刻、番線unknownを扱う。
+- 既定接続条件60〜600秒。池袋発tripごとに最早着を1件だけprimaryとして選択し、同着なら直通優先。直通代替と最早乗換候補／候補数は保持する。ODPT JSONはGTFS列車番号・路線・calendarの一意一致と池袋発時刻一致時だけ種別・行先を両区間に補い、生JSONは返さない。
+- `scripts/validate_odpt_itineraries.py` と `tests/test_odpt_itinerary.py` を追加。代表日と期間外日を検証し、0/1/2分、60〜600秒条件、複数接続集約、日付跨ぎ、祝日例外、欠損・降車不可、ODPT照合を確認。自動テスト8件すべて成功。
+- 実績: 平日439発便、直通287、乗換候補を持つ便417、primaryは直通287・乗換148・有効到着なし4。土曜／祝日各405発便、直通240、乗換候補366、primaryは直通240・乗換156・有効到着なし9。既存Phase 3の60秒以上ペア622／490と整合。0分候補は集計に残るが生成旅程には採用しない。
+- `docs/project_state.md` を更新。GTFS/ODPTの生データ、`.env.local`、APIキーに触れず、外部通信なし。アプリHTML/CSS/JavaScriptと公開用データは変更せず、コミットなし。
