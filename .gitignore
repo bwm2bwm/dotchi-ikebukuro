@@ -1,3 +1,4 @@
 .DS_Store
 .env.local
 .venv/
+local_data/odpt/

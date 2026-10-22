@@ -23,6 +23,18 @@ APIキーはリポジトリ内の `.env.local` に設定します。このファ
 
 検証スクリプトは `.env.local` を読み、東京メトロの路線一覧を1回だけ取得します。設定ファイルまたはキーがない場合は通信せず終了します。出力は成否の概要のみで、キー、認証付きURL、HTTPリクエスト全文、応答本文は表示しません。`.env.local` は共有・コミットしないでください。
 
+### Phase 2 データ取得・解析
+
+`.venv` と `certifi` を準備済みの場合、リポジトリ直下で次を順番に実行します。認証付き取得はユーザーの通常ターミナルで実行してください。
+
+```sh
+.venv/bin/python scripts/odpt_phase2_fetch.py
+find local_data/odpt -maxdepth 1 -type f -print
+.venv/bin/python scripts/odpt_phase2_analyze.py
+```
+
+取得スクリプトは対象JSONを最大6リクエストでローカル保存します。`local_data/odpt/` はGit管理対象外です。GTFSのCKAN配布URL・認証条件は未確認のため自動ダウンロードしません。入手済みZIPを同フォルダに置くと解析対象になります。解析結果はターミナルに表示され、データ未配置時に実データ結果を作りません。
+
 ## ファイル構成
 
 - index.html: 画面の骨組み
