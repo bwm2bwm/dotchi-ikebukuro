@@ -4,6 +4,7 @@ import { countdownText, earliestVisible, selectPreviewGroups } from './selection
 
 const clock = document.getElementById('clock');
 const statusEl = document.getElementById('timetable-status');
+const metadataEl = document.getElementById('payload-metadata');
 const boardEl = document.getElementById('board');
 const directOnlyEl = document.getElementById('direct-only');
 const lineButton = document.getElementById('mode-line');
@@ -11,18 +12,47 @@ const departureButton = document.getElementById('mode-departure');
 const clockFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: TOKYO_TIME_ZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
+const metadataFormatter = new Intl.DateTimeFormat('ja-JP', {
+  timeZone: TOKYO_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
 let mode = 'line';
 let prepared = null;
 let loadFailure = null;
 let selectedSignature = '';
 let perfHistory = [];
 let fetchCount = 0;
+let metadataSignature = '';
 
 window.__dotchiPreviewPerf = { history: perfHistory, get fetchCount() { return fetchCount; } };
 
 function setStatus(message, state) {
   if (statusEl.textContent !== message) statusEl.textContent = message;
   statusEl.dataset.state = state;
+}
+
+function displayTimestamp(value) {
+  return value ? metadataFormatter.format(new Date(value)) : '未取得';
+}
+
+function renderMetadata(diagnostics) {
+  if (!diagnostics) return;
+  const values = [
+    `${displayTimestamp(diagnostics.applicationStartsAt)} 〜 ${displayTimestamp(diagnostics.applicationEndsAt)}（終了日時は含まない）`,
+    displayTimestamp(diagnostics.generatedAt),
+    `${diagnostics.feedValidFrom} 〜 ${diagnostics.feedValidThrough}（両日を含む）`,
+    displayTimestamp(diagnostics.gtfsUpdatedAt),
+    displayTimestamp(diagnostics.odptUpdatedAt),
+    displayTimestamp(diagnostics.webAppBuiltAt),
+  ];
+  const signature = values.join('|');
+  if (signature === metadataSignature) return;
+  metadataSignature = signature;
+  [
+    'meta-application-period', 'meta-generated-at', 'meta-feed-period',
+    'meta-gtfs-updated', 'meta-odpt-updated', 'meta-webapp-built',
+  ].forEach((id, index) => { document.getElementById(id).textContent = values[index]; });
+  metadataEl.hidden = false;
 }
 
 function renderGroups(groups, nowMs) {
@@ -34,18 +64,13 @@ function renderGroups(groups, nowMs) {
     for (const group of groups) {
       const section = document.createElement('section');
       section.className = 'line';
-      if (group.line) {
-        const heading = document.createElement('h2');
-        heading.className = 'line-title';
-        heading.textContent = `${group.line} · ${group.items.length}本表示`;
-        section.appendChild(heading);
-      }
-      for (const item of group.items) {
+      for (const [index, item] of group.items.entries()) {
         const card = document.createElement('article');
         card.className = `train${item.id === best?.id ? ' best' : ''}`;
         card.style.setProperty('--line-color', item.color);
-        card.innerHTML = `<div><div><span class="route"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発 <span class="kind"></span></div><div class="sub"></div></div><div><div class="count"></div><div class="tiny">発車まで</div></div><div><div class="arrival"></div><div class="tiny">氷川台着</div></div>`;
+        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="line-count"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発 <span class="minitxt kind"></span></div><div class="sub"></div></div><div class="countwrap"><div class="count"></div><div class="minitxt">発車まで</div></div><div><div class="arrival"></div><div class="minitxt" style="text-align:right">氷川台着</div></div>`;
         card.querySelector('.route').textContent = item.line;
+        card.querySelector('.line-count').textContent = group.line && index === 0 ? `${group.items.length}本` : '';
         card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
         card.querySelector('.departure-text').textContent = item.departureText;
         card.querySelector('.kind').textContent = `${item.kind}・${item.destination}行`;
@@ -101,6 +126,7 @@ function tick(eventStarted = performance.now()) {
     const state = result.validity === 'valid' ? 'ok' : 'warning';
     setStatus(result.statusMessage, state);
     statusEl.title = result.periodText;
+    renderMetadata(result.diagnostics);
     if (result.validity !== 'valid') {
       selectedSignature = '';
       boardEl.replaceChildren();
@@ -125,12 +151,16 @@ async function load() {
 
 lineButton.addEventListener('click', () => {
   mode = 'line';
+  lineButton.classList.add('sel');
+  departureButton.classList.remove('sel');
   lineButton.setAttribute('aria-pressed', 'true');
   departureButton.setAttribute('aria-pressed', 'false');
   tick();
 });
 departureButton.addEventListener('click', () => {
   mode = 'departure';
+  departureButton.classList.add('sel');
+  lineButton.classList.remove('sel');
   lineButton.setAttribute('aria-pressed', 'false');
   departureButton.setAttribute('aria-pressed', 'true');
   tick();

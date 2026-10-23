@@ -228,3 +228,15 @@
 - payload validatorとstage/失敗保護/必須入力/日付跨ぎのPythonテストを追加。READMEとproject_stateに更新手順・鮮度上の制約を記録。
 - 保存済み元データの更新日時・Web build日時は不明のためnullのまま。payloadを再生成しても元データの鮮度は保証しない。
 - 外部API・資格情報・公開デモ・実payloadのGit管理には触れない。commitなし。
+# 2026-10-23 — 公開モック準拠のローカルpreview UI統合
+
+- root公開モックの `styles.css` をpreview生成stageから永続previewへコピーし、preview HTMLはそのCSSとpreview固有上書きを読み込む。公開側index/styles/appには変更なし。
+- HTMLのヘッダー／時計、注意文、独立ルート枠、操作行、コンパクト3列カード、フッター、320×50広告placeholder dockをモック構造へ合わせた。路線別見出しを外し、先頭カード内に件数を置く。
+- 実ダイヤの状態バナーは通常時1行、異常時は折返し表示。payload期間、生成日時、GTFS feed期間、GTFS/ODPT更新日時、Web build日時を折りたたみ詳細に区別して表示し、未取得は未取得と表記。
+- adapter、selection、列車判定・選択、T01の生成・検証・差し替え手順には変更なし。スタイルコピーのみprepare_previewへ追加。実payloadを再生成し自動テストを実施。iPhone Safariの実機目視は未実施。
+
+## iPhone Safari縦レイアウト調整
+
+- 上部のmain/demo/route/status/details/controls間の余白を合計20px圧縮。カードの文字サイズ・最小高・4px間隔、広告dockの寸法とsafe-area下余白予約は維持。
+- 常時表示していた安全上の注意文を折りたたみmetadata詳細内へ移動。期限切れ・運行日不足・読込失敗の動的status bannerは変更せず、エラー時は引き続き表示。
+- iOS Safariの狭幅時だけヘッダーをsafe-area上端内側でstickyにし、システムstatus textとの重なりを避ける。自動レイアウト契約テスト追加。物理iPhone上のscroll/safe-area/広告dock確認は未実施。

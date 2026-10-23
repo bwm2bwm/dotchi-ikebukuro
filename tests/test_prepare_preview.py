@@ -60,6 +60,7 @@ class PreparePreviewTests(unittest.TestCase):
         self.assertEqual([str(x) for x in result["service_dates"]], ["2026-10-22", "2026-10-23", "2026-10-24"])
         self.assertFalse((self.output / "old.marker").exists())
         self.assertTrue((self.output / "timetable.json").exists())
+        self.assertEqual((self.output / "styles.css").read_bytes(), (ROOT / "styles.css").read_bytes())
         self.assertEqual((self.output / "index.html").read_text(), "index.html")
 
     def test_missing_required_file_fails_before_changing_output(self):

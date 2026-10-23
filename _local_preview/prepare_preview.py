@@ -36,7 +36,7 @@ def service_dates(now: datetime | None = None) -> list[date]:
 
 def check_inputs() -> None:
     missing = [str(path) for path in REQUIRED_INPUTS if not path.is_file()]
-    missing += [str(path) for path in (ADAPTER, LOADER, EXPORTER, SOURCE / "validate_payload.mjs",
+    missing += [str(path) for path in (ROOT / "styles.css", ADAPTER, LOADER, EXPORTER, SOURCE / "validate_payload.mjs",
                                       *(SOURCE / name for name in PREVIEW_FILES))
                 if not path.is_file()]
     if missing:
@@ -58,6 +58,7 @@ def prepare(*, now: datetime | None = None, output: Path = OUTPUT,
     try:
         for name in PREVIEW_FILES:
             shutil.copy2(SOURCE / name, stage / name)
+        shutil.copy2(ROOT / "styles.css", stage / "styles.css")
         shutil.copy2(ADAPTER, stage / "timetable_adapter.mjs")
         shutil.copy2(LOADER, stage / "local_preview_payload_loader.mjs")
         shutil.copy2(SOURCE / "validate_payload.mjs", stage / "validate_payload.mjs")

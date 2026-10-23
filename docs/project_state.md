@@ -1,5 +1,16 @@
 # プロジェクト状態
 
+## 公開モック準拠のローカルpreview UI
+
+- `_local_preview/index.html` は公開モックと同じヘッダー／時計、注意表示、ルート枠、44px操作行、カードDOM、下部広告dockの構成。`prepare_preview.py` はroot `styles.css` をローカル出力へコピーし、preview.cssで状態表示・折りたたみmetadataを補う。
+- 実ダイヤ側はローカルデータ注記、適用期間バナー、安全停止、payload適用期間／生成日時／GTFS・ODPT更新日時／Web build日時の個別表示を維持。未取得日時は「未取得」。
+- adapter、selection、列車数制限、T01のpayload生成・検証・安全差し替えロジックは変更していない。prepare_previewにはroot CSSのコピーだけを追加。再生成によりpayload生成日時は更新される。iPhone Safari目視確認が残る。
+
+## iPhone Safari縦レイアウト調整
+
+- 6列車カード、公開モック由来カード寸法、320×50広告dock、本文の広告高＋20px＋safe-area予約を維持。通常時の最下部注意文は通常画面から除き、payload詳細内へ移動。例外発生時の状態バナーは引き続き表示。
+- 上部のCSS余白を合計20px圧縮。iOS Safariではヘッダーをsafe area内側のsticky位置に置き、ステータス表示との重なりを抑制する。実機での最終目視確認が残る。
+
 ## ローカルpreview更新（T01）
 
 - `python3 _local_preview/prepare_preview.py` は保存済みGTFS/ODPT必須ファイルを確認し、JST前日・当日・翌日のpayloadをリポジトリ外の一時stageで生成します。
