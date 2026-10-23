@@ -46,11 +46,11 @@ python3 _local_preview/prepare_preview.py
 python3 -m http.server 8765 --bind 127.0.0.1 --directory "$HOME/Library/Application Support/dotchi-ikebukuro-preview/site"
 ```
 
-previewでは「池袋 → 氷川台」のルート枠から目的地選択を開けます。8駅のpayloadは更新時にまとめて生成・検証し、UIは選択駅に対応する1ファイルだけを読み込みます。目的地は端末へ保存せず、リロードすると氷川台に戻ります。個別生成には引き続き `scripts/export_local_timetable_payload.py` の `--destination-station-id`（`Kanamecho` / `Senkawa` / `KotakeMukaihara` / `Hikawadai` / `Heiwadai` / `ChikatetsuAkatsuka` / `ChikatetsuNarimasu` / `Wakoshi`）と `--output` を指定できます。
+previewではルート枠から8駅の目的地選択を開けます。更新時に全payloadを生成・検証し、UIは選択駅の1ファイルだけ読み込みます。選択したstation IDだけをlocalStorageへ保存し、リロード時に復元します。storageが使えない場合は氷川台で開始し、選択操作は継続できます。payloadや列車データは端末へ保存しません。個別生成には `scripts/export_local_timetable_payload.py` の `--destination-station-id` と `--output` を指定できます。
 
 更新スクリプトは必要な保存済みGTFS/ODPTファイルを確認し、一時ディレクトリ内で画面ファイルと8駅分の独立payload（氷川台は互換のため `timetable.json`、他駅は `timetable-{stationId}.json`）を生成します。全payloadをadapterで形式・metadata・現在必要な運行日について検証し、すべて成功した場合だけpreview一式を差し替えます。1駅でも生成・検証に失敗した場合は既存preview一式を維持します。入力ファイルが更新されない限り、payloadの生成日時だけが新しくなっても元データの鮮度は保証されません。24時間TTLはなく、適用期間と必要運行日の有無で表示可否を判定します。
 
-Mac Safariで `http://127.0.0.1:8765/index.html` を開きます。終了時はHTTP serverを `Ctrl-C` で停止します。`window.__dotchiPreviewPerf.history` で直近50回のadapter・DOM計測、`window.__dotchiPreviewPerf.fetchCount` でfetch回数を確認できます。
+Mac Safariで `http://127.0.0.1:8765/index.html` を開きます。終了時はHTTP serverを `Ctrl-C` で停止します。開発用計測はSafari Web Inspector Consoleの `window.__dotchiPreviewPerf.history`（adapter、selection、DOM描画）と `window.__dotchiPreviewPerf.loadHistory`（fetch、本文読込、JSON解析、adapter、cache hit）で直近50件を確認できます。`fetchCount` と `cachedDestinationIds` も参照できます。計測値は画面には表示しません。
 
 ## ファイル構成
 

@@ -66,7 +66,7 @@ test('destination picker is an ordered modal and does not enlarge the page layou
   assert.match(html, /<dialog id="destination-dialog"/);
   assert.match(html, /id="destination-list"/);
   assert.match(script, /Kanamecho.*要町[\s\S]*Senkawa.*千川[\s\S]*KotakeMukaihara.*小竹向原[\s\S]*Hikawadai.*氷川台[\s\S]*Heiwadai.*平和台[\s\S]*ChikatetsuAkatsuka.*地下鉄赤塚[\s\S]*ChikatetsuNarimasu.*地下鉄成増[\s\S]*Wakoshi.*和光市/);
-  assert.match(script, /selectedDestinationId = 'Hikawadai'/);
+  assert.match(script, /selectedDestinationId = readSavedDestinationId\(\)/);
   assert.match(script, /destinationDialog\.showModal\(\)/);
   assert.match(script, /ArrowDown/);
   assert.match(script, /destinationTrigger\.focus/);
@@ -76,4 +76,14 @@ test('destination picker is an ordered modal and does not enlarge the page layou
   assert.match(script, /arrival-caption'[)]\.textContent = `\$\{selectedDestination\(\)\?\.name/);
   assert.match(mockCss, /min-height: 68px/);
   assert.match(mockCss, /height: 50px/);
+});
+
+test('destination preference stores only a whitelisted ID and exposes development timing separately', () => {
+  assert.match(script, /selectedDestinationId = readSavedDestinationId\(\)/);
+  assert.match(script, /saveDestinationId\(destination\.id\)/);
+  assert.match(script, /const preparedPayloadCache = createPreparedPayloadCache\(2\)/);
+  assert.match(script, /if \(result\.stale\) return/);
+  assert.match(script, /loadHistory: loadPerfHistory/);
+  assert.match(script, /cachedDestinationIds/);
+  assert.doesNotMatch(script, /localStorage|sessionStorage/);
 });

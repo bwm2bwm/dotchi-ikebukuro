@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createLatestDestinationLoader, DESTINATION_PAYLOADS, loadTimetablePayload } from '../scripts/local_preview_payload_loader.mjs';
+import { createLatestDestinationLoader, createPreparedPayloadCache, DEFAULT_DESTINATION_ID,
+  DESTINATION_PAYLOADS, DESTINATION_STORAGE_KEY, loadTimetablePayload,
+  readSavedDestinationId, saveDestinationId } from '../scripts/local_preview_payload_loader.mjs';
 
 function emptyPayload(destinationStationId = 'Hikawadai') {
   const transferCapable = ['Heiwadai', 'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi']
@@ -31,24 +33,39 @@ function emptyPayload(destinationStationId = 'Hikawadai') {
   };
 }
 
+function payloadResponse(payload, { ok = true, contentLength = null, textError = null, textBody = undefined } = {}) {
+  return {
+    ok,
+    headers: { get: name => name.toLowerCase() === 'content-length' ? contentLength : null },
+    text: async () => {
+      if (textError) throw textError;
+      return textBody ?? JSON.stringify(payload);
+    },
+  };
+}
+
 test('valid payload loads and is prepared once', async () => {
   let calls = 0;
   const result = await loadTimetablePayload('Hikawadai', async (path, options) => {
     calls += 1;
     assert.equal(path, DESTINATION_PAYLOADS.Hikawadai);
     assert.equal(options.cache, 'no-store');
-    return { ok: true, json: async () => emptyPayload('Hikawadai') };
+    return payloadResponse(emptyPayload('Hikawadai'), { contentLength: '1234' });
   });
   assert.ok(result.prepared);
   assert.equal(result.failure, null);
   assert.equal(calls, 1);
+  assert.equal(result.timings.payloadBytes, 1234);
+  for (const key of ['fetchMs', 'bodyReadMs', 'jsonParseMs', 'adapterMs', 'totalMs']) {
+    assert.equal(typeof result.timings[key], 'number');
+  }
 });
 
 test('fetch, HTTP, and JSON failures return a load error without a payload', async () => {
   const failures = [
     () => Promise.reject(new Error('offline')),
-    async () => ({ ok: false, json: async () => emptyPayload() }),
-    async () => ({ ok: true, json: async () => { throw new SyntaxError('invalid JSON'); } }),
+    async () => payloadResponse(emptyPayload(), { ok: false }),
+    async () => payloadResponse(null, { textError: new Error('read failed') }),
   ];
   for (const fetchImpl of failures) {
     const result = await loadTimetablePayload('Hikawadai', fetchImpl);
@@ -57,10 +74,17 @@ test('fetch, HTTP, and JSON failures return a load error without a payload', asy
   }
 });
 
+test('invalid JSON reports a parse error and is not prepared', async () => {
+  const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(null, { textBody: '{' }));
+  assert.equal(result.prepared, null);
+  assert.match(result.failure, /JSON形式/);
+  assert.equal(typeof result.timings.jsonParseMs, 'number');
+});
+
 test('invalid or incomplete metadata returns a data error without a payload', async () => {
   const invalid = emptyPayload();
   delete invalid.applicationPeriod;
-  const result = await loadTimetablePayload('Hikawadai', async () => ({ ok: true, json: async () => invalid }));
+  const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(invalid));
   assert.equal(result.prepared, null);
   assert.match(result.failure, /必須メタデータ/);
 });
@@ -71,8 +95,7 @@ test('fixed destination mapping loads only the selected payload and rejects an u
   assert.deepEqual(Object.keys(DESTINATION_PAYLOADS), ids);
   for (const id of ids) {
     const result = await loadTimetablePayload(id, async path => ({
-      ok: true, json: async () => emptyPayload(id),
-      path,
+      ...payloadResponse(emptyPayload(id)), path,
     }));
     assert.ok(result.prepared, id);
   }
@@ -85,7 +108,7 @@ test('fixed destination mapping loads only the selected payload and rejects an u
 
 test('payload destination mismatch is rejected without a fallback', async () => {
   const result = await loadTimetablePayload('Wakoshi', async () => ({
-    ok: true, json: async () => emptyPayload('Hikawadai'),
+    ...payloadResponse(emptyPayload('Hikawadai')),
   }));
   assert.equal(result.prepared, null);
   assert.match(result.failure, /必須メタデータ/);
@@ -103,4 +126,37 @@ test('late destination response is marked stale after a newer selection', async 
   assert.equal(secondResult.stale, false);
   assert.equal(secondResult.prepared, 'wakoshi');
   assert.equal(firstResult.stale, true);
+});
+
+test('first visit defaults to Hikawadai and remembered supported ID is restored', () => {
+  assert.equal(DEFAULT_DESTINATION_ID, 'Hikawadai');
+  assert.equal(readSavedDestinationId(() => null), 'Hikawadai');
+  const values = new Map([[DESTINATION_STORAGE_KEY, 'Wakoshi']]);
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  assert.equal(readSavedDestinationId(() => storage), 'Wakoshi');
+  assert.equal(saveDestinationId('Heiwadai', () => storage), true);
+  assert.deepEqual([...values.entries()], [[DESTINATION_STORAGE_KEY, 'Heiwadai']]);
+});
+
+test('unknown stored ID and storage failures safely fall back or remain non-fatal', () => {
+  const unknown = { getItem: () => 'UnknownStation' };
+  assert.equal(readSavedDestinationId(() => unknown), 'Hikawadai');
+  assert.equal(readSavedDestinationId(() => { throw new Error('storage blocked'); }), 'Hikawadai');
+  assert.equal(saveDestinationId('Wakoshi', () => { throw new Error('storage blocked'); }), false);
+  assert.equal(saveDestinationId('UnknownStation', () => { throw new Error('must not be called'); }), false);
+});
+
+test('prepared payload cache reuses only validated stations and stays bounded', () => {
+  const cache = createPreparedPayloadCache(2);
+  const first = { schemaVersion: 1 };
+  const second = { schemaVersion: 1, id: 2 };
+  const third = { schemaVersion: 1, id: 3 };
+  assert.equal(cache.set('Hikawadai', first), true);
+  assert.equal(cache.get('Hikawadai'), first);
+  assert.equal(cache.set('Wakoshi', second), true);
+  assert.equal(cache.set('Heiwadai', third), true);
+  assert.deepEqual(cache.keys(), ['Wakoshi', 'Heiwadai']);
+  assert.equal(cache.get('Hikawadai'), undefined);
+  assert.equal(cache.set('../Wakoshi', third), false);
+  assert.equal(cache.set('Senkawa', null), false);
 });

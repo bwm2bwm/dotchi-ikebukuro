@@ -21,9 +21,10 @@
 ## T14 Phase 4A 目的地選択・payload切替
 
 - ルート枠を目的地選択ボタンにし、要町・千川・小竹向原・氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市を順番どおりに選ぶモーダルを追加。選択状態、Escape/閉じる、矢印/Home/Endキー、フォーカス復帰、背景スクロール抑止、safe-areaを扱う。UIレイアウト変更はモーダルとルート枠に限定。
-- loaderは固定station ID→固定filename対応を使用し、選択されたpayloadだけを取得。payload内の全service dayが選択IDと一致しなければ拒否する。更新時は旧カード・metadataを消して読み込み中を示し、最新要求tokenで高速切替の古いresponseを破棄。失敗時は列車を表示せずエラーを示す。選択は保存せず、リロードは氷川台。
+- loaderは固定station ID→固定filename対応を使用し、選択されたpayloadだけを取得。payload内の全service dayが選択IDと一致しなければ拒否する。更新時は旧カード・metadataを消して読み込み中を示し、最新要求tokenで高速切替の古いresponseを破棄。失敗時は列車を表示せずエラーを示す。Phase 4A.1でlocalStorageにstation IDのみを保存・復元し、保存値不正やstorage利用不可は氷川台へfallback。
 - 目的地別の既存旅程生成と直通filter／路線別・発車順／最早着／countdownは維持。カード到着ラベルは現在の目的地名を付け、T17での「到着」統一や操作行の並べ替え・文字サイズ変更は未着手。
-- Phase 4A自動テストでは8駅の固定mapping、payload不一致・未知ID拒否、非同期切替競合、8ファイル生成・検証、途中失敗時の既存preview保持を確認。Python 49件、Node 38件、adapter UTC 24件成功。実payload 8件も生成・検証し、現在の保存先に反映済み。最終反映は生成40.0秒・検証1.7秒、総容量22,109,229 bytes。氷川台は独立exporterとの比較でgeneratedAt以外一致。iPhone Safari実機の見た目・フォーカス操作確認が残る。
+- Phase 4A自動テストでは8駅の固定mapping、payload不一致・未知ID拒否、非同期切替競合、8ファイル生成・検証、途中失敗時の既存preview保持を確認。実payload 8件も生成・検証し、現在の保存先に反映済み。生成40.0秒・検証1.7秒、総容量22,109,229 bytes。氷川台は独立exporterとの比較でgeneratedAt以外一致。
+- Phase 4A.1ではlocalStorage保存障害・不正値のfallback、2件LRUのメモリ内prepared payload cache、fetch/body/JSON/adapter/selection/DOM計測を追加。キャッシュ利用時も`buildBoard`を都度実行し、期限・必要service dayの判定は維持。自動テストはPython 49件、Node 43件、adapter UTC 24件が成功。Safari実機の目的地記憶と計測確認が残る。
 
 更新日: 2026-10-23
 

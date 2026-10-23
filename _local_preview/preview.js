@@ -1,5 +1,6 @@
 import { buildBoard, TOKYO_TIME_ZONE } from './timetable_adapter.mjs';
-import { createLatestDestinationLoader, loadTimetablePayload } from './local_preview_payload_loader.mjs';
+import { createLatestDestinationLoader, createPreparedPayloadCache, loadTimetablePayload,
+  readSavedDestinationId, saveDestinationId, DESTINATION_PAYLOADS } from './local_preview_payload_loader.mjs';
 import { countdownText, earliestVisible, selectPreviewGroups } from './selection.mjs';
 
 const clock = document.getElementById('clock');
@@ -32,17 +33,36 @@ const metadataFormatter = new Intl.DateTimeFormat('ja-JP', {
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
 let mode = 'line';
-let selectedDestinationId = 'Hikawadai';
+let selectedDestinationId = readSavedDestinationId();
 let prepared = null;
 let loadFailure = null;
 let loading = true;
-const loadLatestDestination = createLatestDestinationLoader(destinationId => loadTimetablePayload(destinationId, fetch));
+const preparedPayloadCache = createPreparedPayloadCache(2);
+const loadLatestDestination = createLatestDestinationLoader(async destinationId => {
+  const cached = preparedPayloadCache.get(destinationId);
+  if (cached) {
+    const cacheStarted = performance.now();
+    return { prepared: cached, failure: null, timings: {
+      fetchMs: 0, bodyReadMs: 0, jsonParseMs: 0, adapterMs: 0,
+      totalMs: performance.now() - cacheStarted,
+      payloadBytes: null, cacheHit: true,
+    } };
+  }
+  if (Object.hasOwn(DESTINATION_PAYLOADS, destinationId)) fetchCount += 1;
+  return loadTimetablePayload(destinationId, fetch);
+});
 let selectedSignature = '';
 let perfHistory = [];
+let loadPerfHistory = [];
 let fetchCount = 0;
 let metadataSignature = '';
 
-window.__dotchiPreviewPerf = { history: perfHistory, get fetchCount() { return fetchCount; } };
+window.__dotchiPreviewPerf = {
+  history: perfHistory,
+  loadHistory: loadPerfHistory,
+  get fetchCount() { return fetchCount; },
+  get cachedDestinationIds() { return preparedPayloadCache.keys(); },
+};
 
 function setStatus(message, state) {
   if (statusEl.textContent !== message) statusEl.textContent = message;
@@ -72,6 +92,7 @@ function renderDestinationOptions() {
     button.append(label, state);
     button.addEventListener('click', () => {
       const changed = selectedDestinationId !== destination.id;
+      saveDestinationId(destination.id);
       if (changed) loadDestination(destination.id);
       destinationDialog.close();
       if (!changed) destinationTrigger.focus({ preventScroll: true });
@@ -175,6 +196,11 @@ function recordPerf(entry) {
   if (perfHistory.length > 50) perfHistory.shift();
 }
 
+function recordLoadPerf(entry) {
+  loadPerfHistory.push(entry);
+  if (loadPerfHistory.length > 50) loadPerfHistory.shift();
+}
+
 function tick(eventStarted = performance.now()) {
   const nowMs = Date.now();
   clock.textContent = clockFormatter.format(new Date(nowMs));
@@ -241,12 +267,16 @@ async function loadDestination(destinationId) {
   metadataEl.hidden = true;
   boardEl.replaceChildren();
   tick();
-  fetchCount += 1;
   const result = await loadLatestDestination(destinationId);
+  recordLoadPerf({
+    at: Date.now(), destinationStationId: destinationId, stale: result.stale,
+    ...(result.timings ?? {}),
+  });
   if (result.stale) return;
   prepared = result.prepared;
   loadFailure = result.failure;
   loading = false;
+  if (prepared) preparedPayloadCache.set(destinationId, prepared);
   tick();
 }
 

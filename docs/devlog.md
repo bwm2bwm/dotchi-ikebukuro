@@ -295,3 +295,12 @@
 - 選択駅名は画面上部とカード到着ラベルに反映。直通のみ／路線別・発車順／最早着／countdown、各駅の既存旅程、24時超・T01〜T03安全判定を維持。T17で指定されたモード左右入替、初期発車順、文字サイズ、到着caption統一は変更していない。
 - Python unittest 49件、Node全体38件、adapter UTC 24件成功。実データ8駅payloadを現行運行日（2026-10-22〜24）で生成し、全てadapter validatorを通過。最後の反映実測は生成40.0秒、検証1.7秒、容量22,109,229 bytes。氷川台payloadは独立した同条件のexporter出力と `generatedAt` 以外一致。配信コピーのHTML/JS/CSS/adapter/loaderも作業ソースと一致。Safari実機操作は未確認。公開mock・root `index.html` / `styles.css` / `app.js`・ODPT/GTFS元データは変更しない。外部通信・認証情報・commit/push/mergeなし。
 - 配置payloadの3運行日合計: 要町・千川はprimary直通1,086件ずつ、小竹向原は1,280件。氷川台・平和台・地下鉄赤塚・地下鉄成増はprimary 1,266件、直通候補814件、乗換候補親trip1,200件、候補組1,734組ずつ。和光市はprimary1,267、直通874、乗換候補親trip1,216、組1,795。各service dayはadapter上validで、非氷川台payloadの日次destinationStatusはnormal。氷川台statusを追加せず旧payload形状を維持。
+
+## 2026-10-23 — T14 Phase 4A.1 目的地記憶・読込計測
+
+- `dotchi-ikebukuro.destination-id.v1` に許可済みstation IDだけを保存。初期値は氷川台、保存値が未知・storage getter/read/writeが失敗する場合も画面操作を続ける。storageにはpayloadや列車情報を保存しない。選択駅のpayload取得失敗時はその駅のエラー状態を維持し、別駅データへfallbackしない。
+- ページ内に直近2駅分の検証済みprepared payloadをLRUで保持。同じ駅を選び直す操作はfetchしない。切替で過去の駅へ戻った場合はメモリcacheを使う。HTTP `cache: no-store` は維持し、ページreload時には保存stationのファイルを取得する。cache hit後も毎秒 `buildBoard` を呼び、有効期間・required service days・現在時刻の24時間horizonを再評価する。8駅全てを初期取得しない。
+- 開発計測は画面に出さず `window.__dotchiPreviewPerf.loadHistory` にfetch応答待ち、本文読込、JSON parse、adapter validation/preparation、payload byte、cache hitを、`history` に毎秒のadapter/candidate processing、selection、DOM描画を最大50標本記録する。これによりSafari Web Inspectorから端末側の長時間段階を確認できる。
+- 実payloadをMac Nodeで12周（warm-up 2周を除く80標本/段階）計測。氷川台payloadは3,306,543 bytes。Macローカルread median 1.360ms / p95 13.573ms、JSON parse 14.240 / 18.196ms、adapter validation/preparation 38.443 / 47.628ms、buildBoard＋selection 0.791 / 1.264ms。これはMac Nodeとwarm filesystem cacheの参考値でiPhone Safariの転送・DOM値ではない。reported 1〜3秒の端末側原因をこれだけで特定できない。`no-store` のHTTP取得時間とDOM更新時間をSafariで読む必要がある。
+- 自動テストはPython 49件、Node全体43件、adapter UTC 24件が成功。8駅payloadを再生成し、生成39.9秒・検証1.7秒、合計22,109,229 bytes。配置先は `~/Library/Application Support/dotchi-ikebukuro-preview/site`。iPhone確認用の配信コピーは再生成後のソースと一致し、全8駅payloadがstage内検証後に原子的に反映された。
+- iPhone Safariの実機計測値は未取得。Safari Web Inspectorで `window.__dotchiPreviewPerf.loadHistory.slice(-10)` と `window.__dotchiPreviewPerf.history.slice(-10)` を確認し、端末側のfetch/本文/parse/adapter/selection/DOM時間を測る。公開mock/root公開ファイル、GTFS/ODPT元データ、外部API、秘密情報、commit/push/mergeには触れない。

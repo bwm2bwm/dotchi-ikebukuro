@@ -90,6 +90,11 @@ def prepare(*, now: datetime | None = None, output: Path = OUTPUT,
                       cwd=ROOT, check=True, capture_output=True, text=True)
             validation_seconds += time.perf_counter() - started
         payload_bytes = sum((stage / name).stat().st_size for name in DESTINATION_PAYLOADS.values())
+        # copy2 preserves source timestamps; refresh the staged HTTP validators so
+        # Safari sees updated modules after an atomic preview replacement.
+        for staged_file in stage.iterdir():
+            if staged_file.is_file():
+                os.utime(staged_file, None)
         stage.chmod(0o700)
 
         if output.exists():

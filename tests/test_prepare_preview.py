@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -62,6 +63,7 @@ class PreparePreviewTests(unittest.TestCase):
         def validator(command, **kwargs):
             validated.append(command[-1])
             self.successful_validator(command, **kwargs)
+        started_at = time.time()
         result = prepare_preview.prepare(now=datetime(2026, 10, 23, 0, 10, tzinfo=ZoneInfo("Asia/Tokyo")),
                                         output=self.output, exporter=exporter, validator=validator)
         self.assertEqual([str(x) for x in result["service_dates"]], ["2026-10-22", "2026-10-23", "2026-10-24"])
@@ -80,6 +82,7 @@ class PreparePreviewTests(unittest.TestCase):
                          set(prepare_preview.DESTINATION_PAYLOADS.values()))
         self.assertEqual((self.output / "styles.css").read_bytes(), (ROOT / "styles.css").read_bytes())
         self.assertEqual((self.output / "index.html").read_text(), "index.html")
+        self.assertGreaterEqual((self.output / "preview.js").stat().st_mtime, started_at)
 
     def test_failure_while_generating_one_destination_keeps_existing_preview(self):
         calls = 0
