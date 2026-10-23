@@ -221,3 +221,10 @@
 - 実payload: serviceDate 2026-10-22〜24、GTFS version 20261008、池袋発1,283便。adapter valid、路線別3+3／発車順6／直通のみ、best一件、countdownを実payloadで確認。100反復（1回あたりline/departure/direct board）合算時間中央値2.17ms、p95 6.90ms（Node測定、Safari性能値ではない）。
 - 検証: JS 25件（通常TZ・`TZ=UTC`双方）、Python unittest 28件、preview JS/Python syntax check、`git diff --check`成功。localhost HTTPでindex/payload/moduleを200確認。Safari操作環境がSafariアプリへ接続できず、Safari目視は未実施。
 - Mac Safari手順はREADMEの「ローカル実ダイヤpreview」を参照。歴史上のpreviewソースは失われたため、画面細部は完全一致を保証しない。外部API、`.env.local` / API key、生データの再取得、GitHub Pages変更、commit/push/mergeなし。
+# 2026-10-23 — T01 ローカルpreview更新の安全化
+
+- `prepare_preview.py` を入力確認→同じ出力filesystem上の一時stage生成→Node adapter検証→成功後置換へ変更。payloadの形式・必須metadataに加え、現在時点で必要なservice dayをadapterで検証する。24時間TTLは設けない。
+- stage検証前の例外では既存previewに触れない。置換中にstage配置が失敗した場合は退避した既存siteを戻す。
+- payload validatorとstage/失敗保護/必須入力/日付跨ぎのPythonテストを追加。READMEとproject_stateに更新手順・鮮度上の制約を記録。
+- 保存済み元データの更新日時・Web build日時は不明のためnullのまま。payloadを再生成しても元データの鮮度は保証しない。
+- 外部API・資格情報・公開デモ・実payloadのGit管理には触れない。commitなし。

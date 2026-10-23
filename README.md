@@ -39,12 +39,14 @@ find local_data/odpt -maxdepth 1 -type f -print
 
 previewのソースは [`_local_preview/`](_local_preview/) にあります。underscore始まりのディレクトリはGitHub PagesのJekyll出力対象外です。実行時のHTML/JSコピーとpayloadはリポジトリ外の `~/Library/Application Support/dotchi-ikebukuro-preview/site/` に置きます。ODPT/GTFS生データ、payload、preview生成物をGit管理・公開しません。
 
-保存済み `local_data/odpt/` から、JSTの前日・当日・翌日をpayloadにしてpreviewを再生成します。外部API・`.env.local` は使いません。
+保存済み `local_data/odpt/` から、JSTの前日・当日・翌日をpayloadにしてpreviewを再生成します。外部API・`.env.local` は使いません。出力はOS一時領域ではなく、`~/Library/Application Support/dotchi-ikebukuro-preview/site/` です。
 
 ```sh
 python3 _local_preview/prepare_preview.py
 python3 -m http.server 8765 --bind 127.0.0.1 --directory "$HOME/Library/Application Support/dotchi-ikebukuro-preview/site"
 ```
+
+更新スクリプトは必要な保存済みGTFS/ODPTファイルを確認し、一時ディレクトリ内でpayloadと画面ファイルを生成します。adapterで形式・metadata・現在必要な運行日を検証し、成功した場合だけpreviewを差し替えます。生成・検証に失敗した場合は既存previewを維持して原因を表示します。入力ファイルが更新されない限り、payloadの生成日時だけが新しくなっても元データの鮮度は保証されません。24時間TTLはなく、適用期間と必要運行日の有無で表示可否を判定します。
 
 Mac Safariで `http://127.0.0.1:8765/index.html` を開きます。終了時はHTTP serverを `Ctrl-C` で停止します。`window.__dotchiPreviewPerf.history` で直近50回のadapter・DOM計測、`window.__dotchiPreviewPerf.fetchCount` でfetch回数を確認できます。
 

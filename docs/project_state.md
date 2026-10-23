@@ -1,5 +1,12 @@
 # プロジェクト状態
 
+## ローカルpreview更新（T01）
+
+- `python3 _local_preview/prepare_preview.py` は保存済みGTFS/ODPT必須ファイルを確認し、JST前日・当日・翌日のpayloadをリポジトリ外の一時stageで生成します。
+- stageのpayloadを既存adapterでJSON/schema/必須metadata、適用期間、現在必要なservice dayについて検証し、合格後にのみ永続previewを置換します。生成・検証エラーでは既存siteを維持します。外部通信・データ再取得はありません。
+- 元データ更新時刻・Web build時刻は未確認のままnull。payload生成時刻は更新時に変わりますが、元データが古い可能性は残るため鮮度保証ではありません。24時間TTLなし。
+- 自動テスト: `python3 -B -m unittest discover -s tests` とNodeテスト。実payload再生成には保存済みローカルデータが必要です。
+
 更新日: 2026-10-23
 
 ## ローカル実ダイヤpreview・T02/T03（2026-10-23）
