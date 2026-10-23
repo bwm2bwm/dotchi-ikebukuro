@@ -119,12 +119,21 @@ function serviceDay(serviceDate, departures) {
 }
 
 function payload(serviceDays = []) {
+  const dates = new Set(serviceDays.map(day => day.serviceDate));
+  for (const serviceDate of ['2026-10-21', '2026-10-22', '2026-10-23']) {
+    if (!dates.has(serviceDate)) serviceDays = [...serviceDays, {
+      serviceDate, originStationId: 'Ikebukuro', destinationStationId: 'Hikawadai', departures: [],
+    }];
+  }
   return {
     schemaVersion: 1,
     dataScope: 'local-preview-only',
-    generatedAt: '2026-10-22T00:00:00+00:00',
+    generatedAt: '2026-10-21T15:00:00+00:00',
     timezone: 'Asia/Tokyo',
-    feed: { version: 'test-feed', validFrom: '2026-10-21', validThrough: '2026-10-23' },
+    feed: { version: 'test-feed', validFrom: '2026-10-21', validThrough: '2026-10-23', sourceUpdatedAt: null },
+    odpt: { sourceUpdatedAt: null },
+    applicationPeriod: { startsAt: '2026-10-21T00:00:00+09:00', endsAt: '2026-10-24T00:00:00+09:00' },
+    webApp: { builtAt: null },
     connectionPolicy: {
       minimumWaitSeconds: 60,
       maximumWaitSeconds: 600,
@@ -214,6 +223,7 @@ test('feed validity is inclusive and out-of-period service days are excluded', (
     serviceDay('2026-10-20', [outside]),
     serviceDay('2026-10-23', [boundaryEnd]),
   ]);
+  source.generatedAt = '2026-10-20T15:00:00+00:00';
   const board = buildBoard(source, { nowMs: JST('2026-10-21T05:00:00') });
   assert.deepEqual(board.items.map(item => item.sourceId), ['start']);
   assert.ok(board.excluded.some(item => item.id === 'outside' && item.reason === 'outside_feed_validity'));
@@ -399,6 +409,34 @@ test('invalid payloads are rejected with a validation error', () => {
     directAlternative: direct(6 * 3600 + 15 * 60), bestTransferAlternative: invalidTransfer });
   assert.throws(() => buildBoard(payload([serviceDay('2026-10-22', [badJourney])]),
     { nowMs: JST('2026-10-22T05:00:00') }), PayloadValidationError);
+});
+
+test('application period is start-inclusive and end-exclusive, with safe states', () => {
+  const source = payload([]);
+  source.generatedAt = '2026-10-20T14:00:00+00:00';
+  assert.equal(buildBoard(source, { nowMs: JST('2026-10-20T23:59:59') }).validity, 'not_started');
+  assert.equal(buildBoard(source, { nowMs: JST('2026-10-21T00:00:00') }).validity, 'valid');
+  source.generatedAt = '2026-10-23T02:00:00+00:00';
+  assert.equal(buildBoard(source, { nowMs: JST('2026-10-23T23:59:59') }).validity, 'valid');
+  assert.equal(buildBoard(source, { nowMs: JST('2026-10-24T00:00:00') }).validity, 'expired');
+  source.generatedAt = '2026-10-24T00:00:00+09:00';
+  assert.equal(buildBoard(source, { nowMs: JST('2026-10-23T12:00:00') }).validity, 'invalid');
+  source.applicationPeriod = undefined;
+  assert.throws(() => buildBoard(source), /applicationPeriod/);
+});
+
+test('payload remains valid after 24 hours when needed service dates are present', () => {
+  const source = payload([]);
+  assert.equal(buildBoard(source, { nowMs: JST('2026-10-23T00:00:01') }).validity, 'valid');
+});
+
+test('missing a required service date fails closed and reports the missing date', () => {
+  const source = payload([]);
+  source.serviceDays = source.serviceDays.filter(day => day.serviceDate !== '2026-10-23');
+  const board = buildBoard(source, { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(board.validity, 'missing_service_days');
+  assert.deepEqual(board.diagnostics.missingServiceDates, ['2026-10-23']);
+  assert.equal(board.items.length, 0);
 });
 
 test('invalid options and service dates fail clearly', () => {

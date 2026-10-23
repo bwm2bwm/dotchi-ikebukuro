@@ -9,6 +9,10 @@ const TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: TOKYO_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
 });
+const DATETIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
+  timeZone: TOKYO_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
 const PREPARED_PAYLOADS = new WeakMap();
 
 const ROUTE_PRESENTATION = Object.freeze({
@@ -77,6 +81,14 @@ function requireDate(value, path) {
   return value;
 }
 
+function requireTimestamp(value, path, { nullable = false } = {}) {
+  if (nullable && value === null) return null;
+  if (typeof value !== 'string' || !isIsoDate(value.slice(0, 10))
+      || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value)
+      || !Number.isFinite(Date.parse(value))) fail(path, 'ISO timestamp with timezone required');
+  return value;
+}
+
 function requireBoolean(value, path) {
   if (typeof value !== 'boolean') fail(path, 'boolean required');
   return value;
@@ -98,6 +110,22 @@ export function formatTokyoTime(epochMs) {
   const parts = TIME_FORMATTER.formatToParts(new Date(epochMs));
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${values.hour}:${values.minute}`;
+}
+
+function formatTokyoDateTime(epochMs) {
+  return DATETIME_FORMATTER.format(new Date(epochMs));
+}
+
+function validityPresentation(validity, startsAtMs, endsAtMs) {
+  const periodText = `${formatTokyoDateTime(startsAtMs)}〜${formatTokyoDateTime(endsAtMs)}（終了時刻を含まない）`;
+  const messages = {
+    valid: `ダイヤ適用期限 ${formatTokyoDateTime(endsAtMs - 60_000)}まで`,
+    not_started: `この時刻表はまだ適用前です（${periodText}）。更新が必要です。`,
+    expired: `この時刻表の適用期間は終了しました（${periodText}）。更新が必要です。`,
+    missing_service_days: '現在必要な運行日の時刻表データがありません。previewを再生成してください。',
+    invalid: '時刻表の生成日時が現在より未来です。安全のため列車を表示しません。更新が必要です。',
+  };
+  return { validityLabel: validity === 'valid' ? '実ダイヤ' : '要更新', statusMessage: messages[validity], periodText };
 }
 
 function tokyoCalendarDate(epochMs) {
@@ -194,6 +222,17 @@ export function validateTimetablePayload(payload) {
   requireDate(feed.validFrom, 'payload.feed.validFrom');
   requireDate(feed.validThrough, 'payload.feed.validThrough');
   if (feed.validFrom > feed.validThrough) fail('payload.feed', 'validFrom must not follow validThrough');
+  requireTimestamp(feed.sourceUpdatedAt, 'payload.feed.sourceUpdatedAt', { nullable: true });
+  const odpt = requireObject(payload.odpt, 'payload.odpt');
+  requireTimestamp(odpt.sourceUpdatedAt, 'payload.odpt.sourceUpdatedAt', { nullable: true });
+  const applicationPeriod = requireObject(payload.applicationPeriod, 'payload.applicationPeriod');
+  requireTimestamp(applicationPeriod.startsAt, 'payload.applicationPeriod.startsAt');
+  requireTimestamp(applicationPeriod.endsAt, 'payload.applicationPeriod.endsAt');
+  if (Date.parse(applicationPeriod.endsAt) <= Date.parse(applicationPeriod.startsAt)) {
+    fail('payload.applicationPeriod', 'endsAt must follow startsAt');
+  }
+  const webApp = requireObject(payload.webApp, 'payload.webApp');
+  requireTimestamp(webApp.builtAt, 'payload.webApp.builtAt', { nullable: true });
 
   const policy = requireObject(payload.connectionPolicy, 'payload.connectionPolicy');
   requireInteger(policy.minimumWaitSeconds, 'payload.connectionPolicy.minimumWaitSeconds');
@@ -422,6 +461,37 @@ export function buildBoard(payload, {
   const sourceEntries = prepared?.entries ?? payload.serviceDays.flatMap(day =>
     day.departures.map(departure => ({ day, departure, primary: null, direct: null })));
   const sourcePayload = prepared?.payload ?? payload;
+  const startsAtMs = Date.parse(sourcePayload.applicationPeriod.startsAt);
+  const endsAtMs = Date.parse(sourcePayload.applicationPeriod.endsAt);
+  const generatedAtMs = Date.parse(sourcePayload.generatedAt);
+  let validity = generatedAtMs > nowMs ? 'invalid'
+    : nowMs < startsAtMs ? 'not_started'
+      : nowMs >= endsAtMs ? 'expired' : 'valid';
+  const requiredServiceDates = [
+    addCalendarDays(todayTokyo, -1), todayTokyo, addCalendarDays(todayTokyo, 1),
+  ].filter(serviceDate => serviceDate >= sourcePayload.feed.validFrom
+    && serviceDate <= sourcePayload.feed.validThrough);
+  const availableServiceDates = new Set(sourcePayload.serviceDays.map(day => day.serviceDate));
+  const missingServiceDates = requiredServiceDates.filter(serviceDate => !availableServiceDates.has(serviceDate));
+  if (validity === 'valid' && missingServiceDates.length) validity = 'missing_service_days';
+  const presentation = validityPresentation(validity, startsAtMs, endsAtMs);
+  if (validity !== 'valid') {
+    return {
+      mode, nowMs, windowEndMs: nowMs + horizonMs, items: [], groups: [], bestId: null, excluded: [],
+      validity, ...presentation,
+      diagnostics: {
+        feedVersion: sourcePayload.feed.version, feedValidFrom: sourcePayload.feed.validFrom,
+        feedValidThrough: sourcePayload.feed.validThrough, generatedAt: sourcePayload.generatedAt,
+        applicationStartsAt: sourcePayload.applicationPeriod.startsAt,
+        applicationEndsAt: sourcePayload.applicationPeriod.endsAt,
+        requiredServiceDates,
+        missingServiceDates,
+        gtfsUpdatedAt: sourcePayload.feed.sourceUpdatedAt, odptUpdatedAt: sourcePayload.odpt.sourceUpdatedAt,
+        webAppBuiltAt: sourcePayload.webApp.builtAt,
+        dataScope: sourcePayload.dataScope, connectionPolicy: { ...sourcePayload.connectionPolicy },
+      },
+    };
+  }
   const candidateStarted = onTiming ? performance.now() : 0;
   for (const entry of sourceEntries) {
     const { day, departure } = entry;
@@ -497,6 +567,8 @@ export function buildBoard(payload, {
     items,
     groups,
     bestId: earliest?.id ?? null,
+    validity,
+    ...presentation,
     excluded,
     diagnostics: {
       duplicateCount,
@@ -505,6 +577,13 @@ export function buildBoard(payload, {
       feedValidFrom: sourcePayload.feed.validFrom,
       feedValidThrough: sourcePayload.feed.validThrough,
       generatedAt: sourcePayload.generatedAt,
+      applicationStartsAt: sourcePayload.applicationPeriod.startsAt,
+      applicationEndsAt: sourcePayload.applicationPeriod.endsAt,
+      requiredServiceDates,
+      missingServiceDates,
+      gtfsUpdatedAt: sourcePayload.feed.sourceUpdatedAt,
+      odptUpdatedAt: sourcePayload.odpt.sourceUpdatedAt,
+      webAppBuiltAt: sourcePayload.webApp.builtAt,
       dataScope: sourcePayload.dataScope,
       connectionPolicy: { ...sourcePayload.connectionPolicy },
     },

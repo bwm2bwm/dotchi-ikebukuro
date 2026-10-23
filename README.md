@@ -35,6 +35,19 @@ find local_data/odpt -maxdepth 1 -type f -print
 
 取得スクリプトは対象JSONを最大6リクエストでローカル保存します。`local_data/odpt/` はGit管理対象外です。GTFSのCKAN配布URL・認証条件は未確認のため自動ダウンロードしません。入手済みZIPを同フォルダに置くと解析対象になります。解析結果はターミナルに表示され、データ未配置時に実データ結果を作りません。
 
+### ローカル実ダイヤpreview
+
+previewのソースは [`_local_preview/`](_local_preview/) にあります。underscore始まりのディレクトリはGitHub PagesのJekyll出力対象外です。実行時のHTML/JSコピーとpayloadはリポジトリ外の `~/Library/Application Support/dotchi-ikebukuro-preview/site/` に置きます。ODPT/GTFS生データ、payload、preview生成物をGit管理・公開しません。
+
+保存済み `local_data/odpt/` から、JSTの前日・当日・翌日をpayloadにしてpreviewを再生成します。外部API・`.env.local` は使いません。
+
+```sh
+python3 _local_preview/prepare_preview.py
+python3 -m http.server 8765 --bind 127.0.0.1 --directory "$HOME/Library/Application Support/dotchi-ikebukuro-preview/site"
+```
+
+Mac Safariで `http://127.0.0.1:8765/index.html` を開きます。終了時はHTTP serverを `Ctrl-C` で停止します。`window.__dotchiPreviewPerf.history` で直近50回のadapter・DOM計測、`window.__dotchiPreviewPerf.fetchCount` でfetch回数を確認できます。
+
 ## ファイル構成
 
 - index.html: 画面の骨組み

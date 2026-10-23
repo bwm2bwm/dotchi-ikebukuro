@@ -111,7 +111,16 @@ def build_payload(generator: ItineraryGenerator, service_dates: list[str]) -> di
             "version": generator.feed_version,
             "validFrom": generator.feed_start.isoformat(),
             "validThrough": generator.feed_end.isoformat(),
+            # Source publication timestamps are not present in the local feed files.
+            "sourceUpdatedAt": None,
         },
+        "odpt": {"sourceUpdatedAt": None},
+        "applicationPeriod": {
+            "startsAt": f"{generator.feed_start.isoformat()}T00:00:00+09:00",
+            # GTFS end_date is inclusive; represent its exclusive instant explicitly.
+            "endsAt": f"{date.fromordinal(generator.feed_end.toordinal() + 1).isoformat()}T00:00:00+09:00",
+        },
+        "webApp": {"builtAt": None},
         "connectionPolicy": {
             "minimumWaitSeconds": generator.min_transfer_seconds,
             "maximumWaitSeconds": generator.max_transfer_seconds,

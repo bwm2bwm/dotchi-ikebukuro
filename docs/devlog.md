@@ -211,3 +211,13 @@
 - 再生成した実payloadをJST 2026-10-22 06:00でadapter+preview selectionへ通し、line mode 3+3、departure mode 6件、直通filter off/on、最早着印各1件を確認。direct-only時は表示6件全て直通。
 - 検証: Python unittest 28件、Node adapter 16件（通常TZ・`TZ=UTC`の両方）、preview selection 6件、Node syntax check、matcher report（879 control + 100 residual + 242 confirmed + 6 held）成功。
 - Safari再確認: `cd /private/tmp/dotchi-ikebukuro-preview/site && python3 -m http.server 8765 --bind 127.0.0.1` でlocalhost限定起動後、Safariで `http://127.0.0.1:8765/index.html` を開く。Consoleで `window.__dotchiPreviewPerf` を確認し、路線別/発車順と直通filterを各10回ほど切替えて、`history` の `eventToDomMs`, `adapterMs`, `candidateMs`, `sortMs`, `selectionMs`, `domMs` を読む。`fetchCount` が1のままかも確認する。発車後の補充、3+3/6件、最早着1件も確認する。終了時にサーバーを停止。preview・payloadは作業コピー/`/private/tmp`のみ、公開UI変更・外部通信・秘密情報参照・commitなし。
+# 2026-10-23 — 実ダイヤpreview再構築・T02/T03
+
+- preview専用のHTML/CSS/ES moduleと再生成scriptを `_local_preview/` に追加。Pagesはroot/Jekyll方式で、underscore directoryはJekyll出力対象外。公開rootの `index.html`, `app.js`, `data.js`, `styles.css` に変更なし。
+- 出力先を `~/Library/Application Support/dotchi-ikebukuro-preview/site/` に固定。payload・実行コピーは非公開・Git外に配置し、出力directory mode 0700、payload mode 0600。GTFS/ODPTの保存済みローカルデータのみ使用。
+- exporter payloadに適用期間、GTFS/ODPT source update time、web app build timeを区別して保持。元ファイルから更新時刻・build時刻を確認できないため3値はnull。JST適用期間は `[validFrom 00:00, validThrough翌日00:00)`。
+- adapterの24時間payload TTLを削除。期間判定に加えて前日・当日・翌日のfeed期間内service dayがpayloadに揃うか毎秒検証し、不足／期間外は列車を返さない。現在から先24時間のcandidate horizonは維持。
+- previewへstatus banner、payload fetch/JSON/schema失敗表示、通常候補なし状態、路線別3+3／発車順6件、直通filter、表示候補内最早着、JST時計、カウントダウンを接続。毎秒はadapter候補計算と既存カードのcountdown更新を行い、selection signatureが変わる場合のみDOM再描画。preview perf history 50回を `window.__dotchiPreviewPerf` に保持。
+- 実payload: serviceDate 2026-10-22〜24、GTFS version 20261008、池袋発1,283便。adapter valid、路線別3+3／発車順6／直通のみ、best一件、countdownを実payloadで確認。100反復（1回あたりline/departure/direct board）合算時間中央値2.17ms、p95 6.90ms（Node測定、Safari性能値ではない）。
+- 検証: JS 25件（通常TZ・`TZ=UTC`双方）、Python unittest 28件、preview JS/Python syntax check、`git diff --check`成功。localhost HTTPでindex/payload/moduleを200確認。Safari操作環境がSafariアプリへ接続できず、Safari目視は未実施。
+- Mac Safari手順はREADMEの「ローカル実ダイヤpreview」を参照。歴史上のpreviewソースは失われたため、画面細部は完全一致を保証しない。外部API、`.env.local` / API key、生データの再取得、GitHub Pages変更、commit/push/mergeなし。

@@ -1,6 +1,16 @@
 # プロジェクト状態
 
-更新日: 2026-10-22
+更新日: 2026-10-23
+
+## ローカル実ダイヤpreview・T02/T03（2026-10-23）
+
+- 永続previewソースを [`_local_preview/`](../_local_preview/) に置く。GitHub PagesはリポジトリrootをJekyllで配信する構成（Pages workflow、`.nojekyll`、Jekyll設定ファイルなし）で、underscore始まりのpreviewディレクトリはJekyll出力対象外。公開デモのroot `index.html` / `app.js` / `data.js` / `styles.css` は変更しない。
+- 実行用サイトとpayloadは `~/Library/Application Support/dotchi-ikebukuro-preview/site/` に生成し、GTFS/ODPT生データ・実payload・実行コピーはGit管理外。再生成は `python3 _local_preview/prepare_preview.py`、起動はlocalhostにbindしたPython HTTP server。
+- adapterはJST適用期間 `[startsAt, endsAt)` と、現在日を中心とした前日・当日・翌日のうちfeed期間内にある必須service dayを検証する。24時間payload TTLは撤廃。24時間は表示候補horizonとして維持。必要service day不足・期間外は空表示と状態メッセージ。
+- T02/T03のstatus messageは専用preview bannerへ接続。payload取得失敗・JSON/必須metadataエラーも列車カードを出さずエラー表示。正常だが候補がない場合は別の空状態を表示。表示は路線別各3件／発車順6件、直通filter、表示対象内最早着、東京時計・発車countdown。
+- 現在の永続preview生成物: 2026-10-22〜24の3日、1,283便、GTFS version 20261008。adapterの実payload判定はvalid、HTTP index/payload/moduleは200。100回のNode loop（line/departure/direct boardを各回生成）の合算は中央値2.17ms / p95 6.90ms（Safari値ではない）。
+- Nodeテスト25件は通常TZ・`TZ=UTC`双方成功、Python unittest 28件成功、JS/Python syntax check・`git diff --check`成功。Safariアプリは自動操作環境から利用できず、目視は未実施。Mac Safariでの再確認手順はREADME。
+- 元preview専用ソースは一時領域と共に失われたため、UI細部の完全一致は保証しない。再構成した画面でSafari目視確認が残る。
 
 本書は「いまの実装」「確認待ち」「次の作業」を共有する状況メモです。確定仕様の詳細は product_spec.md と ui_spec.md、過去の経緯は devlog.md を参照してください。コードを変更する作業では、実ファイルを状態確認の基準とします。
 
@@ -108,7 +118,7 @@
 - `timetable_adapter.mjs` 経由で路線別・発車順、直通filter、現在から24時間内候補、JST時計／カウントダウン、直通／小竹向原乗換・待ち時間を表示。路線別は各路線3件、発車順は合計6件に制限し、filter後に件数を切る。最早着は表示6件内で一件選び、発車後の毎秒再描画で後続便を補充する。行先・種別不明は不明表示、時刻データ読込失敗・payload鮮度超過で架空便へfallbackしない。
 - Mac Safariで `http://127.0.0.1:8765/index.html` を開いて画面表示を確認。カードの実発時刻・到着時刻・残り時間、路線色、未確定列車種別、乗換注記を視認。ローカルHTTPのHTML/CSS/JS/adapter/payloadはすべて200応答。サーバーは検証後停止。
 - 日付を固定したadapter集計: 平日2026-10-22は表示候補435（直通287、乗換148、うち待ち60秒65）、土曜2026-10-24は396（直通240、乗換156、60秒80）、祝日2026-11-03は418（直通263、乗換155、60秒79）。各ケースで発車順整列と最早着マーク1件を確認。実時刻における画面候補数は時間経過で変動する。
-- preview起動: `python3 -m http.server 8765 --bind 127.0.0.1 --directory /private/tmp/dotchi-ikebukuro-preview/site`。payload生成日時から24時間を超えると表示停止する。日付を更新する際は前日・当日・翌日のJST日付でpayloadを再生成する。
+- 過去previewの一時保存先と起動例。現在の永続保存先と起動手順は本書先頭のローカルpreview状態を参照。過去版は生成24時間TTLだったが、現在は必要運行日カバレッジ判定へ置き換えた。
 - iPhone実機は未確認。`127.0.0.1` はMac自身に限定されるため、別端末のSafariから直接アクセスできない。Mac Safariのレスポンシブデザインモードでは画面幅の確認ができるが、実機接続にはlocalhost限定制約を維持する別方式の検討が必要。
 - 外部APIアクセス、`.env.local` / APIキー読取、GitHub Pages反映、公開データ生成、commitはなし。実ダイヤHTML/JS/payloadはすべてリポジトリ外。
 
