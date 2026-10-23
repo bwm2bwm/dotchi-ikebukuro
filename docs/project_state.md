@@ -34,6 +34,14 @@
 - 保存済みGTFS/ODPTで平日・土曜・祝日の候補数、通過・不足を検証。既定氷川台payloadは保存済みpreviewを基準に `generatedAt` 以外すべて一致。UIとT01更新フローは未変更。
 - Phase 3対象は平和台・地下鉄赤塚・地下鉄成増・和光市。Phase 4で目的地選択UIとiPhone Safari検証を行う。
 
+## T14 目的地拡張 Phase 3.5
+
+- 目的地カタログで経路方針を管理する。要町・千川・小竹向原は直通のみ、氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市は直通＋小竹向原での別trip乗換候補に対応。
+- 乗換元・先の路線、service day、乗降可、停車順、時刻の単調性、目的地到着・降車可を検証。60〜600秒の既存範囲、直通優先／最早着主候補選定は維持。別tripを同一列車の継続や直通旅程として扱わない。
+- `destinationStatus` は直通候補、乗換候補親trip、乗換候補組、乗換のみ、乗換不足・通過を分ける。既存の部分候補方針を維持し、不完全な乗換データを直通旅程の不足判定に混ぜない。氷川台・既存3駅の出力回帰はgeneratedAt以外のpayload一致で確認。
+- 小竹向原の公式駅案内・バリアフリー情報・構内図は [`odpt_research.md`](odpt_research.md) を参照。3・4番線の同一島式ホームという駅構造情報があっても、GTFSから番線や列車別接続保証を確認できない。全transferは `connectionGuaranteed=false`、platform unknownで、「時刻表上の乗換候補」として扱う。60秒を保証時間と解釈しない。
+- Phase 4では1〜2分候補が多数あること、接続保証・番線情報がないことを利用者へ伝える表示と、候補の扱いを検討する。今回はUI・最低乗換時間・選定方式は変更しない。
+
 ## ローカル実ダイヤpreview・T02/T03（2026-10-23）
 
 - 永続previewソースを [`_local_preview/`](../_local_preview/) に置く。GitHub PagesはリポジトリrootをJekyllで配信する構成（Pages workflow、`.nojekyll`、Jekyll設定ファイルなし）で、underscore始まりのpreviewディレクトリはJekyll出力対象外。公開デモのroot `index.html` / `app.js` / `data.js` / `styles.css` は変更しない。

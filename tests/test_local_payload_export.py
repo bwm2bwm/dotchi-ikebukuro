@@ -108,12 +108,39 @@ class LocalPayloadExportTests(unittest.TestCase):
         day = payload["serviceDays"][0]
         self.assertEqual(day["destinationStationId"], "Wakoshi")
         self.assertEqual(day["destinationStatus"]["status"], "normal")
-        self.assertEqual(day["destinationStatus"]["routes"]["6"]["candidateCount"], 150)
-        self.assertEqual(day["destinationStatus"]["routes"]["9"]["candidateCount"], 150)
+        self.assertEqual(day["destinationStatus"]["candidateCount"], 435)
+        self.assertEqual(day["destinationStatus"]["directCandidateCount"], 300)
+        self.assertEqual(day["destinationStatus"]["routes"]["6"]["directCandidateCount"], 150)
+        self.assertEqual(day["destinationStatus"]["routes"]["9"]["directCandidateCount"], 150)
         candidate = next(item for item in day["departures"] if item["primary"])
         self.assertEqual(candidate["primary"]["arrivalStationId"], "Wakoshi")
         self.assertEqual(candidate["destination"], candidate["headsign"])
         self.assertEqual(candidate["destinationSource"], "gtfs_headsign")
+
+    def test_phase35_payload_counts_primary_direct_and_transfer_candidates_separately(self):
+        generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                       destination_station_id="Heiwadai")
+        payload = build_payload(generator, ["2026-10-22"])
+        day = payload["serviceDays"][0]
+        state = day["destinationStatus"]
+        self.assertEqual(len(day["departures"]), 439)
+        self.assertEqual(day["destinationStationId"], "Heiwadai")
+        self.assertEqual(state["status"], "normal")
+        self.assertEqual(state["candidateCount"], 435)
+        self.assertEqual(state["directCandidateCount"], 287)
+        self.assertEqual(state["transferCandidateCount"], 417)
+        self.assertEqual(state["transferPairCount"], 622)
+        self.assertEqual(state["transferOnlyCount"], 148)
+        self.assertEqual(state["transferPassThroughCount"], 13)
+        self.assertEqual(state["transferDataInsufficientCount"], 0)
+        candidate = next(item for item in day["departures"] if item["bestTransferAlternative"])
+        transfer = candidate["bestTransferAlternative"]
+        self.assertEqual(transfer["kind"], "transfer")
+        self.assertEqual(transfer["arrivalStationId"], "Heiwadai")
+        self.assertFalse(transfer["connectionGuaranteed"])
+        self.assertEqual(transfer["platformStatus"], "unknown")
+        self.assertIn(transfer["transfer"]["waitSeconds"], range(60, 601))
+        self.assertEqual(candidate["headsign"], candidate["destination"])
 
 
 class ExportPathGuardTests(unittest.TestCase):

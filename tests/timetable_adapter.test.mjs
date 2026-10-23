@@ -125,6 +125,16 @@ function emptyDestinationStatus() {
     dataInsufficientCount: 0, routes: { '6': emptyRoute(), '9': emptyRoute() } };
 }
 
+function emptyTransferDestinationStatus() {
+  const emptyRoute = () => ({ originTripCount: 0, candidateCount: 0, passThroughCount: 0,
+    dataInsufficientCount: 0, directCandidateCount: 0, transferCandidateCount: 0,
+    transferPairCount: 0, transferOnlyCount: 0 });
+  return { status: 'no_candidates', candidateCount: 0, directCandidateCount: 0,
+    transferCandidateCount: 0, transferPairCount: 0, transferOnlyCount: 0,
+    passThroughCount: 0, transferPassThroughCount: 0, dataInsufficientCount: 0,
+    transferDataInsufficientCount: 0, routes: { '6': emptyRoute(), '9': emptyRoute() } };
+}
+
 function payload(serviceDays = []) {
   const dates = new Set(serviceDays.map(day => day.serviceDate));
   for (const serviceDate of ['2026-10-21', '2026-10-22', '2026-10-23']) {
@@ -133,7 +143,10 @@ function payload(serviceDays = []) {
         serviceDate, originStationId: 'Ikebukuro',
         destinationStationId: serviceDays[0]?.destinationStationId ?? 'Hikawadai', departures: [],
       };
-      if (day.destinationStationId !== 'Hikawadai') day.destinationStatus = emptyDestinationStatus();
+      if (day.destinationStationId === 'Heiwadai' || day.destinationStationId === 'ChikatetsuAkatsuka'
+          || day.destinationStationId === 'ChikatetsuNarimasu' || day.destinationStationId === 'Wakoshi') {
+        day.destinationStatus = emptyTransferDestinationStatus();
+      } else if (day.destinationStationId !== 'Hikawadai') day.destinationStatus = emptyDestinationStatus();
       serviceDays = [...serviceDays, day];
     }
   }
@@ -486,6 +499,41 @@ test('destination payload keeps selected target separate from train headsign', (
   assert.equal(board.items[0].arrivalStationId, 'Kanamecho');
   assert.equal(board.items[0].headsign, '和光市');
   assert.equal(board.destinationStates[0].status, 'normal');
+});
+
+test('transfer-capable destination validates direct and transfer counts separately', () => {
+  const target = 'Heiwadai';
+  const row = departure({
+    id: 'heiwadai-transfer',
+    destination: '和光市',
+    primary: Object.assign(transfer(6 * 3600 + 720, 120), { arrivalStationId: target }),
+    directAlternative: direct(6 * 3600 + 1400, { arrivalStationId: target }),
+    bestTransferAlternative: Object.assign(transfer(6 * 3600 + 720, 120), { arrivalStationId: target }),
+  });
+  const state = {
+    status: 'normal', candidateCount: 1, directCandidateCount: 1,
+    transferCandidateCount: 1, transferPairCount: 2, transferOnlyCount: 0,
+    passThroughCount: 0, transferPassThroughCount: 1,
+    dataInsufficientCount: 0, transferDataInsufficientCount: 0,
+    routes: {
+      '6': { originTripCount: 1, candidateCount: 1, passThroughCount: 0, dataInsufficientCount: 0,
+        directCandidateCount: 1, transferCandidateCount: 1, transferPairCount: 2, transferOnlyCount: 0 },
+      '9': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0,
+        directCandidateCount: 0, transferCandidateCount: 0, transferPairCount: 0, transferOnlyCount: 0 },
+    },
+  };
+  const day = serviceDay('2026-10-22', [row], target);
+  day.destinationStatus = state;
+  const board = buildBoard(payload([day]), { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(board.validity, 'valid');
+  assert.equal(board.items[0].arrivalStationId, target);
+  assert.equal(board.items[0].headsign, '和光市');
+  assert.equal(board.items[0].transfer.wait, 2);
+
+  const badMetrics = structuredClone(payload([day]));
+  badMetrics.serviceDays.find(item => item.serviceDate === '2026-10-22')
+    .destinationStatus.transferPairCount = 1;
+  assert.throws(() => validateTimetablePayload(badMetrics), /transfer metrics must match/);
 });
 
 test('destination insufficient data fails closed while a verified empty day stays distinct', () => {

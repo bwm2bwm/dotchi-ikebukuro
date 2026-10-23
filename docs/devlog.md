@@ -275,3 +275,14 @@
 - 生成状態は既存名の `normal`。`no_candidates`、`data_insufficient`、`unsupported`、`invalid` の意味・adapter fail-closed方針は維持。目的地別payloadはリポジトリ外へ出力でき、通常preview既定は氷川台のまま。READMEに8駅payload生成用CLI optionを追記。
 - 4駅の日別route/pass/24時超件数と同一trip・降車・stop ID、Wakoshi payloadの目的地/status/headsign分離をテストへ追加。既存Phase 2件数テストも従来期待値を維持。
 - GTFS/ODPT原データ、永続preview出力、公開モックは変更しない。実payload検証は一時領域に限定。
+
+## 2026-10-23 — T14 Phase 3.5 小竹向原乗換生成の共通化
+
+- 目的地カタログに経路方針を持たせ、要町・千川・小竹向原は `direct_only`、氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市は `direct_and_kotake_transfer` とした。後者5駅で、池袋発tripから小竹向原で降車し、反対路線の別tripへ乗車して同じservice day内に目的地へ到着する候補を共通生成する。別tripを直通として結合しない。
+- 新4駅の乗換元は小竹向原までの停車順・時刻単調性・到着・降車可を確認し、乗換先は小竹向原発車・乗車可、目的地の下流停車順・到着時刻・降車可を確認する。60〜600秒を維持。既存の最早着選定、直通優先、乗換候補の主候補選定を変更していない。小竹向原乗換は `connectionGuaranteed=false`、platform `unknown` のまま。
+- 公式の[小竹向原駅案内](https://www.tokyometro.jp/station/kotake-mukaihara/index.html)、[バリアフリー設備案内](https://www.tokyometro.jp/station/kotake-mukaihara/accessibility/index.html)、[駅構内図](https://www.tokyometro.jp/station/kotake-mukaihara/yardmap/index_print.html)を2026-10-23に確認。駅案内は有楽町線・副都心線と和光市方面を示し、バリアフリー案内は1・2番線と3・4番線のホーム群を示す。駅構造上の移動条件は接続可能性の参考にとどめる。GTFSには列車別番線、minimum transfer time、connection guarantee、block_idが確認できず、時刻表上の候補を実際の接続保証とは扱わない。ユーザー提示の3・4番線同一島式ホーム情報も、60秒を保証時間と解釈する根拠にはしない。
+- 新4駅の `destinationStatus` は直通候補親trip数、乗換候補を持つ親trip数、全乗換候補組数、乗換のみ親trip数、乗換側の明示通過・データ不足を分けて記録する。直通不足と乗換側不足も分け、直通旅程の検証結果は乗換側の不足で変えない。候補がある日は、Phase 2と同じく有効候補を表示しつつ不足件数も報告する。氷川台の既存status/payload形状は互換のため変更しない。
+- 代表日（平日2026-10-22、土曜2026-10-24、祝日2026-11-03）の新4駅の件数は平和台・地下鉄赤塚・地下鉄成増で同じ。平日: 直通親287、乗換候補親417、乗換組622、乗換のみ148、primary 435。土曜・祝日: 直通親240、乗換候補親366、乗換組490、乗換のみ156、primary 396。和光市は平日300/419/635/135/435、土曜・祝日274/378/525/123/397（同順）。新3駅では乗換先の明示通過13/34/34件、和光市は0。土曜・祝日は各駅で小竹向原の必要な乗換記録が使えないtripが3件あり、乗換不足として計上。直通判定は独立して維持し、有効旅程は従来の部分候補方針どおり利用可能。
+- 新4駅を合わせると、primaryの1分乗換は平日247件、土曜・祝日各294件。2分乗換は平日124件、土曜・祝日各66件。全4駅・3日とも乗換の方が直通より早い／同着のprimaryは0件で、該当旅程は乗換のみの池袋発便。1〜2分は候補を一律除外しないが、接続保証がないため、Phase 4では「時刻表上の乗換候補」、待ち時間、番線未確認、接続保証なしを短く伝える方法を評価する。
+- 回帰確認: 氷川台・要町・千川・小竹向原の旧生成結果は全3日でgeneratedAt以外一致。氷川台の保存済みpreview payloadも同条件で一致。追加4駅はPhase 3直通候補射影（発着、headsign、ODPT raw種別・source・照合、駅ID等）が旧結果と一致。自動検証はPython unittest 47件、Node全体34件、adapter UTC 24件が成功。追加4駅の実payloadを各1件、一時領域で生成してadapter validatorで検証し、生成ファイルは削除した。
+- 外部API、認証情報、GTFS/ODPT原データ、preview UI/公開mock、永続preview payloadは変更していない。目的地別検証payloadは一時領域のみで生成し、Git管理・commit/push/mergeなし。

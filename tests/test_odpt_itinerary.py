@@ -39,6 +39,12 @@ class LocalFeedItineraryTests(unittest.TestCase):
             "ChikatetsuNarimasu": ("602", "902"), "Wakoshi": ("601", "901"),
         }
         self.assertEqual(set(DESTINATIONS), set(expected))
+        for station_id in ("Kanamecho", "Senkawa", "KotakeMukaihara"):
+            self.assertEqual(DESTINATIONS[station_id]["routePolicy"], "direct_only")
+        for station_id in ("Hikawadai", "Heiwadai", "ChikatetsuAkatsuka",
+                           "ChikatetsuNarimasu", "Wakoshi"):
+            self.assertEqual(DESTINATIONS[station_id]["routePolicy"],
+                             "direct_and_kotake_transfer")
         for station_id, (y_stop, f_stop) in expected.items():
             with self.subTest(station_id=station_id):
                 destination = DESTINATIONS[station_id]
@@ -73,7 +79,7 @@ class LocalFeedItineraryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown destination"):
             ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR, destination_station_id="ShinjukuSanchome")
 
-    def test_phase3_targets_generate_only_valid_same_trip_direct_journeys(self):
+    def test_phase3_direct_candidates_remain_valid_when_transfer_candidates_are_added(self):
         expected = {
             "Heiwadai": {"2026-10-22": (150, 137, 13, 7),
                          "2026-10-24": (129, 111, 34, 8),
@@ -97,19 +103,18 @@ class LocalFeedItineraryTests(unittest.TestCase):
                     rows = generator.generate(service_date)
                     coverage = generator.last_destination_status
                     self.assertEqual(coverage["status"], "normal")
-                    self.assertEqual(coverage["candidateCount"], y_count + f_count)
+                    self.assertEqual(coverage["directCandidateCount"], y_count + f_count)
                     self.assertEqual(coverage["passThroughCount"], pass_count)
-                    self.assertEqual(coverage["dataInsufficientCount"], 0)
-                    self.assertEqual(coverage["routes"]["6"]["candidateCount"], y_count)
-                    self.assertEqual(coverage["routes"]["9"]["candidateCount"], f_count)
+                    self.assertEqual(coverage["routes"]["6"]["directCandidateCount"], y_count)
+                    self.assertEqual(coverage["routes"]["9"]["directCandidateCount"], f_count)
                     self.assertEqual(coverage["routes"]["6"]["passThroughCount"] +
                                      coverage["routes"]["9"]["passThroughCount"], pass_count)
-                    candidates = [row for row in rows if row.primary_itinerary]
+                    candidates = [row for row in rows if row.direct_alternative]
                     self.assertEqual(len(candidates), y_count + f_count)
-                    self.assertEqual(sum(row.primary_itinerary.arrival_seconds >= 86400
+                    self.assertEqual(sum(row.direct_alternative.arrival_seconds >= 86400
                                          for row in candidates), after_midnight)
                     for row in candidates:
-                        itinerary = row.primary_itinerary
+                        itinerary = row.direct_alternative
                         self.assertEqual(itinerary.kind, "direct")
                         self.assertIsNone(itinerary.second_leg)
                         self.assertEqual(itinerary.first_leg.trip.trip_id, row.origin_trip_id)
@@ -134,7 +139,105 @@ class LocalFeedItineraryTests(unittest.TestCase):
                     passed = [row for row in rows
                               if "destination_explicit_pass" in row.data_quality]
                     self.assertEqual(len(passed), pass_count)
-                    self.assertTrue(all(row.primary_itinerary is None for row in passed))
+                    self.assertTrue(all(row.direct_alternative is None for row in passed))
+
+    def test_phase35_transfer_destinations_keep_direct_and_transfer_metrics_separate(self):
+        expected = {
+            "Heiwadai": {"2026-10-22": (439, 435, 287, 417, 622, 148, 13, 0, 96),
+                         "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 3, 98),
+                         "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 3, 98)},
+            "ChikatetsuAkatsuka": {"2026-10-22": (439, 435, 287, 417, 622, 148, 13, 0, 96),
+                                   "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 3, 98),
+                                   "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 3, 98)},
+            "ChikatetsuNarimasu": {"2026-10-22": (439, 435, 287, 417, 622, 148, 13, 0, 96),
+                                   "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 3, 98),
+                                   "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 3, 98)},
+            "Wakoshi": {"2026-10-22": (439, 435, 300, 419, 635, 135, 0, 0, 83),
+                        "2026-10-24": (405, 397, 274, 378, 525, 123, 0, 3, 66),
+                        "2026-11-03": (405, 397, 274, 378, 525, 123, 0, 3, 66)},
+        }
+        for destination_id, by_day in expected.items():
+            generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                           destination_station_id=destination_id)
+            destination = DESTINATIONS[destination_id]
+            for day, values in by_day.items():
+                (origin_count, primary_count, direct_count, transfer_origins, transfer_pairs,
+                 transfer_only, pass_count, transfer_data_shortage, short_transfer_primary) = values
+                with self.subTest(destination=destination_id, service_date=day):
+                    rows = generator.generate(day)
+                    state = generator.last_destination_status
+                    self.assertEqual(len(rows), origin_count)
+                    self.assertEqual(state["status"], "normal")
+                    self.assertEqual(state["candidateCount"], primary_count)
+                    self.assertEqual(state["directCandidateCount"], direct_count)
+                    self.assertEqual(state["transferCandidateCount"], transfer_origins)
+                    self.assertEqual(state["transferPairCount"], transfer_pairs)
+                    self.assertEqual(state["transferOnlyCount"], transfer_only)
+                    self.assertEqual(state["passThroughCount"], pass_count)
+                    self.assertEqual(state["transferPassThroughCount"], pass_count)
+                    self.assertEqual(state["transferDataInsufficientCount"], transfer_data_shortage)
+                    self.assertEqual(state["dataInsufficientCount"], transfer_data_shortage)
+                    self.assertEqual(state["candidateCount"], sum(
+                        route["candidateCount"] for route in state["routes"].values()))
+                    self.assertEqual(state["directCandidateCount"], sum(
+                        route["directCandidateCount"] for route in state["routes"].values()))
+                    self.assertEqual(state["transferPairCount"], sum(
+                        route["transferPairCount"] for route in state["routes"].values()))
+
+                    best_transfer_rows = [row for row in rows if row.best_transfer_alternative]
+                    self.assertEqual(len(best_transfer_rows), transfer_origins)
+                    self.assertEqual(sum(row.transfer_candidates_count for row in rows), transfer_pairs)
+                    transfer_primary = [row for row in rows
+                                        if row.primary_itinerary and row.primary_itinerary.kind == "transfer"]
+                    self.assertEqual(sum(row.primary_itinerary.transfer_wait_seconds <= 120
+                                         for row in transfer_primary), short_transfer_primary)
+                    for row in rows:
+                        direct = row.direct_alternative
+                        transfer = row.best_transfer_alternative
+                        if direct is not None and transfer is not None:
+                            self.assertEqual(row.primary_itinerary.kind,
+                                             "direct" if direct.arrival_seconds <= transfer.arrival_seconds
+                                             else "transfer")
+                        if transfer is None:
+                            continue
+                        self.assertEqual(transfer.kind, "transfer")
+                        self.assertEqual(transfer.arrival_station_id, destination_id)
+                        self.assertEqual(transfer.first_leg.trip.trip_id, row.origin_trip_id)
+                        self.assertNotEqual(transfer.second_leg.trip.trip_id, row.origin_trip_id)
+                        self.assertEqual(transfer.second_leg.trip.route_id,
+                                         "9" if row.route_id == "6" else "6")
+                        self.assertEqual(transfer.first_leg.alight.stop_id,
+                                         DESTINATIONS["KotakeMukaihara"]["routeStopIds"][row.route_id])
+                        self.assertEqual(transfer.second_leg.board.stop_id,
+                                         DESTINATIONS["KotakeMukaihara"]["routeStopIds"]
+                                         [transfer.second_leg.trip.route_id])
+                        self.assertEqual(transfer.second_leg.alight.stop_id,
+                                         destination["routeStopIds"][transfer.second_leg.trip.route_id])
+                        self.assertEqual(transfer.transfer_wait_seconds,
+                                         transfer.second_leg.board_seconds
+                                         - transfer.first_leg.alight_seconds)
+                        self.assertTrue(transfer.first_leg.alight.can_alight)
+                        self.assertTrue(transfer.second_leg.board.can_board)
+                        self.assertTrue(transfer.second_leg.alight.can_alight)
+                        self.assertGreaterEqual(transfer.transfer_wait_seconds, 60)
+                        self.assertLessEqual(transfer.transfer_wait_seconds, 600)
+                        self.assertFalse(transfer.connection_guaranteed)
+                        self.assertEqual(transfer.platform_status, "unknown")
+                        self.assertEqual(transfer.second_leg.trip.headsign,
+                                         generator.trips[transfer.second_leg.trip.trip_id]
+                                         .get("trip_headsign") or None)
+                        onward_order = {value["routeStopIds"][transfer.second_leg.trip.route_id]:
+                                        value["outboundOrder"] for value in DESTINATIONS.values()}
+                        onward_events = [event for event in transfer.second_leg.trip.events
+                                         if transfer.second_leg.board.sequence <= event.sequence
+                                         <= transfer.second_leg.alight.sequence
+                                         and event.stop_id in onward_order]
+                        observed = [onward_order[event.stop_id] for event in onward_events]
+                        self.assertEqual(observed, sorted(observed))
+                        times = [seconds for event in onward_events
+                                 for seconds in (event.arrival_seconds, event.departure_seconds)
+                                 if seconds is not None]
+                        self.assertTrue(all(later >= earlier for earlier, later in zip(times, times[1:])))
 
     def test_phase2_targets_generate_same_trip_direct_only_and_classify_data(self):
         expected = {

@@ -23,6 +23,9 @@ const DESTINATION_STATION_IDS = new Set([
   'Kanamecho', 'Senkawa', 'KotakeMukaihara', 'Hikawadai', 'Heiwadai',
   'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi',
 ]);
+const TRANSFER_DESTINATION_STATION_IDS = new Set([
+  'Heiwadai', 'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi',
+]);
 const DEFAULT_DESTINATION_STATION_ID = 'Hikawadai';
 
 const TRAIN_TYPE_LABELS = Object.freeze({
@@ -352,6 +355,13 @@ export function validateTimetablePayload(payload) {
     }
     if (day.destinationStatus !== undefined) {
       const state = requireObject(day.destinationStatus, `${path}.destinationStatus`);
+      const transferMetricsRequired = TRANSFER_DESTINATION_STATION_IDS.has(day.destinationStationId);
+      if (transferMetricsRequired) {
+        for (const key of ['directCandidateCount', 'transferCandidateCount', 'transferPairCount',
+          'transferOnlyCount', 'transferPassThroughCount', 'transferDataInsufficientCount']) {
+          requireInteger(state[key], `${path}.destinationStatus.${key}`);
+        }
+      }
       if (!['normal', 'no_candidates', 'data_insufficient', 'unsupported', 'invalid'].includes(state.status)) {
         fail(`${path}.destinationStatus.status`, 'unsupported destination status');
       }
@@ -364,15 +374,49 @@ export function validateTimetablePayload(payload) {
         for (const key of ['originTripCount', 'candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
           requireInteger(counts[key], `${path}.destinationStatus.routes.${routeId}.${key}`);
         }
+        if (transferMetricsRequired) {
+          for (const key of ['directCandidateCount', 'transferCandidateCount', 'transferPairCount',
+            'transferOnlyCount']) {
+            requireInteger(counts[key], `${path}.destinationStatus.routes.${routeId}.${key}`);
+          }
+        }
       }
       const routeTotals = Object.values(routes).reduce((totals, counts) => {
         for (const key of ['originTripCount', 'candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
           totals[key] += counts[key];
         }
+        if (transferMetricsRequired) {
+          for (const key of ['directCandidateCount', 'transferCandidateCount', 'transferPairCount',
+            'transferOnlyCount']) totals[key] += counts[key];
+        }
         return totals;
-      }, { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 });
-      for (const key of ['candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
+      }, { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0,
+        directCandidateCount: 0, transferCandidateCount: 0, transferPairCount: 0, transferOnlyCount: 0 });
+      for (const key of ['candidateCount', 'passThroughCount']) {
         if (state[key] !== routeTotals[key]) fail(`${path}.destinationStatus.${key}`, 'must match route totals');
+      }
+      if (!transferMetricsRequired
+          && state.dataInsufficientCount !== routeTotals.dataInsufficientCount) {
+        fail(`${path}.destinationStatus.dataInsufficientCount`, 'must match route totals');
+      }
+      if (transferMetricsRequired) {
+        if (state.directCandidateCount !== routeTotals.directCandidateCount
+            || state.transferCandidateCount !== routeTotals.transferCandidateCount
+            || state.transferPairCount !== routeTotals.transferPairCount
+            || state.transferOnlyCount !== routeTotals.transferOnlyCount) {
+          fail(`${path}.destinationStatus`, 'transfer metrics must match route totals');
+        }
+        if (state.directCandidateCount !== day.departures.filter(item => item.directAlternative !== null).length
+            || state.transferCandidateCount !== day.departures.filter(item => item.bestTransferAlternative !== null).length
+            || state.transferPairCount !== day.departures.reduce((sum, item) => sum + item.transferCandidateCount, 0)
+            || state.transferOnlyCount !== day.departures.filter(item => item.directAlternative === null
+              && item.bestTransferAlternative !== null).length) {
+          fail(`${path}.destinationStatus`, 'transfer metrics must match departures');
+        }
+        if (state.dataInsufficientCount !== routeTotals.dataInsufficientCount
+            + state.transferDataInsufficientCount) {
+          fail(`${path}.destinationStatus.dataInsufficientCount`, 'must include transfer data insufficiency');
+        }
       }
       if (state.candidateCount !== day.departures.filter(item => item.primary !== null).length) {
         fail(`${path}.destinationStatus.candidateCount`, 'must match journeys with a primary itinerary');
