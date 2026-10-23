@@ -10,7 +10,7 @@ const [html, css, mockCss, script] = await Promise.all([
 ]);
 
 test('preview uses the public mock structure and fixed ad dock with safe-area reserve', () => {
-  for (const marker of ['viewport-fit=cover', 'class="top"', 'class="demo"', 'class="selectbox"',
+  for (const marker of ['viewport-fit=cover', 'class="top"', 'class="demo"', 'class="selectbox destination-trigger"',
     'class="controls"', 'class="filter"', 'id="board"', 'class="ad-dock"', 'AD 320×50']) {
     assert.ok(html.includes(marker), `missing ${marker}`);
   }
@@ -59,4 +59,21 @@ test('train type and destination have separate compact elements with distinct so
   assert.match(css, /\.type-unknown\s*\{[^}]*color:\s*#737b84/);
   assert.doesNotMatch(css, /\.type-(?:normal|express|brand|supplement|unknown)\s*\{[^}]*text-decoration/);
   assert.match(mockCss, /\.bestmark\s*\{[^}]*color:\s*#267340/);
+});
+
+test('destination picker is an ordered modal and does not enlarge the page layout', () => {
+  assert.match(html, /id="destination-trigger"[^>]*aria-haspopup="dialog"/);
+  assert.match(html, /<dialog id="destination-dialog"/);
+  assert.match(html, /id="destination-list"/);
+  assert.match(script, /Kanamecho.*要町[\s\S]*Senkawa.*千川[\s\S]*KotakeMukaihara.*小竹向原[\s\S]*Hikawadai.*氷川台[\s\S]*Heiwadai.*平和台[\s\S]*ChikatetsuAkatsuka.*地下鉄赤塚[\s\S]*ChikatetsuNarimasu.*地下鉄成増[\s\S]*Wakoshi.*和光市/);
+  assert.match(script, /selectedDestinationId = 'Hikawadai'/);
+  assert.match(script, /destinationDialog\.showModal\(\)/);
+  assert.match(script, /ArrowDown/);
+  assert.match(script, /destinationTrigger\.focus/);
+  assert.match(css, /env\(safe-area-inset-top/);
+  assert.match(css, /env\(safe-area-inset-bottom/);
+  assert.match(css, /body\.destination-modal-open\s*\{\s*overflow:\s*hidden/);
+  assert.match(script, /arrival-caption'[)]\.textContent = `\$\{selectedDestination\(\)\?\.name/);
+  assert.match(mockCss, /min-height: 68px/);
+  assert.match(mockCss, /height: 50px/);
 });

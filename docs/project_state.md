@@ -4,7 +4,7 @@
 
 - `_local_preview/index.html` は公開モックと同じヘッダー／時計、注意表示、ルート枠、44px操作行、カードDOM、下部広告dockの構成。`prepare_preview.py` はroot `styles.css` をローカル出力へコピーし、preview.cssで状態表示・折りたたみmetadataを補う。
 - 実ダイヤ側はローカルデータ注記、適用期間バナー、安全停止、payload適用期間／生成日時／GTFS・ODPT更新日時／Web build日時の個別表示を維持。未取得日時は「未取得」。
-- adapter、selection、列車数制限、T01のpayload生成・検証・安全差し替えロジックは変更していない。prepare_previewにはroot CSSのコピーだけを追加。再生成によりpayload生成日時は更新される。iPhone Safari目視確認が残る。
+- 8駅の目的地選択はPhase 4Aでpreview専用に追加。selectionの列車候補・件数制限ロジックは維持し、ルート枠でモーダルを開く。端末保存はせず、リロード時は氷川台。
 
 ## iPhone Safari縦レイアウト調整
 
@@ -13,10 +13,17 @@
 
 ## ローカルpreview更新（T01）
 
-- `python3 _local_preview/prepare_preview.py` は保存済みGTFS/ODPT必須ファイルを確認し、JST前日・当日・翌日のpayloadをリポジトリ外の一時stageで生成します。
-- stageのpayloadを既存adapterでJSON/schema/必須metadata、適用期間、現在必要なservice dayについて検証し、合格後にのみ永続previewを置換します。生成・検証エラーでは既存siteを維持します。外部通信・データ再取得はありません。
+- `python3 _local_preview/prepare_preview.py` は保存済みGTFS/ODPT必須ファイルを確認し、JST前日・当日・翌日の8駅payloadをリポジトリ外の一時stageで生成します。氷川台の互換ファイル名は `timetable.json`、他7駅は `timetable-{stationId}.json` です。
+- 全payloadを既存adapterでJSON/schema/必須metadata、適用期間、現在必要なservice dayについて検証し、すべて合格後にのみpreview一式を置換します。1駅でも生成・検証に失敗した場合は既存siteを維持します。外部通信・データ再取得はありません。
 - 元データ更新時刻・Web build時刻は未確認のままnull。payload生成時刻は更新時に変わりますが、元データが古い可能性は残るため鮮度保証ではありません。24時間TTLなし。
 - 自動テスト: `python3 -B -m unittest discover -s tests` とNodeテスト。実payload再生成には保存済みローカルデータが必要です。
+
+## T14 Phase 4A 目的地選択・payload切替
+
+- ルート枠を目的地選択ボタンにし、要町・千川・小竹向原・氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市を順番どおりに選ぶモーダルを追加。選択状態、Escape/閉じる、矢印/Home/Endキー、フォーカス復帰、背景スクロール抑止、safe-areaを扱う。UIレイアウト変更はモーダルとルート枠に限定。
+- loaderは固定station ID→固定filename対応を使用し、選択されたpayloadだけを取得。payload内の全service dayが選択IDと一致しなければ拒否する。更新時は旧カード・metadataを消して読み込み中を示し、最新要求tokenで高速切替の古いresponseを破棄。失敗時は列車を表示せずエラーを示す。選択は保存せず、リロードは氷川台。
+- 目的地別の既存旅程生成と直通filter／路線別・発車順／最早着／countdownは維持。カード到着ラベルは現在の目的地名を付け、T17での「到着」統一や操作行の並べ替え・文字サイズ変更は未着手。
+- Phase 4A自動テストでは8駅の固定mapping、payload不一致・未知ID拒否、非同期切替競合、8ファイル生成・検証、途中失敗時の既存preview保持を確認。Python 49件、Node 38件、adapter UTC 24件成功。実payload 8件も生成・検証し、現在の保存先に反映済み。最終反映は生成40.0秒・検証1.7秒、総容量22,109,229 bytes。氷川台は独立exporterとの比較でgeneratedAt以外一致。iPhone Safari実機の見た目・フォーカス操作確認が残る。
 
 更新日: 2026-10-23
 
@@ -32,7 +39,7 @@
 - 要町・千川・小竹向原を旅程生成可能にした。池袋で乗車可能な同一GTFS tripに対象駅の停車記録があり、停車順・時刻・降車可が整合する場合だけ直通候補を生成する。別trip接続は行わない。
 - 目的地別payloadの日次 `destinationStatus` は `normal` / `no_candidates` / `data_insufficient` と路線別件数を保持する。adapterは必要運行日のデータ不足をfail-closedし、検証済み候補なしとは区別する。未対応・不正状態も列車を出さない。
 - 保存済みGTFS/ODPTで平日・土曜・祝日の候補数、通過・不足を検証。既定氷川台payloadは保存済みpreviewを基準に `generatedAt` 以外すべて一致。UIとT01更新フローは未変更。
-- Phase 3対象は平和台・地下鉄赤塚・地下鉄成増・和光市。Phase 4で目的地選択UIとiPhone Safari検証を行う。
+- Phase 3対象の4駅追加・Phase 3.5乗換候補共通化を完了。Phase 4Aで8駅選択と目的地別payload切替をローカルpreviewへ実装。Phase 4Bでレイアウト調整を行う。
 
 ## T14 目的地拡張 Phase 3.5
 

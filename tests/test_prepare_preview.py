@@ -54,14 +54,60 @@ class PreparePreviewTests(unittest.TestCase):
         assert Path(command[-1]).is_file()
 
     def test_normal_update_stages_and_replaces_preview(self):
+        exported = []
+        validated = []
+        def exporter(command, **kwargs):
+            exported.append(command)
+            self.successful_exporter(command, **kwargs)
+        def validator(command, **kwargs):
+            validated.append(command[-1])
+            self.successful_validator(command, **kwargs)
         result = prepare_preview.prepare(now=datetime(2026, 10, 23, 0, 10, tzinfo=ZoneInfo("Asia/Tokyo")),
-                                        output=self.output, exporter=self.successful_exporter,
-                                        validator=self.successful_validator)
+                                        output=self.output, exporter=exporter, validator=validator)
         self.assertEqual([str(x) for x in result["service_dates"]], ["2026-10-22", "2026-10-23", "2026-10-24"])
         self.assertFalse((self.output / "old.marker").exists())
         self.assertTrue((self.output / "timetable.json").exists())
+        self.assertEqual(result["payload_count"], 8)
+        self.assertEqual(result["payload_bytes"], sum((self.output / name).stat().st_size
+                                                       for name in prepare_preview.DESTINATION_PAYLOADS.values()))
+        self.assertGreaterEqual(result["generation_seconds"], 0)
+        self.assertGreaterEqual(result["validation_seconds"], 0)
+        self.assertEqual(len(exported), 8)
+        self.assertEqual(len(validated), 8)
+        self.assertEqual({command[command.index("--destination-station-id") + 1] for command in exported},
+                         set(prepare_preview.DESTINATION_PAYLOADS))
+        self.assertEqual({Path(command[command.index("--output") + 1]).name for command in exported},
+                         set(prepare_preview.DESTINATION_PAYLOADS.values()))
         self.assertEqual((self.output / "styles.css").read_bytes(), (ROOT / "styles.css").read_bytes())
         self.assertEqual((self.output / "index.html").read_text(), "index.html")
+
+    def test_failure_while_generating_one_destination_keeps_existing_preview(self):
+        calls = 0
+        def fail_seventh(command, **kwargs):
+            nonlocal calls
+            calls += 1
+            output = Path(command[command.index("--output") + 1])
+            output.write_text("complete payload" if calls < 7 else "partial payload")
+            if calls == 7:
+                raise RuntimeError("seventh destination failed")
+        with self.assertRaisesRegex(RuntimeError, "seventh destination"):
+            prepare_preview.prepare(output=self.output, exporter=fail_seventh,
+                                    validator=self.successful_validator)
+        self.assertEqual((self.output / "old.marker").read_text(), "keep")
+        self.assertFalse(any(self.output.glob("timetable-*.json")))
+
+    def test_validation_failure_on_one_destination_keeps_existing_preview(self):
+        calls = 0
+        def reject_seventh(command, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 7:
+                raise RuntimeError("seventh payload invalid")
+            self.successful_validator(command, **kwargs)
+        with self.assertRaisesRegex(RuntimeError, "seventh payload invalid"):
+            prepare_preview.prepare(output=self.output, exporter=self.successful_exporter, validator=reject_seventh)
+        self.assertEqual((self.output / "old.marker").read_text(), "keep")
+        self.assertFalse(any(self.output.glob("timetable-*.json")))
 
     def test_missing_required_file_fails_before_changing_output(self):
         self.inputs[0].unlink()

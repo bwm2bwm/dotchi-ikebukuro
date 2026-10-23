@@ -286,3 +286,12 @@
 - 新4駅を合わせると、primaryの1分乗換は平日247件、土曜・祝日各294件。2分乗換は平日124件、土曜・祝日各66件。全4駅・3日とも乗換の方が直通より早い／同着のprimaryは0件で、該当旅程は乗換のみの池袋発便。1〜2分は候補を一律除外しないが、接続保証がないため、Phase 4では「時刻表上の乗換候補」、待ち時間、番線未確認、接続保証なしを短く伝える方法を評価する。
 - 回帰確認: 氷川台・要町・千川・小竹向原の旧生成結果は全3日でgeneratedAt以外一致。氷川台の保存済みpreview payloadも同条件で一致。追加4駅はPhase 3直通候補射影（発着、headsign、ODPT raw種別・source・照合、駅ID等）が旧結果と一致。自動検証はPython unittest 47件、Node全体34件、adapter UTC 24件が成功。追加4駅の実payloadを各1件、一時領域で生成してadapter validatorで検証し、生成ファイルは削除した。
 - 外部API、認証情報、GTFS/ODPT原データ、preview UI/公開mock、永続preview payloadは変更していない。目的地別検証payloadは一時領域のみで生成し、Git管理・commit/push/mergeなし。
+
+## 2026-10-23 — T14 Phase 4A 目的地選択・8駅payload切替
+
+- `_local_preview` のルート枠をボタン化し、8駅を停車順に選択するモーダルを追加。選択中の駅名と状態を表示し、閉じる/Escape、矢印・Home・Endキー、フォーカス復帰、背景scroll抑止、safe-areaを実装。画面本体の高さと既存カード寸法・6件制限・広告dockは変更していない。
+- loaderに固定station ID→payload pathを定義。初期・reloadは氷川台 (`timetable.json`)、残る7駅は `timetable-{stationId}.json`。requested ID以外のpayloadや未知IDを拒否し、fallbackしない。切替時は現カードとmetadataを消し、読み込み状態を表示する。latest-request controllerが連続切替で遅れて返った古いresponseを無効化する。フィルターと表示modeは状態を保持。
+- prepare_previewは一時stage内で8目的地のpayloadを生成し、個別に現行adapter検証してから全ファイルとUIを原子的に差し替える。いずれかの生成・検証失敗時は旧siteを維持。payload bytes、生成秒、検証秒を完了ログに出す。
+- 選択駅名は画面上部とカード到着ラベルに反映。直通のみ／路線別・発車順／最早着／countdown、各駅の既存旅程、24時超・T01〜T03安全判定を維持。T17で指定されたモード左右入替、初期発車順、文字サイズ、到着caption統一は変更していない。
+- Python unittest 49件、Node全体38件、adapter UTC 24件成功。実データ8駅payloadを現行運行日（2026-10-22〜24）で生成し、全てadapter validatorを通過。最後の反映実測は生成40.0秒、検証1.7秒、容量22,109,229 bytes。氷川台payloadは独立した同条件のexporter出力と `generatedAt` 以外一致。配信コピーのHTML/JS/CSS/adapter/loaderも作業ソースと一致。Safari実機操作は未確認。公開mock・root `index.html` / `styles.css` / `app.js`・ODPT/GTFS元データは変更しない。外部通信・認証情報・commit/push/mergeなし。
+- 配置payloadの3運行日合計: 要町・千川はprimary直通1,086件ずつ、小竹向原は1,280件。氷川台・平和台・地下鉄赤塚・地下鉄成増はprimary 1,266件、直通候補814件、乗換候補親trip1,200件、候補組1,734組ずつ。和光市はprimary1,267、直通874、乗換候補親trip1,216、組1,795。各service dayはadapter上validで、非氷川台payloadの日次destinationStatusはnormal。氷川台statusを追加せず旧payload形状を維持。

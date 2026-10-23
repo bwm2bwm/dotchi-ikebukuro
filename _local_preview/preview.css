@@ -2,6 +2,70 @@
 main { padding-top: 2px; }
 .demo { margin-top: 3px; margin-bottom: 3px; padding-top: 3px; padding-bottom: 3px; }
 .selectbox { min-height: 38px; padding-top: 4px; padding-bottom: 4px; }
+.destination-trigger {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.destination-dialog {
+  width: min(420px, calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 24px));
+  max-width: none;
+  max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+  margin: auto;
+  padding: 16px;
+  border: 1px solid #d8dddf;
+  border-radius: 14px;
+  color: #25292e;
+  background: #f8f7f4;
+  box-shadow: 0 12px 36px #18212b38;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.destination-dialog::backdrop { background: #17212b80; }
+.destination-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.destination-dialog h2 { margin: 0; font-size: 17px; line-height: 1.25; }
+.destination-close {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #384958;
+  background: #e9eced;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.destination-dialog-description { margin: 10px 0 5px; color: #68727a; font-size: 11px; }
+.destination-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.destination-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #e2e5e6;
+  border-radius: 9px;
+  padding: 7px 11px;
+  color: #25292e;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.destination-option[aria-pressed="true"] {
+  border-color: #526c82;
+  background: #edf3f7;
+  box-shadow: inset 3px 0 #526c82;
+}
+.destination-option-state { color: #38576c; font-size: 11px; font-weight: 700; }
+body.destination-modal-open { overflow: hidden; }
 .status {
   min-height: 0;
   margin: 2px 0 0;

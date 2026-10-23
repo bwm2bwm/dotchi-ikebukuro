@@ -1,14 +1,29 @@
 import { buildBoard, TOKYO_TIME_ZONE } from './timetable_adapter.mjs';
-import { loadTimetablePayload } from './local_preview_payload_loader.mjs';
+import { createLatestDestinationLoader, loadTimetablePayload } from './local_preview_payload_loader.mjs';
 import { countdownText, earliestVisible, selectPreviewGroups } from './selection.mjs';
 
 const clock = document.getElementById('clock');
 const statusEl = document.getElementById('timetable-status');
 const metadataEl = document.getElementById('payload-metadata');
 const boardEl = document.getElementById('board');
+const destinationTrigger = document.getElementById('destination-trigger');
+const routeDisplay = document.getElementById('route-display');
+const destinationDialog = document.getElementById('destination-dialog');
+const destinationClose = document.getElementById('destination-close');
+const destinationList = document.getElementById('destination-list');
 const directOnlyEl = document.getElementById('direct-only');
 const lineButton = document.getElementById('mode-line');
 const departureButton = document.getElementById('mode-departure');
+const DESTINATIONS = Object.freeze([
+  { id: 'Kanamecho', name: '要町' },
+  { id: 'Senkawa', name: '千川' },
+  { id: 'KotakeMukaihara', name: '小竹向原' },
+  { id: 'Hikawadai', name: '氷川台' },
+  { id: 'Heiwadai', name: '平和台' },
+  { id: 'ChikatetsuAkatsuka', name: '地下鉄赤塚' },
+  { id: 'ChikatetsuNarimasu', name: '地下鉄成増' },
+  { id: 'Wakoshi', name: '和光市' },
+]);
 const clockFormatter = new Intl.DateTimeFormat('en-GB', {
   timeZone: TOKYO_TIME_ZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
@@ -17,8 +32,11 @@ const metadataFormatter = new Intl.DateTimeFormat('ja-JP', {
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
 let mode = 'line';
+let selectedDestinationId = 'Hikawadai';
 let prepared = null;
 let loadFailure = null;
+let loading = true;
+const loadLatestDestination = createLatestDestinationLoader(destinationId => loadTimetablePayload(destinationId, fetch));
 let selectedSignature = '';
 let perfHistory = [];
 let fetchCount = 0;
@@ -29,6 +47,45 @@ window.__dotchiPreviewPerf = { history: perfHistory, get fetchCount() { return f
 function setStatus(message, state) {
   if (statusEl.textContent !== message) statusEl.textContent = message;
   statusEl.dataset.state = state;
+}
+
+function selectedDestination() {
+  return DESTINATIONS.find(destination => destination.id === selectedDestinationId) ?? null;
+}
+
+function renderDestinationOptions() {
+  const fragment = document.createDocumentFragment();
+  for (const [index, destination] of DESTINATIONS.entries()) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.className = 'destination-option';
+    button.type = 'button';
+    button.dataset.destinationId = destination.id;
+    button.setAttribute('aria-pressed', String(destination.id === selectedDestinationId));
+    button.setAttribute('aria-posinset', String(index + 1));
+    button.setAttribute('aria-setsize', String(DESTINATIONS.length));
+    const label = document.createElement('span');
+    label.textContent = destination.name;
+    const state = document.createElement('span');
+    state.className = 'destination-option-state';
+    state.textContent = destination.id === selectedDestinationId ? '選択中' : '';
+    button.append(label, state);
+    button.addEventListener('click', () => {
+      const changed = selectedDestinationId !== destination.id;
+      if (changed) loadDestination(destination.id);
+      destinationDialog.close();
+      if (!changed) destinationTrigger.focus({ preventScroll: true });
+    });
+    item.appendChild(button);
+    fragment.appendChild(item);
+  }
+  destinationList.replaceChildren(fragment);
+}
+
+function updateDestinationLabel() {
+  const destination = selectedDestination();
+  routeDisplay.textContent = destination ? `池袋 → ${destination.name}` : '池袋 → 目的地不明';
+  renderDestinationOptions();
 }
 
 function displayTimestamp(value) {
@@ -77,7 +134,7 @@ function renderGroups(groups, nowMs) {
         const card = document.createElement('article');
         card.className = `train${item.id === best?.id ? ' best' : ''}`;
         card.style.setProperty('--line-color', item.color);
-        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="line-count"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発<span class="type-destination"><span class="type-label"></span><span class="destination-label"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="count"></div><div class="minitxt">発車まで</div></div><div><div class="arrival"></div><div class="minitxt" style="text-align:right">氷川台着</div></div>`;
+        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="line-count"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発<span class="type-destination"><span class="type-label"></span><span class="destination-label"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="count"></div><div class="minitxt">発車まで</div></div><div><div class="arrival"></div><div class="minitxt arrival-caption" style="text-align:right"></div></div>`;
         card.querySelector('.route').textContent = item.line;
         card.querySelector('.line-count').textContent = group.line && index === 0 ? `${group.items.length}本` : '';
         card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
@@ -90,6 +147,7 @@ function renderGroups(groups, nowMs) {
         card.querySelector('.sub').textContent = item.journeyKind === 'direct'
           ? '直通・乗換なし' : `小竹向原乗換・待ち約${Math.round(item.transfer.waitMinutes)}分`;
         card.querySelector('.arrival').textContent = item.arrivalText ?? '—';
+        card.querySelector('.arrival-caption').textContent = `${selectedDestination()?.name ?? '目的地'}着`;
         card.dataset.departureAt = String(item.departureAtMs);
         section.appendChild(card);
       }
@@ -128,6 +186,13 @@ function tick(eventStarted = performance.now()) {
     recordPerf({ at: nowMs, eventToDomMs: performance.now() - eventStarted, adapterMs: 0, selectionMs: 0, domMs: 0 });
     return;
   }
+  if (loading) {
+    setStatus(`${selectedDestination()?.name ?? '目的地'}の時刻表を読み込んでいます…`, 'warning');
+    boardEl.replaceChildren();
+    selectedSignature = '';
+    recordPerf({ at: nowMs, eventToDomMs: performance.now() - eventStarted, adapterMs: 0, selectionMs: 0, domMs: 0 });
+    return;
+  }
   try {
     const adapterStarted = performance.now();
     const result = buildBoard(prepared, { nowMs, directOnly: directOnlyEl.checked, mode });
@@ -154,13 +219,61 @@ function tick(eventStarted = performance.now()) {
   }
 }
 
-async function load() {
+async function loadDestination(destinationId) {
+  if (!DESTINATIONS.some(destination => destination.id === destinationId)) {
+    void loadLatestDestination(destinationId);
+    selectedDestinationId = destinationId;
+    prepared = null;
+    loading = false;
+    loadFailure = '選択した目的地IDが不正です。氷川台へ戻ってください。';
+    updateDestinationLabel();
+    metadataEl.hidden = true;
+    tick();
+    return;
+  }
+  selectedDestinationId = destinationId;
+  updateDestinationLabel();
+  prepared = null;
+  loadFailure = null;
+  loading = true;
+  selectedSignature = '';
+  metadataSignature = '';
+  metadataEl.hidden = true;
+  boardEl.replaceChildren();
+  tick();
   fetchCount += 1;
-  const result = await loadTimetablePayload(fetch);
+  const result = await loadLatestDestination(destinationId);
+  if (result.stale) return;
   prepared = result.prepared;
   loadFailure = result.failure;
+  loading = false;
   tick();
 }
+
+destinationTrigger.addEventListener('click', () => {
+  if (destinationDialog.open) return;
+  destinationDialog.showModal();
+  document.body.classList.add('destination-modal-open');
+  destinationList.querySelector(`[data-destination-id="${selectedDestinationId}"]`)?.focus({ preventScroll: true });
+});
+destinationClose.addEventListener('click', () => destinationDialog.close());
+destinationDialog.addEventListener('close', () => {
+  document.body.classList.remove('destination-modal-open');
+  destinationTrigger.focus({ preventScroll: true });
+});
+destinationDialog.addEventListener('click', event => {
+  if (event.target === destinationDialog) destinationDialog.close();
+});
+destinationDialog.addEventListener('keydown', event => {
+  const options = [...destinationList.querySelectorAll('.destination-option')];
+  const currentIndex = options.indexOf(document.activeElement);
+  if (currentIndex < 0 || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const nextIndex = event.key === 'Home' ? 0
+    : event.key === 'End' ? options.length - 1
+      : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+  options[nextIndex].focus();
+});
 
 lineButton.addEventListener('click', () => {
   mode = 'line';
@@ -180,5 +293,6 @@ departureButton.addEventListener('click', () => {
 });
 directOnlyEl.addEventListener('change', () => tick());
 
-load();
+updateDestinationLabel();
+loadDestination(selectedDestinationId);
 setInterval(() => tick(), 1000);
