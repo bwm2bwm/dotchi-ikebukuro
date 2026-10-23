@@ -2,6 +2,8 @@ import { prepareTimetablePayload } from './timetable_adapter.mjs';
 
 export const DEFAULT_DESTINATION_ID = 'Hikawadai';
 export const DESTINATION_STORAGE_KEY = 'dotchi-ikebukuro.destination-id.v1';
+export const DEFAULT_DISPLAY_MODE = 'departure';
+export const DISPLAY_MODE_STORAGE_KEY = 'dotchi-ikebukuro.display-mode.v1';
 export const DESTINATION_PAYLOADS = Object.freeze({
   Kanamecho: './timetable-Kanamecho.json',
   Senkawa: './timetable-Senkawa.json',
@@ -28,6 +30,27 @@ export function saveDestinationId(id, getStorage = () => globalThis.localStorage
     const storage = getStorage();
     if (!storage) return false;
     storage.setItem(DESTINATION_STORAGE_KEY, id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readSavedDisplayMode(getStorage = () => globalThis.localStorage) {
+  try {
+    const mode = getStorage()?.getItem(DISPLAY_MODE_STORAGE_KEY);
+    return mode === 'line' || mode === 'departure' ? mode : DEFAULT_DISPLAY_MODE;
+  } catch {
+    return DEFAULT_DISPLAY_MODE;
+  }
+}
+
+export function saveDisplayMode(mode, getStorage = () => globalThis.localStorage) {
+  if (mode !== 'line' && mode !== 'departure') return false;
+  try {
+    const storage = getStorage();
+    if (!storage) return false;
+    storage.setItem(DISPLAY_MODE_STORAGE_KEY, mode);
     return true;
   } catch {
     return false;

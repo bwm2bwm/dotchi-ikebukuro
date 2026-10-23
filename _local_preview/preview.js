@@ -1,6 +1,7 @@
 import { buildBoard, TOKYO_TIME_ZONE } from './timetable_adapter.mjs';
 import { createLatestDestinationLoader, createPreparedPayloadCache, loadTimetablePayload,
-  readSavedDestinationId, saveDestinationId, DESTINATION_PAYLOADS } from './local_preview_payload_loader.mjs';
+  readSavedDestinationId, saveDestinationId, readSavedDisplayMode, saveDisplayMode,
+  DESTINATION_PAYLOADS } from './local_preview_payload_loader.mjs';
 import { countdownText, earliestVisible, selectPreviewGroups } from './selection.mjs';
 
 const clock = document.getElementById('clock');
@@ -32,7 +33,7 @@ const metadataFormatter = new Intl.DateTimeFormat('ja-JP', {
   timeZone: TOKYO_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
-let mode = 'line';
+let mode = readSavedDisplayMode();
 let selectedDestinationId = readSavedDestinationId();
 let prepared = null;
 let loadFailure = null;
@@ -67,6 +68,14 @@ window.__dotchiPreviewPerf = {
 function setStatus(message, state) {
   if (statusEl.textContent !== message) statusEl.textContent = message;
   statusEl.dataset.state = state;
+}
+
+function updateModeButtons() {
+  const lineSelected = mode === 'line';
+  lineButton.classList.toggle('sel', lineSelected);
+  departureButton.classList.toggle('sel', !lineSelected);
+  lineButton.setAttribute('aria-pressed', String(lineSelected));
+  departureButton.setAttribute('aria-pressed', String(!lineSelected));
 }
 
 function selectedDestination() {
@@ -151,13 +160,12 @@ function renderGroups(groups, nowMs) {
     for (const group of groups) {
       const section = document.createElement('section');
       section.className = 'line';
-      for (const [index, item] of group.items.entries()) {
+      for (const item of group.items) {
         const card = document.createElement('article');
         card.className = `train${item.id === best?.id ? ' best' : ''}`;
         card.style.setProperty('--line-color', item.color);
-        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="line-count"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発<span class="type-destination"><span class="type-label"></span><span class="destination-label"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="count"></div><div class="minitxt">発車まで</div></div><div><div class="arrival"></div><div class="minitxt arrival-caption" style="text-align:right"></div></div>`;
+        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text time-value"></span><span class="depart-suffix">発</span><span class="type-destination"><span class="type-label"></span><span class="destination-label"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="minitxt">発車まで</div><div class="count"></div></div><div class="arrival-wrap"><div class="minitxt arrival-caption">到着</div><div class="arrival time-value"></div></div>`;
         card.querySelector('.route').textContent = item.line;
-        card.querySelector('.line-count').textContent = group.line && index === 0 ? `${group.items.length}本` : '';
         card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
         card.querySelector('.departure-text').textContent = item.departureText;
         const typeLabel = card.querySelector('.type-label');
@@ -168,7 +176,7 @@ function renderGroups(groups, nowMs) {
         card.querySelector('.sub').textContent = item.journeyKind === 'direct'
           ? '直通・乗換なし' : `小竹向原乗換・待ち約${Math.round(item.transfer.waitMinutes)}分`;
         card.querySelector('.arrival').textContent = item.arrivalText ?? '—';
-        card.querySelector('.arrival-caption').textContent = `${selectedDestination()?.name ?? '目的地'}着`;
+        card.querySelector('.arrival-caption').textContent = '到着';
         card.dataset.departureAt = String(item.departureAtMs);
         section.appendChild(card);
       }
@@ -307,22 +315,19 @@ destinationDialog.addEventListener('keydown', event => {
 
 lineButton.addEventListener('click', () => {
   mode = 'line';
-  lineButton.classList.add('sel');
-  departureButton.classList.remove('sel');
-  lineButton.setAttribute('aria-pressed', 'true');
-  departureButton.setAttribute('aria-pressed', 'false');
+  saveDisplayMode(mode);
+  updateModeButtons();
   tick();
 });
 departureButton.addEventListener('click', () => {
   mode = 'departure';
-  departureButton.classList.add('sel');
-  lineButton.classList.remove('sel');
-  lineButton.setAttribute('aria-pressed', 'false');
-  departureButton.setAttribute('aria-pressed', 'true');
+  saveDisplayMode(mode);
+  updateModeButtons();
   tick();
 });
 directOnlyEl.addEventListener('change', () => tick());
 
+updateModeButtons();
 updateDestinationLabel();
 loadDestination(selectedDestinationId);
 setInterval(() => tick(), 1000);

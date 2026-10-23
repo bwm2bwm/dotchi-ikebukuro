@@ -31,12 +31,11 @@ test('safety explanation is inside collapsed metadata details, not the normal fo
 test('public card sizing remains inherited while the iOS header stays below the status bar', () => {
   assert.match(mockCss, /min-height: 68px/);
   assert.match(mockCss, /margin-bottom: 4px/);
-  assert.doesNotMatch(css, /\.train\s*\{/);
   assert.match(css, /position: sticky/);
   assert.match(css, /top: 0/);
   assert.match(css, /padding: env\(safe-area-inset-top/);
   assert.match(css, /\.controls\s*\{\s*margin-top: 3px; margin-bottom: 1px;/);
-  assert.match(script, /line-count/);
+  assert.doesNotMatch(script, /line-count|3本/);
 });
 
 test('train type and destination have separate compact elements with distinct source styling', () => {
@@ -51,8 +50,9 @@ test('train type and destination have separate compact elements with distinct so
   assert.match(script, /destination-label'\)\.textContent = `\$\{item\.destination\}行`/);
   assert.doesNotMatch(script, /destination-label'\)\.textContent = `・/);
   assert.doesNotMatch(css, /\.type-label\s*\{[^}]*display:\s*block/);
-  assert.doesNotMatch(css, /\.train\s*\{/);
-  assert.match(css, /\.type-destination\s*\{[^}]*gap:\s*4px;[^}]*white-space:\s*nowrap/);
+  assert.match(css, /\.train\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 72px 56px;[^}]*gap:\s*3px;[^}]*padding-left:\s*13px;[^}]*padding-right:\s*6px;[^}]*align-items:\s*start/);
+  assert.doesNotMatch(css, /\.train\s*\{[^}]*\b(?:min-height|margin|padding):/);
+  assert.match(css, /\.type-destination\s*\{[^}]*gap:\s*4px;[^}]*white-space:\s*normal/);
   assert.match(css, /\.type-normal\s*\{[^}]*color:\s*#55565B/);
   assert.match(css, /\.type-express,\s*\.type-brand\s*\{[^}]*color:\s*#B84E49/);
   assert.match(css, /\.type-supplement\s*\{[^}]*color:\s*#68727a/);
@@ -73,7 +73,7 @@ test('destination picker is an ordered modal and does not enlarge the page layou
   assert.match(css, /env\(safe-area-inset-top/);
   assert.match(css, /env\(safe-area-inset-bottom/);
   assert.match(css, /body\.destination-modal-open\s*\{\s*overflow:\s*hidden/);
-  assert.match(script, /arrival-caption'[)]\.textContent = `\$\{selectedDestination\(\)\?\.name/);
+  assert.match(script, /arrival-caption'[)]\.textContent = '到着'/);
   assert.match(mockCss, /min-height: 68px/);
   assert.match(mockCss, /height: 50px/);
 });
@@ -86,4 +86,50 @@ test('destination preference stores only a whitelisted ID and exposes developmen
   assert.match(script, /loadHistory: loadPerfHistory/);
   assert.match(script, /cachedDestinationIds/);
   assert.doesNotMatch(script, /localStorage|sessionStorage/);
+});
+
+test('Phase 4B control order, mode default, and card labels match the compact layout spec', () => {
+  const controls = html.match(/<div class="controls">[\s\S]*?<\/div>\s*<div id="board"/)?.[0] ?? '';
+  assert.ok(controls.indexOf('class="toggle"') < controls.indexOf('class="filter"'));
+  assert.match(html, /id="mode-line" type="button" aria-pressed="false"/);
+  assert.match(html, /id="mode-departure" class="sel" type="button" aria-pressed="true"/);
+  assert.match(html, /▼ 目的地を選択/);
+  assert.match(script, /let mode = readSavedDisplayMode\(\)/);
+  const renderStart = script.indexOf('function renderGroups');
+  const loadStart = script.indexOf('async function loadDestination');
+  const loadEnd = script.indexOf("destinationTrigger.addEventListener", loadStart);
+  assert.ok(!script.slice(loadStart, loadEnd).includes("mode = 'line'"));
+  assert.ok(!script.slice(loadStart, loadEnd).includes("mode = 'departure'"));
+  assert.ok(!script.slice(loadStart, loadEnd).includes('directOnlyEl.checked ='));
+  assert.ok(renderStart >= 0);
+  assert.match(script, /<div class="minitxt">発車まで<\/div><div class="count"><\/div>/);
+  assert.match(script, /<div class="minitxt arrival-caption">到着<\/div><div class="arrival time-value"><\/div>/);
+  assert.match(script, /'直通・乗換なし'/);
+  assert.match(script, /`小竹向原乗換・待ち約\$\{Math\.round\(item\.transfer\.waitMinutes\)\}分`/);
+  assert.match(script, /<span class="departure-text time-value"><\/span>/);
+  assert.match(script, /<div class="arrival time-value"><\/div>/);
+  assert.match(css, /\.depart\s*>\s*\.time-value,\s*\.arrival\.time-value\s*\{[^}]*font-family:\s*inherit;[^}]*font-size:\s*15px;[^}]*font-weight:\s*800;[^}]*line-height:\s*1\.1;[^}]*letter-spacing:\s*normal;[^}]*font-variant-numeric:\s*tabular-nums/);
+  assert.match(css, /\.sub\s*\{[^}]*font-size:\s*12px/);
+  assert.match(css, /\.train\s*\{[^}]*align-items:\s*start/);
+  assert.match(css, /\.depart\s*\{\s*margin-top:\s*4px; column-gap:\s*3px/);
+  assert.match(css, /\.sub\s*\{\s*margin-top:\s*6px/);
+  assert.match(css, /\.countwrap,\s*\.arrival-wrap\s*\{[^}]*align-items:\s*center;[^}]*text-align:\s*center/);
+  assert.match(css, /\.countwrap \.count,\s*\.arrival-wrap \.arrival\s*\{\s*margin-top:\s*4px/);
+  assert.match(css, /\.countwrap \.minitxt,\s*\.arrival-caption\s*\{\s*text-align:\s*center/);
+  assert.match(mockCss, /\.train\s*\{[^}]*grid-template-columns:[^}]*min-height:\s*68px/);
+  assert.match(mockCss, /\.train\s*\{[^}]*margin-bottom:\s*4px/);
+  assert.match(css, /\.hint\s*\{[^}]*font-size:\s*11px;[^}]*font-weight:\s*750/);
+  assert.match(css, /\.controls\s*>\s*\.toggle\s*\{\s*order:\s*0/);
+  assert.match(css, /\.controls\s*>\s*\.filter\s*\{\s*order:\s*1/);
+  assert.match(css, /\.type-destination\s*\{[^}]*flex:\s*0 1 auto;[^}]*min-width:\s*0;[^}]*flex-wrap:\s*wrap;[^}]*white-space:\s*normal/);
+  assert.match(css, /\.type-label,\s*\.destination-label\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /@media \(max-width:\s*359px\)\s*\{\s*\.train\s*\{[^}]*72px 54px/);
+});
+
+test('display mode preference uses its own storage key, restores safely, and persists button changes', () => {
+  assert.match(script, /let mode = readSavedDisplayMode\(\)/);
+  assert.match(script, /saveDisplayMode\(mode\)/);
+  assert.match(script, /updateModeButtons\(\)/);
+  assert.match(script, /readSavedDisplayMode, saveDisplayMode/);
+  assert.doesNotMatch(script, /saveDirectOnly|DIRECT_ONLY_STORAGE_KEY/);
 });

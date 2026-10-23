@@ -304,3 +304,24 @@
 - 実payloadをMac Nodeで12周（warm-up 2周を除く80標本/段階）計測。氷川台payloadは3,306,543 bytes。Macローカルread median 1.360ms / p95 13.573ms、JSON parse 14.240 / 18.196ms、adapter validation/preparation 38.443 / 47.628ms、buildBoard＋selection 0.791 / 1.264ms。これはMac Nodeとwarm filesystem cacheの参考値でiPhone Safariの転送・DOM値ではない。reported 1〜3秒の端末側原因をこれだけで特定できない。`no-store` のHTTP取得時間とDOM更新時間をSafariで読む必要がある。
 - 自動テストはPython 49件、Node全体43件、adapter UTC 24件が成功。8駅payloadを再生成し、生成39.9秒・検証1.7秒、合計22,109,229 bytes。配置先は `~/Library/Application Support/dotchi-ikebukuro-preview/site`。iPhone確認用の配信コピーは再生成後のソースと一致し、全8駅payloadがstage内検証後に原子的に反映された。
 - iPhone Safariの実機計測値は未取得。Safari Web Inspectorで `window.__dotchiPreviewPerf.loadHistory.slice(-10)` と `window.__dotchiPreviewPerf.history.slice(-10)` を確認し、端末側のfetch/本文/parse/adapter/selection/DOM時間を測る。公開mock/root公開ファイル、GTFS/ODPT元データ、外部API、秘密情報、commit/push/mergeには触れない。
+
+## 2026-10-23 — T14 Phase 4B / T17 UIレイアウト改善
+
+- preview操作行を左「路線別｜発車順」、右「直通のみ表示」に並べ替え、初期modeを発車順に設定。目的地切替ではmodeとfilter stateを変更せず、保存済み目的地IDにも影響しない。
+- 発車時刻は到着時刻と同じ15px/800、直通・乗換説明は「発車まで」と同じ12px相当へ。カウントダウンと到着時刻のラベルを値の上に中央配置し、全駅の到着ラベルを「到着」に統一。ルート枠は「▼ 目的地を選択」とし、既存モーダル・フォーカス・キーボード操作は維持。
+- 変更は `_local_preview/index.html` / `preview.css` / `preview.js` とUI契約テストに限定。カード最小高68px、カード間隔4px、6件表示、広告dock、safe area、種別色・最早着色は維持。公開root mockに差分なし。
+- 自動テスト: Python 49件、Node全体44件成功。8駅payloadを生成46.3秒・検証1.8秒で再生成（合計22,109,229 bytes）。配信ファイルの一致と `git diff --check` を確認。Safari実機での最終視覚確認は利用者による確認待ち。iPhone用ローカルserverは `192.168.11.7:8765` のみで稼働。
+
+## 2026-10-23 — T17 実機フィードバック追加修正
+
+- 発車・到着時刻に共通の `.time-value` スタイルを適用（15px、800、継承font family、line-height 1.1、letter-spacing normal、tabular numerals）。発車の「発」は独立要素。
+- カード列を上端揃えにし、路線名／発車まで／到着のラベル行と、発車時刻／countdown／到着時刻の数値位置を揃える。最早着表示は路線名と同じ行に維持し、路線横の件数表示だけを削除。
+- 表示モードは `dotchi-ikebukuro.display-mode.v1` にline/departureのみを保存・復元。初期値・不正値・storage利用不可はdeparture。目的地IDの既存キーとは独立し、直通filterは保存しない。
+- Python unittest 49件、Node全体47件成功。8駅のローカルpreviewを生成89.8秒・検証3.4秒で再生成（22,109,229 bytes）。配信ファイルを確認後、iPhone確認のため `192.168.11.7:8765` のみで起動。公開モック、旅程生成、payload内容は変更なし。
+
+## 2026-10-23 — T17 カード内最終レイアウト調整
+
+- 路線名／発車まで／到着のラベル行はカード上端で維持。発車時刻・countdown・到着時刻は各ラベルから同じ4px空けて配置し、既存の左説明行は `margin-top: 6px` で下げてカード下部の余白へ再配分。カードmin-height 68px、外側vertical padding 5px、margin-bottom 4pxは不変更。
+- 左列を確保するため、内部gapを4→3px、水平paddingを15/7→13/6px、右列を78/61→72/56pxへ調整。390px viewportで左列は215px。320pxまでの狭幅や拡大時は、種別・行先のflex itemを縮小・折返し可能にし、文字を省略しない。
+- 保存済み8駅payload（平日2026-10-22/23、土曜2026-10-24）のprimary旅程は表示ペア24種類。GTFS有効期間の祝日2026-11-03も、8駅payloadを`/private/tmp`の一時領域で作成して確認（23種類、3,071 primary records）。最大表示幅は「各駅停車 石神井公園行」193.98px（Mac CoreText system-font reference、15px/800時刻、14px/600種別・行先、現在のCSS gap込）。次点「Fライナー 森林公園行」191.21px。全幅390pxで左列215px、約21pxの余裕。iOS Safari実機は利用者側で再確認が必要で、別OSのCJK fallbackや文字拡大時はwrapを安全策とする。
+- Python unittest 49件、Node全体47件成功。ローカルpreviewを生成42.2秒・検証1.6秒で再生成（22,109,229 bytes）。配信コピーのHTML/CSS/JS/loader一致、公開root mock差分なし、`git diff --check` を確認。`192.168.11.7:8765` の既存serverが再生成後のCSSを配信することもhash一致で確認。保存済み元データ・旅程生成・type resolutionには変更なし。iOS実機での最終表示確認は利用者側で残る。

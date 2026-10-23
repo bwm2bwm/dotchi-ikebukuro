@@ -4,7 +4,7 @@
 
 - `_local_preview/index.html` は公開モックと同じヘッダー／時計、注意表示、ルート枠、44px操作行、カードDOM、下部広告dockの構成。`prepare_preview.py` はroot `styles.css` をローカル出力へコピーし、preview.cssで状態表示・折りたたみmetadataを補う。
 - 実ダイヤ側はローカルデータ注記、適用期間バナー、安全停止、payload適用期間／生成日時／GTFS・ODPT更新日時／Web build日時の個別表示を維持。未取得日時は「未取得」。
-- 8駅の目的地選択はPhase 4Aでpreview専用に追加。selectionの列車候補・件数制限ロジックは維持し、ルート枠でモーダルを開く。端末保存はせず、リロード時は氷川台。
+- 8駅の目的地選択はPhase 4Aでpreview専用に追加。selectionの列車候補・件数制限ロジックは維持し、ルート枠でモーダルを開く。Phase 4A.1で選択IDのみlocalStorageに保存・復元し、payloadは端末保存しない。
 
 ## iPhone Safari縦レイアウト調整
 
@@ -22,9 +22,12 @@
 
 - ルート枠を目的地選択ボタンにし、要町・千川・小竹向原・氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市を順番どおりに選ぶモーダルを追加。選択状態、Escape/閉じる、矢印/Home/Endキー、フォーカス復帰、背景スクロール抑止、safe-areaを扱う。UIレイアウト変更はモーダルとルート枠に限定。
 - loaderは固定station ID→固定filename対応を使用し、選択されたpayloadだけを取得。payload内の全service dayが選択IDと一致しなければ拒否する。更新時は旧カード・metadataを消して読み込み中を示し、最新要求tokenで高速切替の古いresponseを破棄。失敗時は列車を表示せずエラーを示す。Phase 4A.1でlocalStorageにstation IDのみを保存・復元し、保存値不正やstorage利用不可は氷川台へfallback。
-- 目的地別の既存旅程生成と直通filter／路線別・発車順／最早着／countdownは維持。カード到着ラベルは現在の目的地名を付け、T17での「到着」統一や操作行の並べ替え・文字サイズ変更は未着手。
+- 目的地別の既存旅程生成と直通filter／路線別・発車順／最早着／countdownは維持。Phase 4Bでは画面上部に選択駅を表示し、カード到着ラベルは共通の「到着」とする。
 - Phase 4A自動テストでは8駅の固定mapping、payload不一致・未知ID拒否、非同期切替競合、8ファイル生成・検証、途中失敗時の既存preview保持を確認。実payload 8件も生成・検証し、現在の保存先に反映済み。生成40.0秒・検証1.7秒、総容量22,109,229 bytes。氷川台は独立exporterとの比較でgeneratedAt以外一致。
 - Phase 4A.1ではlocalStorage保存障害・不正値のfallback、2件LRUのメモリ内prepared payload cache、fetch/body/JSON/adapter/selection/DOM計測を追加。キャッシュ利用時も`buildBoard`を都度実行し、期限・必要service dayの判定は維持。自動テストはPython 49件、Node 43件、adapter UTC 24件が成功。Safari実機の目的地記憶と計測確認が残る。
+- Phase 4B/T17で操作行を左モード・右直通filterの順にし、初期モードを発車順へ変更。発車時刻を到着時刻相当の15px/800、直通・乗換説明を発車までラベル相当の12px、時刻ラベルを数値の上に中央配置し、到着ラベルは「到着」に統一。ルート枠は「▼ 目的地を選択」を表示する。カード最小高68px・間隔4px、6件、広告dock/safe areaを定義する既存スタイルは維持。
+- T17回帰: Python unittest 49件、Node全体44件成功。公開mockのroot HTML/CSS/JSに差分なし。8駅payload再生成（22,109,229 bytes、生成46.3秒、検証1.8秒）。配信コピーを確認し、iPhone用serverは `192.168.11.7:8765` のみへbind。
+- T17実機追加修正では、数値3列を同じ4px下げ、route/countdown/arrivalの見出し行を上端固定。左3行の空きを減らし、全8駅・平日/土休日payloadと2026-11-03祝日の一時生成分で長い表示組合せを調査。Mac CoreText system-font参考幅は最大193.98px、iPhone 12相当390px幅で左列215px。水平padding/gapと右列幅を小幅調整し、文字拡大・狭幅では種別/行先が折り返せる。
 
 更新日: 2026-10-23
 

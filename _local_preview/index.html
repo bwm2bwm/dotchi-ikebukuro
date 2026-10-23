@@ -16,7 +16,7 @@
     <button id="destination-trigger" class="selectbox destination-trigger" type="button"
       aria-haspopup="dialog" aria-controls="destination-dialog">
       <span id="route-display" class="route-display">池袋 → 氷川台</span>
-      <span class="hint">目的地を選択</span>
+      <span class="hint">▼ 目的地を選択</span>
     </button>
     <div id="timetable-status" class="status" role="status" aria-live="polite">時刻表を読み込んでいます…</div>
     <details id="payload-metadata" class="payload-metadata" hidden>
@@ -33,11 +33,11 @@
     </details>
     <section>
       <div class="controls">
-        <label class="filter"><input id="direct-only" type="checkbox"> 直通のみ表示</label>
         <div class="toggle" role="group" aria-label="表示順">
-          <button id="mode-line" class="sel" type="button" aria-pressed="true">路線別</button>
-          <button id="mode-departure" type="button" aria-pressed="false">発車順</button>
+          <button id="mode-line" type="button" aria-pressed="false">路線別</button>
+          <button id="mode-departure" class="sel" type="button" aria-pressed="true">発車順</button>
         </div>
+        <label class="filter"><input id="direct-only" type="checkbox"> 直通のみ表示</label>
       </div>
       <div id="board" aria-live="off"><p class="empty">読み込み中…</p></div>
     </section>

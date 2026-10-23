@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createLatestDestinationLoader, createPreparedPayloadCache, DEFAULT_DESTINATION_ID,
-  DESTINATION_PAYLOADS, DESTINATION_STORAGE_KEY, loadTimetablePayload,
-  readSavedDestinationId, saveDestinationId } from '../scripts/local_preview_payload_loader.mjs';
+  DEFAULT_DISPLAY_MODE, DESTINATION_PAYLOADS, DESTINATION_STORAGE_KEY, DISPLAY_MODE_STORAGE_KEY,
+  loadTimetablePayload, readSavedDestinationId, readSavedDisplayMode, saveDestinationId,
+  saveDisplayMode } from '../scripts/local_preview_payload_loader.mjs';
 
 function emptyPayload(destinationStationId = 'Hikawadai') {
   const transferCapable = ['Heiwadai', 'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi']
@@ -144,6 +145,27 @@ test('unknown stored ID and storage failures safely fall back or remain non-fata
   assert.equal(readSavedDestinationId(() => { throw new Error('storage blocked'); }), 'Hikawadai');
   assert.equal(saveDestinationId('Wakoshi', () => { throw new Error('storage blocked'); }), false);
   assert.equal(saveDestinationId('UnknownStation', () => { throw new Error('must not be called'); }), false);
+});
+
+test('display mode is stored under a separate key and restores only supported values', () => {
+  assert.equal(DEFAULT_DISPLAY_MODE, 'departure');
+  assert.equal(readSavedDisplayMode(() => null), 'departure');
+  const values = new Map([[DESTINATION_STORAGE_KEY, 'Wakoshi']]);
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  assert.equal(saveDisplayMode('line', () => storage), true);
+  assert.equal(readSavedDisplayMode(() => storage), 'line');
+  assert.deepEqual([...values.entries()], [
+    [DESTINATION_STORAGE_KEY, 'Wakoshi'],
+    [DISPLAY_MODE_STORAGE_KEY, 'line'],
+  ]);
+  values.set(DISPLAY_MODE_STORAGE_KEY, 'invalid');
+  assert.equal(readSavedDisplayMode(() => storage), 'departure');
+});
+
+test('display mode storage failures and invalid writes do not break interaction', () => {
+  assert.equal(readSavedDisplayMode(() => { throw new Error('blocked'); }), 'departure');
+  assert.equal(saveDisplayMode('line', () => { throw new Error('blocked'); }), false);
+  assert.equal(saveDisplayMode('route', () => { throw new Error('must not be called'); }), false);
 });
 
 test('prepared payload cache reuses only validated stations and stays bounded', () => {

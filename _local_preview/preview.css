@@ -94,11 +94,52 @@ body.destination-modal-open { overflow: hidden; }
 .payload-metadata dt { flex: 0 0 132px; font-weight: 700; }
 .payload-metadata dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .controls { margin-top: 3px; margin-bottom: 1px; }
+.controls > .toggle { order: 0; }
+.controls > .filter { order: 1; }
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  color: #222;
+  font-size: 11px;
+  font-weight: 750;
+}
 .ad-dock { background: #f8f7f4; }
 .ad-placeholder { flex-basis: 320px; }
+.train {
+  grid-template-columns: minmax(0, 1fr) 72px 56px;
+  gap: 3px;
+  padding-left: 13px;
+  padding-right: 6px;
+  align-items: start;
+}
+.depart { margin-top: 4px; column-gap: 3px; }
+.depart > .time-value, .arrival.time-value {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sub { margin-top: 6px; font-size: 12px; line-height: 1.15; font-weight: 400; }
+.countwrap, .arrival-wrap { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.countwrap .minitxt, .arrival-caption { text-align: center; }
+.countwrap .count, .arrival-wrap .arrival { margin-top: 4px; }
+.arrival { text-align: center; }
 .type-label { display: inline; }
-.type-destination { display: inline-flex; flex: 0 0 auto; gap: 4px; white-space: nowrap; }
-.destination-label { min-width: 0; }
+.type-destination {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 4px;
+  white-space: normal;
+}
+.type-label, .destination-label { min-width: 0; overflow-wrap: anywhere; }
 .type-normal { color: #55565B; font-weight: 600; }
 .type-express, .type-brand { color: #B84E49; font-weight: 800; }
 .type-supplement { color: #68727a; font-weight: 500; }
@@ -113,4 +154,9 @@ body.destination-modal-open { overflow: hidden; }
       background: #f8f7f4;
     }
   }
+}
+
+@media (max-width: 359px) {
+  .train { grid-template-columns: minmax(0, 1fr) 72px 54px; padding-left: 13px; padding-right: 6px; }
+  .sub { font-size: 11px; }
 }
