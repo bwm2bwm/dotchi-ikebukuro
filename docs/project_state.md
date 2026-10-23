@@ -27,6 +27,13 @@
 - exporterは旅程の到着駅IDを使うが、既定氷川台のpayload値は維持。preview UI・adapter・selection・T01更新手順・公開モックは変更しない。
 - 追加駅の経路成立／データ不足の詳細分類はPhase 2/3でGTFSの停車・乗降・運行日カバレッジ検証と併せて実装する。GTFSの別tripを直通扱いする拡張は行っていない。
 
+## T14 目的地拡張 Phase 2
+
+- 要町・千川・小竹向原を旅程生成可能にした。池袋で乗車可能な同一GTFS tripに対象駅の停車記録があり、停車順・時刻・降車可が整合する場合だけ直通候補を生成する。別trip接続は行わない。
+- 目的地別payloadの日次 `destinationStatus` は `normal` / `no_candidates` / `data_insufficient` と路線別件数を保持する。adapterは必要運行日のデータ不足をfail-closedし、検証済み候補なしとは区別する。未対応・不正状態も列車を出さない。
+- 保存済みGTFS/ODPTで平日・土曜・祝日の候補数、通過・不足を検証。既定氷川台payloadは保存済みpreviewを基準に `generatedAt` 以外すべて一致。UIとT01更新フローは未変更。
+- Phase 3対象は平和台・地下鉄赤塚・地下鉄成増・和光市。Phase 4で目的地選択UIとiPhone Safari検証を行う。
+
 ## ローカル実ダイヤpreview・T02/T03（2026-10-23）
 
 - 永続previewソースを [`_local_preview/`](../_local_preview/) に置く。GitHub PagesはリポジトリrootをJekyllで配信する構成（Pages workflow、`.nojekyll`、Jekyll設定ファイルなし）で、underscore始まりのpreviewディレクトリはJekyll出力対象外。公開デモのroot `index.html` / `app.js` / `data.js` / `styles.css` は変更しない。

@@ -37,9 +37,11 @@ DESTINATIONS = {
     "Wakoshi": {"name": "和光市", "stationKey": "wakoshi", "routeStopIds": {"6": "601", "9": "901"}, "outboundOrder": 8},
 }
 DEFAULT_DESTINATION_ID = "Hikawadai"
-# Other catalog entries are intentionally gated until Phase 2/3 validates their
-# stop order, pass-through semantics, and journey coverage against local feeds.
-VERIFIED_DESTINATION_IDS = frozenset({DEFAULT_DESTINATION_ID})
+# Phase 2 validates same-trip direct journeys for the first three stations.
+# The remaining four stay gated until Phase 3.
+VERIFIED_DESTINATION_IDS = frozenset({
+    "Kanamecho", "Senkawa", "KotakeMukaihara", DEFAULT_DESTINATION_ID,
+})
 STATION_STOP_IDS = {
     "ikebukuro": {"228", "609", "909"},
     "kanamecho": {"608", "908"},
@@ -72,7 +74,7 @@ class FeedDateError(ValueError):
 
 
 class DestinationNotReadyError(ValueError):
-    """Destination exists in the Phase 1 catalog but is not journey-validated."""
+    """Destination exists in the catalog but is not journey-validated yet."""
 
 
 @dataclass(frozen=True)
@@ -285,6 +287,12 @@ def _time_event_usable(event: StopEvent, side: str) -> bool:
     raise ValueError(side)
 
 
+def _event_times_monotonic(events: tuple[StopEvent, ...], start_sequence: int, end_sequence: int) -> bool:
+    values = [seconds for event in events if start_sequence <= event.sequence <= end_sequence
+              for seconds in (event.arrival_seconds, event.departure_seconds) if seconds is not None]
+    return all(later >= earlier for earlier, later in zip(values, values[1:]))
+
+
 class ItineraryGenerator:
     """Reusable in-memory GTFS timetable and itinerary generator."""
 
@@ -317,6 +325,7 @@ class ItineraryGenerator:
         self._station_lookup_cache: dict[tuple[str, str], str] | None = None
         self.last_wait_histogram: dict[int, int] = {}
         self.last_raw_transfer_pairs = 0
+        self.last_destination_status: dict[str, Any] = {}
         self._load()
 
     def _load(self) -> None:
@@ -565,9 +574,20 @@ class ItineraryGenerator:
         origin = next((event for event in events if event.stop_id in route_stops["ikebukuro"]), None)
         if origin is None or not _time_event_usable(origin, "board"):
             return None
-        kotake = next((event for event in events if event.stop_id in route_stops["kotake_mukaihara"]), None)
-        if kotake is None or origin.sequence >= kotake.sequence:
-            return None
+        if self.destination_station_id == DEFAULT_DESTINATION_ID:
+            # Keep the Phase 1/Hikawadai candidate boundary unchanged.
+            kotake = next((event for event in events if event.stop_id in route_stops["kotake_mukaihara"]), None)
+            if kotake is None or origin.sequence >= kotake.sequence:
+                return None
+        else:
+            target_order = DESTINATIONS[self.destination_station_id]["outboundOrder"]
+            onward_ids = {
+                target["routeStopIds"][route_id]
+                for target in DESTINATIONS.values()
+                if target["outboundOrder"] >= target_order
+            }
+            if not any(event.stop_id in onward_ids and event.sequence > origin.sequence for event in events):
+                return None
         return TripInstance(
             service_date=day.isoformat(), trip_id=trip_id, service_id=row["service_id"], route_id=route_id,
             route_name=self.routes.get(route_id, {}).get("route_long_name") or ROUTES[route_id],
@@ -604,23 +624,90 @@ class ItineraryGenerator:
         diagnostics: dict[str, set[str]] = defaultdict(set)
         arrivals: dict[str, StopEvent] = {}
         departures: dict[str, StopEvent] = {}
+        destination_issue_codes = {
+            "destination_stop_record_missing", "destination_stop_record_ambiguous",
+            "destination_arrival_missing", "destination_alighting_restricted",
+            "destination_alighting_unknown", "destination_time_order_conflict",
+            "destination_stop_order_conflict",
+        }
+        route_destination_counts = {
+            route_id: {"originTripCount": 0, "candidateCount": 0, "passThroughCount": 0,
+                       "dataInsufficientCount": 0}
+            for route_id in ROUTES
+        }
 
         for trip_id, trip in trips.items():
             route_stops = ROUTE_STOP_IDS[trip.route_id]
             destination_stop_id = DESTINATIONS[self.destination_station_id]["routeStopIds"][trip.route_id]
-            h_event = self._event_after(trip.events, {destination_stop_id}, trip.origin_event.sequence)
+            route_destination_counts[trip.route_id]["originTripCount"] += 1
+            if self.destination_station_id == DEFAULT_DESTINATION_ID:
+                h_event = self._event_after(trip.events, {destination_stop_id}, trip.origin_event.sequence)
+            else:
+                target_order = DESTINATIONS[self.destination_station_id]["outboundOrder"]
+                station_order = {
+                    item["routeStopIds"][trip.route_id]: item["outboundOrder"]
+                    for item in DESTINATIONS.values()
+                }
+                forward_events = [event for event in trip.events
+                                  if event.sequence > trip.origin_event.sequence
+                                  and event.stop_id in station_order]
+                ordered_values = [station_order[event.stop_id] for event in forward_events]
+                destination_events = [event for event in forward_events
+                                      if event.stop_id == destination_stop_id]
+                if ordered_values != sorted(ordered_values):
+                    diagnostics[trip_id].add("destination_stop_order_conflict")
+                    h_event = None
+                elif len(destination_events) > 1:
+                    diagnostics[trip_id].add("destination_stop_record_ambiguous")
+                    h_event = None
+                elif destination_events:
+                    h_event = destination_events[0]
+                else:
+                    # A later scheduled station proves the trip continues beyond
+                    # the target, but an absent target row is not treated as a pass.
+                    if any(order > target_order for order in ordered_values):
+                        diagnostics[trip_id].add("destination_stop_record_missing")
+                    h_event = None
             if h_event:
-                if h_event.arrival_seconds is None:
+                is_phase2_destination = self.destination_station_id != DEFAULT_DESTINATION_ID
+                if not is_phase2_destination:
+                    # Preserve both legacy Hikawadai diagnostics independently.
+                    if h_event.arrival_seconds is None:
+                        diagnostics[trip_id].add("destination_arrival_missing")
+                    if not h_event.can_alight:
+                        diagnostics[trip_id].add("destination_alighting_prohibited")
+                elif h_event.drop_off_type == "1":
+                    diagnostics[trip_id].add("destination_explicit_pass")
+                    route_destination_counts[trip.route_id]["passThroughCount"] += 1
+                elif h_event.drop_off_type not in ("", "0"):
+                    code = ("destination_alighting_restricted" if h_event.drop_off_type in ("2", "3")
+                            else "destination_alighting_unknown")
+                    diagnostics[trip_id].add(code)
+                elif h_event.arrival_seconds is None:
                     diagnostics[trip_id].add("destination_arrival_missing")
-                if not h_event.can_alight:
-                    diagnostics[trip_id].add("destination_alighting_prohibited")
-                if h_event.arrival_seconds is not None and h_event.can_alight:
+                elif is_phase2_destination and h_event.arrival_seconds < trip.departure_seconds:
+                    diagnostics[trip_id].add("destination_time_order_conflict")
+                elif is_phase2_destination and not _event_times_monotonic(
+                        trip.events, trip.origin_event.sequence, h_event.sequence):
+                    diagnostics[trip_id].add("destination_time_order_conflict")
+                if (not is_phase2_destination and h_event.arrival_seconds is not None and h_event.can_alight) or (
+                    is_phase2_destination and h_event.drop_off_type in ("", "0")
+                    and h_event.arrival_seconds is not None and "destination_time_order_conflict" not in diagnostics[trip_id]
+                ):
                     first = Leg(trip, trip.origin_event, h_event, trip.departure_seconds, h_event.arrival_seconds)
                     direct_by_origin[trip_id] = Itinerary(
                         "direct", trip.departure_seconds, h_event.arrival_seconds, trip.departure_text,
                         format_service_time(h_event.arrival_seconds) or "", first, None, None, None,
                         arrival_station_id=self.destination_station_id,
                     )
+
+            if self.destination_station_id != DEFAULT_DESTINATION_ID:
+                if trip_id in direct_by_origin:
+                    route_destination_counts[trip.route_id]["candidateCount"] += 1
+                if diagnostics[trip_id] & destination_issue_codes:
+                    route_destination_counts[trip.route_id]["dataInsufficientCount"] += 1
+                # Phase 2 is strictly same-trip direct only, including Kotake.
+                continue
 
             k_event = next((event for event in trip.events
                             if event.stop_id in route_stops["kotake_mukaihara"]
@@ -710,6 +797,21 @@ class ItineraryGenerator:
                 primary_itinerary=primary, direct_alternative=direct, best_transfer_alternative=best_transfer,
                 transfer_candidates_count=len(transfers), status=status, data_quality=data_quality,
             ))
+        if self.destination_station_id == DEFAULT_DESTINATION_ID:
+            self.last_destination_status = {}
+        else:
+            candidate_count = sum(row["candidateCount"] for row in route_destination_counts.values())
+            pass_count = sum(row["passThroughCount"] for row in route_destination_counts.values())
+            insufficient_count = sum(row["dataInsufficientCount"] for row in route_destination_counts.values())
+            status = ("normal" if candidate_count else
+                      "data_insufficient" if insufficient_count else "no_candidates")
+            self.last_destination_status = {
+                "status": status,
+                "candidateCount": candidate_count,
+                "passThroughCount": pass_count,
+                "dataInsufficientCount": insufficient_count,
+                "routes": route_destination_counts,
+            }
         return sorted(results, key=lambda result: (result.departure_seconds, result.route_id, result.origin_trip_id))
 
 

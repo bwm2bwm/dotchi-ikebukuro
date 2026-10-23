@@ -19,6 +19,11 @@ const ROUTE_PRESENTATION = Object.freeze({
   '6': Object.freeze({ line: '有楽町線', color: '#c1a026', order: 0 }),
   '9': Object.freeze({ line: '副都心線', color: '#9C5E31', order: 1 }),
 });
+const DESTINATION_STATION_IDS = new Set([
+  'Kanamecho', 'Senkawa', 'KotakeMukaihara', 'Hikawadai', 'Heiwadai',
+  'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi',
+]);
+const DEFAULT_DESTINATION_STATION_ID = 'Hikawadai';
 
 const TRAIN_TYPE_LABELS = Object.freeze({
   Local: '各駅停車',
@@ -123,6 +128,9 @@ function validityPresentation(validity, startsAtMs, endsAtMs) {
     not_started: `この時刻表はまだ適用前です（${periodText}）。更新が必要です。`,
     expired: `この時刻表の適用期間は終了しました（${periodText}）。更新が必要です。`,
     missing_service_days: '現在必要な運行日の時刻表データがありません。previewを再生成してください。',
+    destination_data_insufficient: '目的地までの停車・乗降・時刻データが不足しています。previewを再生成してください。',
+    destination_unsupported: 'この目的地はまだ検証されていません。対応済みの目的地を選んでください。',
+    destination_invalid: '目的地IDが不正です。previewデータを確認してください。',
     invalid: '時刻表の生成日時が現在より未来です。安全のため列車を表示しません。更新が必要です。',
   };
   return { validityLabel: validity === 'valid' ? '実ダイヤ' : '要更新', statusMessage: messages[validity], periodText };
@@ -249,6 +257,7 @@ export function validateTimetablePayload(payload) {
     fail('payload.excludedServiceDates', 'array of YYYY-MM-DD dates required');
   }
   const seenDays = new Set();
+  const destinationIds = new Set();
   payload.serviceDays.forEach((rawDay, dayIndex) => {
     const path = `payload.serviceDays[${dayIndex}]`;
     const day = requireObject(rawDay, path);
@@ -257,6 +266,10 @@ export function validateTimetablePayload(payload) {
     seenDays.add(day.serviceDate);
     requireString(day.originStationId, `${path}.originStationId`);
     requireString(day.destinationStationId, `${path}.destinationStationId`);
+    if (!DESTINATION_STATION_IDS.has(day.destinationStationId)) {
+      fail(`${path}.destinationStationId`, 'unsupported destination station ID');
+    }
+    destinationIds.add(day.destinationStationId);
     if (!Array.isArray(day.departures)) fail(`${path}.departures`, 'array required');
     day.departures.forEach((rawDeparture, departureIndex) => {
       const itemPath = `${path}.departures[${departureIndex}]`;
@@ -307,6 +320,9 @@ export function validateTimetablePayload(payload) {
         validateJourney(item.bestTransferAlternative, `${itemPath}.bestTransferAlternative`, 'transfer'),
       ].filter(Boolean);
       for (const journey of journeys) {
+        if (journey.arrivalStationId !== day.destinationStationId) {
+          fail(itemPath, 'journey arrival station must match selected destination');
+        }
         if (journey.departureServiceSeconds !== item.departureServiceSeconds) {
           fail(itemPath, 'journey departure must match origin departure');
         }
@@ -331,7 +347,50 @@ export function validateTimetablePayload(payload) {
         fail(`${itemPath}.dataQuality`, 'array of strings required');
       }
     });
+    if (day.destinationStationId !== DEFAULT_DESTINATION_STATION_ID && day.destinationStatus === undefined) {
+      fail(`${path}.destinationStatus`, 'required for non-default destinations');
+    }
+    if (day.destinationStatus !== undefined) {
+      const state = requireObject(day.destinationStatus, `${path}.destinationStatus`);
+      if (!['normal', 'no_candidates', 'data_insufficient', 'unsupported', 'invalid'].includes(state.status)) {
+        fail(`${path}.destinationStatus.status`, 'unsupported destination status');
+      }
+      for (const key of ['candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
+        requireInteger(state[key], `${path}.destinationStatus.${key}`);
+      }
+      const routes = requireObject(state.routes, `${path}.destinationStatus.routes`);
+      for (const routeId of Object.keys(ROUTE_PRESENTATION)) {
+        const counts = requireObject(routes[routeId], `${path}.destinationStatus.routes.${routeId}`);
+        for (const key of ['originTripCount', 'candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
+          requireInteger(counts[key], `${path}.destinationStatus.routes.${routeId}.${key}`);
+        }
+      }
+      const routeTotals = Object.values(routes).reduce((totals, counts) => {
+        for (const key of ['originTripCount', 'candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
+          totals[key] += counts[key];
+        }
+        return totals;
+      }, { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 });
+      for (const key of ['candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
+        if (state[key] !== routeTotals[key]) fail(`${path}.destinationStatus.${key}`, 'must match route totals');
+      }
+      if (state.candidateCount !== day.departures.filter(item => item.primary !== null).length) {
+        fail(`${path}.destinationStatus.candidateCount`, 'must match journeys with a primary itinerary');
+      }
+      if (state.status === 'normal' && state.candidateCount === 0) {
+        fail(`${path}.destinationStatus.status`, 'normal requires at least one candidate');
+      }
+      if (state.status === 'no_candidates'
+          && (state.candidateCount !== 0 || state.dataInsufficientCount !== 0)) {
+        fail(`${path}.destinationStatus.status`, 'no_candidates requires zero candidates and no incomplete data');
+      }
+      if (state.status === 'data_insufficient'
+          && (state.candidateCount !== 0 || state.dataInsufficientCount === 0)) {
+        fail(`${path}.destinationStatus.status`, 'data_insufficient requires no candidates and incomplete data');
+      }
+    }
   });
+  if (destinationIds.size > 1) fail('payload.serviceDays', 'destination must be consistent across service days');
   return payload;
 }
 
@@ -474,10 +533,25 @@ export function buildBoard(payload, {
   const availableServiceDates = new Set(sourcePayload.serviceDays.map(day => day.serviceDate));
   const missingServiceDates = requiredServiceDates.filter(serviceDate => !availableServiceDates.has(serviceDate));
   if (validity === 'valid' && missingServiceDates.length) validity = 'missing_service_days';
+  const destinationStates = sourcePayload.serviceDays
+    .filter(day => requiredServiceDates.includes(day.serviceDate) && day.destinationStatus)
+    .map(day => ({
+      serviceDate: day.serviceDate,
+      destinationStationId: day.destinationStationId,
+      ...day.destinationStatus,
+    }));
+  const blockedDestinationState = destinationStates.find(state =>
+    ['data_insufficient', 'unsupported', 'invalid'].includes(state.status));
+  if (validity === 'valid' && blockedDestinationState) {
+    validity = blockedDestinationState.status === 'data_insufficient'
+      ? 'destination_data_insufficient'
+      : blockedDestinationState.status === 'unsupported' ? 'destination_unsupported' : 'destination_invalid';
+  }
   const presentation = validityPresentation(validity, startsAtMs, endsAtMs);
   if (validity !== 'valid') {
     return {
       mode, nowMs, windowEndMs: nowMs + horizonMs, items: [], groups: [], bestId: null, excluded: [],
+      destinationStationId: sourcePayload.serviceDays[0]?.destinationStationId ?? null, destinationStates,
       validity, ...presentation,
       diagnostics: {
         feedVersion: sourcePayload.feed.version, feedValidFrom: sourcePayload.feed.validFrom,
@@ -486,6 +560,7 @@ export function buildBoard(payload, {
         applicationEndsAt: sourcePayload.applicationPeriod.endsAt,
         requiredServiceDates,
         missingServiceDates,
+        destinationStates,
         gtfsUpdatedAt: sourcePayload.feed.sourceUpdatedAt, odptUpdatedAt: sourcePayload.odpt.sourceUpdatedAt,
         webAppBuiltAt: sourcePayload.webApp.builtAt,
         dataScope: sourcePayload.dataScope, connectionPolicy: { ...sourcePayload.connectionPolicy },
@@ -567,6 +642,8 @@ export function buildBoard(payload, {
     items,
     groups,
     bestId: earliest?.id ?? null,
+    destinationStationId: sourcePayload.serviceDays[0]?.destinationStationId ?? null,
+    destinationStates,
     validity,
     ...presentation,
     excluded,

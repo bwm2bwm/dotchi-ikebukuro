@@ -109,21 +109,33 @@ function departure({
   };
 }
 
-function serviceDay(serviceDate, departures) {
+function serviceDay(serviceDate, departures, destinationStationId = 'Hikawadai') {
   return {
     serviceDate,
     originStationId: 'Ikebukuro',
-    destinationStationId: 'Hikawadai',
+    destinationStationId,
     departures,
   };
+}
+
+function emptyDestinationStatus() {
+  const emptyRoute = () => ({ originTripCount: 0, candidateCount: 0, passThroughCount: 0,
+    dataInsufficientCount: 0 });
+  return { status: 'no_candidates', candidateCount: 0, passThroughCount: 0,
+    dataInsufficientCount: 0, routes: { '6': emptyRoute(), '9': emptyRoute() } };
 }
 
 function payload(serviceDays = []) {
   const dates = new Set(serviceDays.map(day => day.serviceDate));
   for (const serviceDate of ['2026-10-21', '2026-10-22', '2026-10-23']) {
-    if (!dates.has(serviceDate)) serviceDays = [...serviceDays, {
-      serviceDate, originStationId: 'Ikebukuro', destinationStationId: 'Hikawadai', departures: [],
-    }];
+    if (!dates.has(serviceDate)) {
+      const day = {
+        serviceDate, originStationId: 'Ikebukuro',
+        destinationStationId: serviceDays[0]?.destinationStationId ?? 'Hikawadai', departures: [],
+      };
+      if (day.destinationStationId !== 'Hikawadai') day.destinationStatus = emptyDestinationStatus();
+      serviceDays = [...serviceDays, day];
+    }
   }
   return {
     schemaVersion: 1,
@@ -453,6 +465,80 @@ test('missing a required service date fails closed and reports the missing date'
   assert.equal(board.validity, 'missing_service_days');
   assert.deepEqual(board.diagnostics.missingServiceDates, ['2026-10-23']);
   assert.equal(board.items.length, 0);
+});
+
+test('destination payload keeps selected target separate from train headsign', () => {
+  const row = departure({ id: 'kanamecho', destination: '和光市', primary: direct(6 * 3600 + 480,
+    { arrivalStationId: 'Kanamecho' }), directAlternative: direct(6 * 3600 + 480,
+    { arrivalStationId: 'Kanamecho' }) });
+  const state = {
+    status: 'normal', candidateCount: 1, passThroughCount: 0, dataInsufficientCount: 0,
+    routes: {
+      '6': { originTripCount: 1, candidateCount: 1, passThroughCount: 0, dataInsufficientCount: 0 },
+      '9': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 },
+    },
+  };
+  const day = serviceDay('2026-10-22', [row], 'Kanamecho');
+  day.destinationStatus = state;
+  const board = buildBoard(payload([day]), { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(board.destinationStationId, 'Kanamecho');
+  assert.equal(board.items[0].destinationStationId, 'Kanamecho');
+  assert.equal(board.items[0].arrivalStationId, 'Kanamecho');
+  assert.equal(board.items[0].headsign, '和光市');
+  assert.equal(board.destinationStates[0].status, 'normal');
+});
+
+test('destination insufficient data fails closed while a verified empty day stays distinct', () => {
+  const insufficient = serviceDay('2026-10-22', [], 'Senkawa');
+  insufficient.destinationStatus = {
+    status: 'data_insufficient', candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 1,
+    routes: {
+      '6': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 1 },
+      '9': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 },
+    },
+  };
+  const blocked = buildBoard(payload([insufficient]), { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(blocked.validity, 'destination_data_insufficient');
+  assert.equal(blocked.items.length, 0);
+
+  const empty = serviceDay('2026-10-22', [], 'Senkawa');
+  empty.destinationStatus = {
+    status: 'no_candidates', candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0,
+    routes: {
+      '6': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 },
+      '9': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 },
+    },
+  };
+  const noCandidates = buildBoard(payload([empty]), { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(noCandidates.validity, 'valid');
+  assert.equal(noCandidates.items.length, 0);
+
+  for (const [stateName, expectedValidity] of [['unsupported', 'destination_unsupported'],
+    ['invalid', 'destination_invalid']]) {
+    const blockedDay = serviceDay('2026-10-22', [], 'Senkawa');
+    blockedDay.destinationStatus = {
+      status: stateName, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0,
+      routes: {
+        '6': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 },
+        '9': { originTripCount: 0, candidateCount: 0, passThroughCount: 0, dataInsufficientCount: 0 },
+      },
+    };
+    const result = buildBoard(payload([blockedDay]), { nowMs: JST('2026-10-22T05:00:00') });
+    assert.equal(result.validity, expectedValidity);
+    assert.equal(result.items.length, 0);
+  }
+});
+
+test('invalid destination ID and conflicting service-day targets are rejected', () => {
+  const unknown = serviceDay('2026-10-22', [], 'UnknownStation');
+  assert.throws(() => validateTimetablePayload(payload([unknown])), PayloadValidationError);
+  const missingState = serviceDay('2026-10-22', [], 'Kanamecho');
+  assert.throws(() => validateTimetablePayload(payload([missingState])), /required for non-default destinations/);
+  const conflicting = payload([
+    Object.assign(serviceDay('2026-10-21', [], 'Kanamecho'), { destinationStatus: emptyDestinationStatus() }),
+    Object.assign(serviceDay('2026-10-22', [], 'Senkawa'), { destinationStatus: emptyDestinationStatus() }),
+  ]);
+  assert.throws(() => validateTimetablePayload(conflicting), /destination must be consistent/);
 });
 
 test('invalid options and service dates fail clearly', () => {

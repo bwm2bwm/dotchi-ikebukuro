@@ -9,7 +9,8 @@ from pathlib import Path
 import tempfile
 import sys
 
-from odpt_itinerary import DEFAULT_DATA_DIR, DEFAULT_GTFS, FeedDateError, ItineraryGenerator
+from odpt_itinerary import (DEFAULT_DATA_DIR, DEFAULT_GTFS, DESTINATIONS, FeedDateError,
+                            ItineraryGenerator)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,7 +65,7 @@ def build_payload(generator: ItineraryGenerator, service_dates: list[str]) -> di
         except FeedDateError:
             excluded_dates.append(day.isoformat())
             continue
-        day_payloads.append({
+        service_day = {
             "serviceDate": day.isoformat(),
             "originStationId": "Ikebukuro",
             "destinationStationId": generator.destination_station_id,
@@ -101,7 +102,10 @@ def build_payload(generator: ItineraryGenerator, service_dates: list[str]) -> di
                 "status": result.status,
                 "dataQuality": list(result.data_quality),
             } for result in results],
-        })
+        }
+        if generator.last_destination_status:
+            service_day["destinationStatus"] = generator.last_destination_status
+        day_payloads.append(service_day)
     return {
         "schemaVersion": 1,
         "dataScope": "local-preview-only",
@@ -140,6 +144,8 @@ def main() -> int:
                         help=f"リポジトリ外の出力先（既定: {DEFAULT_OUTPUT}）")
     parser.add_argument("--gtfs", type=Path, default=DEFAULT_GTFS)
     parser.add_argument("--odpt-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--destination-station-id", choices=sorted(DESTINATIONS), default="Hikawadai",
+                        help="検証済みの駅IDを指定（既定: Hikawadai）")
     args = parser.parse_args()
 
     output = args.output.expanduser().resolve()
@@ -147,7 +153,8 @@ def main() -> int:
         print("出力先はリポジトリ外を指定してください。", file=sys.stderr)
         return 2
     try:
-        generator = ItineraryGenerator(args.gtfs, args.odpt_dir)
+        generator = ItineraryGenerator(args.gtfs, args.odpt_dir,
+                                       destination_station_id=args.destination_station_id)
         payload = build_payload(generator, args.service_date)
     except (OSError, ValueError) as exc:
         print(f"生成エラー: {exc}", file=sys.stderr)

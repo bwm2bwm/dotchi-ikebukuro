@@ -65,10 +65,84 @@ class LocalFeedItineraryTests(unittest.TestCase):
                 self.assertEqual(observed, sorted(observed))
 
     def test_unverified_destination_is_rejected_before_generation(self):
-        with self.assertRaises(DestinationNotReadyError):
-            ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR, destination_station_id="Kanamecho")
+        for destination_id in ("Heiwadai", "ChikatetsuAkatsuka", "ChikatetsuNarimasu", "Wakoshi"):
+            with self.subTest(destination_id=destination_id):
+                with self.assertRaises(DestinationNotReadyError):
+                    ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                       destination_station_id=destination_id)
         with self.assertRaisesRegex(ValueError, "Unknown destination"):
             ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR, destination_station_id="ShinjukuSanchome")
+
+    def test_phase2_targets_generate_same_trip_direct_only_and_classify_data(self):
+        expected = {
+            "Kanamecho": {"2026-10-22": (219, 152, 68), "2026-10-24": (190, 154, 61),
+                          "2026-11-03": (190, 154, 61)},
+            "Senkawa": {"2026-10-22": (219, 152, 68), "2026-10-24": (190, 154, 61),
+                        "2026-11-03": (190, 154, 61)},
+            "KotakeMukaihara": {"2026-10-22": (219, 220, 0), "2026-10-24": (190, 212, 3),
+                                "2026-11-03": (190, 212, 3)},
+        }
+        baseline = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)
+        for destination_id, by_day in expected.items():
+            generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                           destination_station_id=destination_id)
+            target = DESTINATIONS[destination_id]
+            for service_date, (y_count, f_count, pass_count) in by_day.items():
+                with self.subTest(destination=destination_id, service_date=service_date):
+                    old_rows = {row.origin_trip_id: row for row in baseline.generate(service_date)}
+                    rows = generator.generate(service_date)
+                    coverage = generator.last_destination_status
+                    self.assertEqual(coverage["status"], "normal")
+                    self.assertEqual(coverage["candidateCount"], y_count + f_count)
+                    self.assertEqual(coverage["passThroughCount"], pass_count)
+                    self.assertEqual(coverage["dataInsufficientCount"], 0)
+                    self.assertEqual(coverage["routes"]["6"]["candidateCount"], y_count)
+                    self.assertEqual(coverage["routes"]["9"]["candidateCount"], f_count)
+                    self.assertTrue(all(row.primary_itinerary is None or
+                                        row.primary_itinerary.kind == "direct" for row in rows))
+                    self.assertTrue(all(row.best_transfer_alternative is None for row in rows))
+                    candidates = [row for row in rows if row.primary_itinerary]
+                    self.assertEqual(len(candidates), y_count + f_count)
+                    for row in rows:
+                        old = old_rows[row.origin_trip_id]
+                        self.assertEqual(row.odpt, old.odpt)
+                        self.assertEqual(row.type_resolution.reported_train_type,
+                                         old.type_resolution.reported_train_type)
+                        if row.primary_itinerary:
+                            itinerary = row.primary_itinerary
+                            self.assertEqual(itinerary.first_leg.trip.trip_id, row.origin_trip_id)
+                            self.assertIsNone(itinerary.second_leg)
+                            self.assertEqual(itinerary.arrival_station_id, destination_id)
+                            stop_id = target["routeStopIds"][row.route_id]
+                            self.assertEqual(itinerary.first_leg.alight.stop_id, stop_id)
+                            self.assertTrue(itinerary.first_leg.alight.can_alight)
+                            self.assertIsNotNone(itinerary.first_leg.alight.arrival_seconds)
+                            self.assertGreaterEqual(itinerary.arrival_seconds, row.departure_seconds)
+                            path_events = [event for event in itinerary.first_leg.trip.events
+                                           if itinerary.first_leg.board.sequence <= event.sequence
+                                           <= itinerary.first_leg.alight.sequence]
+                            path_times = [seconds for event in path_events
+                                          for seconds in (event.arrival_seconds, event.departure_seconds)
+                                          if seconds is not None]
+                            self.assertTrue(all(later >= earlier for earlier, later in
+                                                zip(path_times, path_times[1:])))
+                    passed = [row for row in rows if "destination_explicit_pass" in row.data_quality]
+                    self.assertEqual(len(passed), pass_count)
+                    self.assertTrue(all(row.primary_itinerary is None for row in passed))
+
+    def test_missing_destination_stop_record_is_data_insufficient_not_a_pass(self):
+        generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                       destination_station_id="Kanamecho")
+        target_ids = set(DESTINATIONS["Kanamecho"]["routeStopIds"].values())
+        for trip_id, events in list(generator.events.items()):
+            if generator.trips[trip_id].get("route_id") not in ("6", "9"):
+                continue
+            generator.events[trip_id] = tuple(event for event in events if event.stop_id not in target_ids)
+        rows = generator.generate("2026-10-22")
+        self.assertEqual(sum(row.primary_itinerary is not None for row in rows), 0)
+        self.assertEqual(generator.last_destination_status["status"], "data_insufficient")
+        self.assertGreater(generator.last_destination_status["dataInsufficientCount"], 0)
+        self.assertTrue(all("destination_explicit_pass" not in row.data_quality for row in rows))
 
     def test_service_time_keeps_after_midnight_service_seconds(self):
         self.assertEqual(parse_gtfs_time("24:02:00"), 86520)

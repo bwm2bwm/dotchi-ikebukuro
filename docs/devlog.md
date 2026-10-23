@@ -256,3 +256,13 @@
 - `ItineraryGenerator` に `destination_station_id` を追加。既定は氷川台で、氷川台だけを旅程検証済みとして許可。他7駅は明示的な未検証エラーで止めるため、未検証の通過・欠損記録を到着と見なさない。
 - exporterは旅程の到着駅IDを参照するようにし、既定氷川台のpayload内容を維持。氷川台の候補便数・旅程選択・表示、adapter/preview/UI、T01更新処理には変更なし。追加駅の旅程生成や目的地選択UIは次Phase。
 - 外部通信・APIキー・ODPT/GTFS原データ・公開モックには触れず、実payloadを生成せず、commit/push/mergeなし。
+
+## 2026-10-23 — T14 Phase 2 要町・千川・小竹向原
+
+- `ItineraryGenerator` で要町・千川・小竹向原を有効化し、同一GTFS tripの池袋乗車から目的地まで、stop ID・進行順・時刻単調性・目的地到着時刻・降車可を検証して直通候補を生成。明示的通過 (`drop_off_type=1`) は候補から外し、対象駅行欠損・時刻欠損・乗降制限・時刻/順序矛盾を日次不足診断へ分類。小竹向原を含め別trip乗換は生成しない。
+- 目的地別payloadは既存schemaVersion 1へ任意 `destinationStatus` を追加。normal / no_candidates / data_insufficient とY/F別件数を保持する。adapterは目的地ID整合、状態・件数を検証し、必要service dayにdata_insufficient / unsupported / invalidがあれば候補を出さない。既存payloadと氷川台payloadは状態フィールドなしで従来互換。
+- 保存済みfeedの旅程数（Y/F）: 要町・千川は平日219/152、土曜・祝日190/154。小竹向原は平日219/220、土曜・祝日190/212。明示通過除外は要町・千川が68/61/61、小竹向原が0/3/3。実データの不足レコードは全対象日0。各対象・日で状態normal。
+- 全対象候補は直通のみ。同一trip内のarrival/drop-offと24時超を含むservice secondsを確認。目的地別3日payloadを一時領域で生成し、既存Node validatorを通過。氷川台の保存済みpreview payloadは `generatedAt` を除く全payloadが一致。
+- ODPT match結果とraw reported typeは全共通tripで一致。平日Y線1件は氷川台の既存旅程なしで表示をunknownに保留していた公式route-rule種別が、Phase 2目的地では有効な直通旅程のため `各駅停車` 表示へ解決された。raw ODPT値 (`SemiExpress`) とunique matchは維持。土曜・祝日は種別表示差なし。
+- 検証: Python unittest 43件成功。Node全体33件成功、adapter UTC 23件成功。代表3日の候補・passカウント、データ不足の合成停止、残り4駅と未知ID拒否、headsign/選択目的地分離、T02適用期間・必要運行日停止、既存最早着/直通filter回帰を確認。
+- 公開mock、preview UI/生成物、ODPT/GTFS元データは変更せず、目的地別payloadは一時領域の検証後削除。外部API・秘密情報なし、commit/push/mergeなし。
