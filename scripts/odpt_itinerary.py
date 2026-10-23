@@ -453,17 +453,70 @@ class ItineraryGenerator:
             for event in segment
         )
 
+    def _yurakucho_rule_eligible(self, trip: TripInstance) -> bool:
+        """Check the exact, boardable Ikebukuro-to-Kotake segment before using the line rule."""
+        odpt = trip.odpt or OdptEnrichment("unavailable")
+        if (trip.route_id != "6" or odpt.status != "unique_match" or odpt.train_type is not None
+                or not odpt.raw_train_type_uri or not odpt.reported_train_type or odpt.service_brand
+                or odpt.unscoped_through_service_type != odpt.reported_train_type
+                or odpt.reported_train_type == "S-TRAIN"):
+            return False
+        if trip.origin_event.stop_id not in ROUTE_STOP_IDS["6"]["ikebukuro"]:
+            return False
+        if not _time_event_usable(trip.origin_event, "board"):
+            return False
+
+        trip_row = self.trips.get(trip.trip_id, {})
+        if any("S-TRAIN" in (trip_row.get(field) or "").upper()
+               for field in ("trip_short_name", "trip_headsign", "block_id")):
+            return False
+
+        kotake_events = [event for event in trip.events
+                         if event.stop_id in ROUTE_STOP_IDS["6"]["kotake_mukaihara"]
+                         and event.sequence > trip.origin_event.sequence]
+        if len(kotake_events) != 1:
+            return False
+        kotake = kotake_events[0]
+        segment = [event for event in trip.events
+                   if trip.origin_event.sequence <= event.sequence <= kotake.sequence]
+        if not segment or segment[0] != trip.origin_event or len({event.sequence for event in segment}) != len(segment):
+            return False
+
+        required_stops = ("608", "607", "606")  # 要町・千川・小竹向原
+        prior_sequence = trip.origin_event.sequence
+        for stop_id in required_stops:
+            matches = [event for event in segment if event.stop_id == stop_id]
+            if len(matches) != 1 or matches[0].sequence <= prior_sequence:
+                return False
+            event = matches[0]
+            if (event.arrival_seconds is None and event.departure_seconds is None) or not (event.can_board or event.can_alight):
+                return False
+            prior_sequence = event.sequence
+
+        event_times = [seconds for event in segment
+                       for seconds in (event.arrival_seconds, event.departure_seconds) if seconds is not None]
+        if any(later < earlier for earlier, later in zip(event_times, event_times[1:])):
+            return False
+        if any((event.arrival_seconds is None and event.departure_seconds is None)
+               or not (event.can_board or event.can_alight) for event in segment):
+            return False
+        return True
+
     def _resolve_train_type(self, trip: TripInstance) -> TypeResolution:
         origin_sequence = trip.origin_event.sequence
         states = {name: event_state(trip.events, stop_id, origin_sequence)
                   for name, stop_id in CRITICAL_STOPS[trip.route_id].items()}
         pattern = classify(trip.route_id, states)
         odpt = trip.odpt or OdptEnrichment("unavailable")
+        route_rule_eligible = self._yurakucho_rule_eligible(trip)
         if trip.route_id == "6" and odpt.train_type == "Local" and self._all_stops_to_kotake(trip):
+            pattern = "all_stops_to_kotake_segment"
+        elif route_rule_eligible:
             pattern = "all_stops_to_kotake_segment"
         return resolve_type(trip.route_id, odpt.status, odpt.train_type,
                             odpt.service_brand, pattern, states,
-                            odpt.reported_train_type)
+                            odpt.reported_train_type,
+                            official_route_rule_eligible=route_rule_eligible)
 
     def _make_trip(self, trip_id: str, row: dict[str, str], day: date, events: tuple[StopEvent, ...]) -> TripInstance | None:
         route_id = row.get("route_id", "")
@@ -592,11 +645,24 @@ class ItineraryGenerator:
             data_quality = sorted(diagnostics.get(trip_id, set()))
             if not direct and "destination_arrival_missing" in data_quality:
                 data_quality.append("direct_arrival_unavailable")
+            type_resolution = trip.type_resolution or self._resolve_train_type(trip)
+            if not primary and type_resolution.source == "official_route_rule":
+                # Do not label a non-displayable trip from a partial route record.
+                # The route fallback is reserved for departures with a validated
+                # Ikebukuro-to-Hikawadai itinerary in this preview.
+                type_resolution = replace(
+                    type_resolution,
+                    train_type=None,
+                    label="種別不明",
+                    source="unknown",
+                    validation="unverifiable",
+                    diagnostic="official_route_rule_requires_valid_hikawadai_itinerary",
+                )
             results.append(DepartureResult(
                 service_date=day.isoformat(), origin_trip_id=trip_id, route_id=trip.route_id,
                 route_name=trip.route_name, departure_seconds=trip.departure_seconds,
                 departure_text=trip.departure_text, headsign=trip.headsign, odpt=enrichment,
-                type_resolution=trip.type_resolution or self._resolve_train_type(trip),
+                type_resolution=type_resolution,
                 primary_itinerary=primary, direct_alternative=direct, best_transfer_alternative=best_transfer,
                 transfer_candidates_count=len(transfers), status=status, data_quality=data_quality,
             ))

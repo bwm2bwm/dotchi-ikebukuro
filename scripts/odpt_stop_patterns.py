@@ -34,7 +34,7 @@ class TypeResolution:
     reported_train_type: str | None
     service_brand: str | None
     label: str
-    source: str  # odpt_confirmed | gtfs_stop_pattern | unknown
+    source: str  # odpt_confirmed | official_route_rule | gtfs_stop_pattern | unknown
     stop_pattern: str
     pattern_states: tuple[tuple[str, str], ...]
     validation: str  # consistent | unverifiable | conflict | not_applicable | unmatched
@@ -79,9 +79,16 @@ def classify(route_id: str, states: dict[str, str]) -> str:
 
 def resolve_type(route_id: str, odpt_status: str, odpt_type: str | None,
                  service_brand: str | None, pattern: str,
-                 states: dict[str, str], reported_train_type: str | None = None) -> TypeResolution:
+                 states: dict[str, str], reported_train_type: str | None = None,
+                 official_route_rule_eligible: bool = False) -> TypeResolution:
     """Resolve a display label while preserving provenance and contradictions."""
     state_tuple = tuple(sorted(states.items()))
+    if (official_route_rule_eligible and route_id == "6" and odpt_status == "unique_match"
+            and odpt_type is None and reported_train_type
+            and reported_train_type != "S-TRAIN" and pattern == "all_stops_to_kotake_segment"):
+        return TypeResolution("Local", reported_train_type, service_brand, "各駅停車",
+                              "official_route_rule", pattern, state_tuple,
+                              "consistent", "yurakucho_all_stops_official_route_rule")
     if odpt_status == "unique_match" and not odpt_type:
         if service_brand == "F-Liner":
             if route_id == "9" and pattern == "local":

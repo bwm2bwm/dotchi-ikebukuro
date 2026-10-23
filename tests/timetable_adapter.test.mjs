@@ -365,6 +365,22 @@ test('confirmed ODPT type provenance and matcher diagnostics survive card conver
   assert.equal(board.items[0].odptMatchMethod, 'normalized_number+exact_time+destination+stop_order');
 });
 
+test('official route-rule label preserves the ODPT reported type and match provenance', () => {
+  const row = departure({ id: 'route-rule', routeId: '6', trainType: 'Local',
+    reportedTrainType: 'SemiExpress', typeLabel: '各駅停車', typeSource: 'official_route_rule',
+    stopPattern: 'all_stops_to_kotake_segment', typeValidation: 'consistent',
+    typeDiagnostic: 'yurakucho_all_stops_official_route_rule',
+    odptMatchStatus: 'unique_match', unscopedTrainType: 'SemiExpress' });
+  const board = buildBoard(payload([serviceDay('2026-10-22', [row])]),
+    { nowMs: JST('2026-10-22T05:00:00') });
+  assert.equal(board.items[0].kind, '各駅停車');
+  assert.equal(board.items[0].kindCode, 'Local');
+  assert.equal(board.items[0].reportedTrainType, 'SemiExpress');
+  assert.equal(board.items[0].unscopedTrainType, 'SemiExpress');
+  assert.equal(board.items[0].typeSource, 'official_route_rule');
+  assert.equal(board.items[0].odptMatchStatus, 'unique_match');
+});
+
 test('stop-pattern labels retain source, avoid assigning F-Liner, and hold conflicts', () => {
   const inferred = departure({ id: 'pattern-commuter', routeId: '9', trainType: 'CommuterExpress',
     reportedTrainType: null, typeLabel: '通勤急行', typeSource: 'gtfs_stop_pattern',

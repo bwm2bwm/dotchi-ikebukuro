@@ -240,3 +240,12 @@
 - 上部のmain/demo/route/status/details/controls間の余白を合計20px圧縮。カードの文字サイズ・最小高・4px間隔、広告dockの寸法とsafe-area下余白予約は維持。
 - 常時表示していた安全上の注意文を折りたたみmetadata詳細内へ移動。期限切れ・運行日不足・読込失敗の動的status bannerは変更せず、エラー時は引き続き表示。
 - iOS Safariの狭幅時だけヘッダーをsafe-area上端内側でstickyにし、システムstatus textとの重なりを避ける。自動レイアウト契約テスト追加。物理iPhone上のscroll/safe-area/広告dock確認は未実施。
+
+## 2026-10-23 — 有楽町線種別補完・種別表示改善（T08/T09）
+
+- 公式の有楽町線運行ルールを使う表示fallbackを追加。route 6、ODPT unique match、原typeとunscoped through-service typeの一致、池袋乗車可、要町/千川/小竹向原の一意かつ有効な停車、順序・時刻整合、S-TRAIN等の例外なしを条件とする。raw ODPT code・照合結果は保持し、sourceを `official_route_rule`、表示を `各駅停車` とする。
+- 旅程のない便には補完を適用しない。対象日payloadには池袋乗車と途中停車が揃っていても有効な氷川台旅程が成立しない便があり、そのレコードは「種別不明」を維持した。route rule適用の可否はtrip IDのハードコードではなく検証条件による。
+- タイプ名と行先を独立したDOM要素にした。各駅停車は通常色、急行/通勤急行は太字＋実線下線、Fライナーは愛称として別色＋破線下線、停車パターン補助表示は控えめな色＋点線下線、種別不明は控えめな色。カード寸法・広告dock・safe areaは変更していない。公開rootの `index.html` / `styles.css` / `app.js` は変更なし。
+- 保存済みGTFS/ODPTのみで代表日集計。preview表示候補の種別不明は平日9/435→0/435、土曜6/396→0/396、祝日6/396→0/396。source `official_route_rule` は9/6/6。旅程不能で非表示のunknownレコードは各日1/3/3件残す。別日も含む更新済みpreview（2026-10-22〜24）は `~/Library/Application Support/dotchi-ikebukuro-preview/site`。
+- 自動検証: `python3 -B -m unittest discover -s tests -v` 38件成功。`node --test tests/*.test.mjs` 30件成功。スタティックUI契約でカード寸法、広告dock/safe-area、表示スタイル、別要素化を確認。Safari実機目視・物理iPhoneの横幅/縦寸法確認は未実施。手順は作業報告に記載。
+- 公式根拠のURL、適用範囲、例外、改正時の再検証条件は [`odpt_research.md`](odpt_research.md)。外部通信・APIキー読取・元データ編集・公開デモ変更・Git追加・commit/push/mergeなし。

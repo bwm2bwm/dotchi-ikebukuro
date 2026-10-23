@@ -111,22 +111,81 @@ class LocalFeedItineraryTests(unittest.TestCase):
         self.assertTrue(any(result.route_id == "9" and result.primary_itinerary.kind == "transfer"
                             for result in f_liners))
 
-    def test_stop_pattern_fallback_counts_and_sources(self):
+    def test_stop_pattern_and_official_route_rule_counts_and_sources(self):
         for day, expected in (("2026-10-22", (426, 9, 0)),
                               ("2026-10-24", (387, 6, 3)),
                               ("2026-11-03", (387, 6, 3))):
-            primary = [r for r in self.generator.generate(day) if r.primary_itinerary]
+            all_departures = self.generator.generate(day)
+            primary = [r for r in all_departures if r.primary_itinerary]
             odpt_count = sum(r.type_resolution.source == "odpt_confirmed" for r in primary)
             unknown_count = sum(r.type_resolution.label == "種別不明" for r in primary)
+            route_rule = [r for r in primary if r.type_resolution.source == "official_route_rule"]
+            pattern_count = sum(r.type_resolution.source == "gtfs_stop_pattern" for r in primary)
             brand_count = sum(r.odpt.service_brand == "F-Liner" and r.type_resolution.label == "Fライナー"
                               for r in primary)
             unresolved_count = sum(r.odpt.status != "unique_match" for r in primary)
             self.assertEqual(odpt_count, expected[0])
-            self.assertEqual(unknown_count, expected[1])
+            self.assertEqual(unknown_count, 0)
+            self.assertFalse(any(r.type_resolution.source == "official_route_rule"
+                                 for r in all_departures if not r.primary_itinerary))
+            self.assertEqual(len(route_rule), 9 if day == "2026-10-22" else 6)
+            self.assertEqual(pattern_count, expected[2])
             self.assertEqual(unresolved_count, expected[2])
             self.assertEqual(brand_count, 23 if day == "2026-10-22" else 24)
             self.assertTrue(all(r.odpt.train_type is None for r in primary
                                 if r.odpt.reported_train_type in {"SemiExpress", "Rapid", "RapidExpress"}))
+            self.assertTrue(all(r.type_resolution.label == "各駅停車"
+                                and r.type_resolution.train_type == "Local"
+                                and r.odpt.status == "unique_match"
+                                and r.odpt.reported_train_type == r.odpt.unscoped_through_service_type
+                                and r.type_resolution.diagnostic == "yurakucho_all_stops_official_route_rule"
+                                for r in route_rule))
+
+    def test_yurakucho_official_rule_requires_confirmed_scoped_eligible_trip(self):
+        result = next(r for r in self.generator.generate("2026-10-22")
+                      if r.type_resolution.source == "official_route_rule")
+        trip = result.primary_itinerary.first_leg.trip
+        self.assertTrue(self.generator._yurakucho_rule_eligible(trip))
+
+        self.assertFalse(self.generator._yurakucho_rule_eligible(
+            replace(trip, odpt=replace(trip.odpt, status="unmatched"))))
+        self.assertFalse(self.generator._yurakucho_rule_eligible(replace(trip, route_id="9")))
+        self.assertFalse(self.generator._yurakucho_rule_eligible(
+            replace(trip, odpt=replace(trip.odpt, reported_train_type=None,
+                                       unscoped_through_service_type=None))))
+        self.assertFalse(self.generator._yurakucho_rule_eligible(
+            replace(trip, odpt=replace(trip.odpt, raw_train_type_uri=None))))
+        self.assertFalse(self.generator._yurakucho_rule_eligible(
+            replace(trip, odpt=replace(trip.odpt, reported_train_type="S-TRAIN",
+                                       unscoped_through_service_type="S-TRAIN"))))
+
+        missing_stop = replace(trip, events=tuple(event for event in trip.events if event.stop_id != "607"))
+        self.assertFalse(self.generator._yurakucho_rule_eligible(missing_stop))
+        unusable_stop = replace(trip, events=tuple(
+            replace(event, arrival_seconds=None, departure_seconds=None,
+                    pickup_type="1", drop_off_type="1") if event.stop_id == "607" else event
+            for event in trip.events))
+        self.assertFalse(self.generator._yurakucho_rule_eligible(unusable_stop))
+
+    def test_official_route_rule_source_is_gated_and_preserves_raw_type(self):
+        states = {"kotake": "stop", "hikawadai": "missing", "senkawa": "stop", "kanamecho": "stop"}
+        resolution = resolve_type("6", "unique_match", None, None,
+                                  "all_stops_to_kotake_segment", states, "SemiExpress",
+                                  official_route_rule_eligible=True)
+        self.assertEqual(resolution.label, "各駅停車")
+        self.assertEqual(resolution.source, "official_route_rule")
+        self.assertEqual(resolution.train_type, "Local")
+        self.assertEqual(resolution.reported_train_type, "SemiExpress")
+        self.assertEqual(resolution.diagnostic, "yurakucho_all_stops_official_route_rule")
+
+        for route_id, status, raw_type in (("9", "unique_match", "SemiExpress"),
+                                           ("6", "unmatched", "SemiExpress"),
+                                           ("6", "unique_match", "S-TRAIN")):
+            with self.subTest(route_id=route_id, status=status, raw_type=raw_type):
+                withheld = resolve_type(route_id, status, None, None,
+                                        "all_stops_to_kotake_segment", states, raw_type,
+                                        official_route_rule_eligible=True)
+                self.assertNotEqual(withheld.source, "official_route_rule")
 
     def test_odpt_pattern_conflict_is_held_for_diagnosis(self):
         states = {"kotake": "stop", "hikawadai": "stop", "senkawa": "stop", "kanamecho": "stop"}

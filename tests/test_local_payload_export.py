@@ -36,7 +36,8 @@ class LocalPayloadExportTests(unittest.TestCase):
         self.assertIn("bestTransferAlternative", departure)
         self.assertIn("reportedTrainType", departure)
         self.assertIn("serviceBrand", departure)
-        self.assertIn(departure["typeSource"], {"odpt_confirmed", "gtfs_stop_pattern", "unknown"})
+        self.assertIn(departure["typeSource"],
+                      {"odpt_confirmed", "official_route_rule", "gtfs_stop_pattern", "unknown"})
         self.assertIn("stopPatternStates", departure)
         self.assertIn(departure["typeValidation"],
                       {"consistent", "unverifiable", "conflict", "not_applicable", "unmatched"})
@@ -47,6 +48,32 @@ class LocalPayloadExportTests(unittest.TestCase):
         self.assertIsNone(f_liner["trainType"])
         self.assertEqual(f_liner["typeSource"], "odpt_confirmed")
         self.assertEqual(f_liner["typeLabel"], "Fライナー")
+
+    def test_yurakucho_scope_labels_only_eligible_unknown_types(self):
+        generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)
+        for service_date, expected_count in (("2026-10-22", 9), ("2026-10-24", 6), ("2026-11-03", 6)):
+            payload = build_payload(generator, [service_date])
+            rows = [item for item in payload["serviceDays"][0]["departures"]
+                    if item["typeSource"] == "official_route_rule"]
+            self.assertEqual(len(rows), expected_count)
+            self.assertTrue(all(item["routeId"] == "6"
+                                and item["odptMatchStatus"] == "unique_match"
+                                and item["trainType"] == "Local"
+                                and item["typeLabel"] == "各駅停車"
+                                and item["reportedTrainType"] in {"SemiExpress", "Rapid", "RapidExpress"}
+                                and item["unscopedTrainType"] == item["reportedTrainType"]
+                                and item["typeDiagnostic"] == "yurakucho_all_stops_official_route_rule"
+                                for item in rows))
+            non_displayable = [item for item in payload["serviceDays"][0]["departures"]
+                               if item["status"] == "no_valid_arrival"]
+            self.assertTrue(all(item["typeSource"] != "official_route_rule"
+                                for item in non_displayable))
+            self.assertTrue(all(item["typeLabel"] == "種別不明"
+                                and item["typeDiagnostic"] ==
+                                "official_route_rule_requires_valid_hikawadai_itinerary"
+                                for item in non_displayable
+                                if item["typeDiagnostic"] ==
+                                "official_route_rule_requires_valid_hikawadai_itinerary"))
 
     def test_outside_feed_service_dates_are_listed_and_skipped(self):
         generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)

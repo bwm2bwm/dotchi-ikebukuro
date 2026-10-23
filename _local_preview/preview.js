@@ -55,6 +55,15 @@ function renderMetadata(diagnostics) {
   metadataEl.hidden = false;
 }
 
+function typeStyle(item) {
+  if (item.kind === 'Fライナー') return 'type-brand';
+  if (item.kind === '急行' || item.kind === '通勤急行') return 'type-express';
+  if (item.typeSource === 'gtfs_stop_pattern') return 'type-supplement';
+  if (item.typeSource === 'official_route_rule') return 'type-normal';
+  if (item.typeSource === 'unknown') return 'type-unknown';
+  return 'type-normal';
+}
+
 function renderGroups(groups, nowMs) {
   const visible = groups.flatMap(group => group.items);
   const best = earliestVisible(groups);
@@ -68,12 +77,16 @@ function renderGroups(groups, nowMs) {
         const card = document.createElement('article');
         card.className = `train${item.id === best?.id ? ' best' : ''}`;
         card.style.setProperty('--line-color', item.color);
-        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="line-count"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発 <span class="minitxt kind"></span></div><div class="sub"></div></div><div class="countwrap"><div class="count"></div><div class="minitxt">発車まで</div></div><div><div class="arrival"></div><div class="minitxt" style="text-align:right">氷川台着</div></div>`;
+        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="line-count"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text"></span>発<span class="type-destination"><span class="type-label"></span><span class="destination-label"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="count"></div><div class="minitxt">発車まで</div></div><div><div class="arrival"></div><div class="minitxt" style="text-align:right">氷川台着</div></div>`;
         card.querySelector('.route').textContent = item.line;
         card.querySelector('.line-count').textContent = group.line && index === 0 ? `${group.items.length}本` : '';
         card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
         card.querySelector('.departure-text').textContent = item.departureText;
-        card.querySelector('.kind').textContent = `${item.kind}・${item.destination}行`;
+        const typeLabel = card.querySelector('.type-label');
+        typeLabel.textContent = item.kind;
+        typeLabel.className = `type-label ${typeStyle(item)}`;
+        typeLabel.dataset.typeSource = item.typeSource;
+        card.querySelector('.destination-label').textContent = `${item.destination}行`;
         card.querySelector('.sub').textContent = item.journeyKind === 'direct'
           ? '直通・乗換なし' : `小竹向原乗換・待ち約${Math.round(item.transfer.waitMinutes)}分`;
         card.querySelector('.arrival').textContent = item.arrivalText ?? '—';

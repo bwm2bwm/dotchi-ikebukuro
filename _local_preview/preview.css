@@ -32,6 +32,13 @@ main { padding-top: 2px; }
 .controls { margin-top: 3px; margin-bottom: 1px; }
 .ad-dock { background: #f8f7f4; }
 .ad-placeholder { flex-basis: 320px; }
+.type-label { display: inline; }
+.type-destination { display: inline-flex; flex: 0 0 auto; gap: 4px; white-space: nowrap; }
+.destination-label { min-width: 0; }
+.type-normal { color: #55565B; font-weight: 600; }
+.type-express, .type-brand { color: #B84E49; font-weight: 800; }
+.type-supplement { color: #68727a; font-weight: 500; }
+.type-unknown { color: #737b84; font-weight: 500; }
 @supports (-webkit-touch-callout: none) {
   @media (max-width: 599px) {
     .top {

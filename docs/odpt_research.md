@@ -744,3 +744,23 @@ python3 -B scripts/validate_odpt_train_matching.py \
 adapterに一度だけpayloadを検証してカードを事前生成する `prepareTimetablePayload` を追加し、Intl formatterも共有化。最早着の候補選択を二度目の全sortから一回のreduceへ変更した。previewでは切替時のみ候補・最大6カードを再生成し、毎秒は時計とカード上のカウントダウンだけを更新する。発車時、東京日付変更、payload有効性変更時は候補を再生成。Safariでconsoleから確認できる `window.__dotchiPreviewPerf` はfetch回数、候補走査、sort、adapter全体、selection、DOM更新、イベントからDOM/次frameまでの時間を直近50回保持する。
 
 同じ1,317便payloadをNodeで15回測定（UIと同じonTiming有効）: unprepared payloadはadapter全体の中央値36.47 ms / 最大50.10 ms、候補走査26.89 / 39.52 ms、sort 0.05 / 0.34 ms。事前準備済みpayloadはadapter全体中央値0.88 / 最大4.47 ms、候補走査0.57 / 1.71 ms、sort 0.03 / 0.22 ms。ここで「最大」は15標本の最大値（p95相当の最近順位値）。この数値はSafariの実測ではない。ブラウザー上のイベントからDOM更新までのSafari数値は未取得で、previewは更新済み・サーバ停止の状態。Mac Safariでの再計測手順は `docs/devlog.md` の当日記録を参照。adapter Node test 15件、Python全28件が成功。ローカルpayloadとODPT派生レポートは `/private/tmp/dotchi-ikebukuro-preview/` のみ。
+
+### 有楽町線内の各駅停車表示と種別表現（2026-10-23）
+
+**公式根拠・適用範囲**
+
+- 東京メトロの2010-03-06改正告知は、有楽町線の準急を各駅停車に変更し「有楽町線は全て各駅停車」と説明している（[東京メトロ 2010年ニュースリリース](https://www.tokyometro.jp/news/2010/2010-06.html)、確認日 2026-10-23）。2008年の準急導入告知は過去の運行形態を説明する資料であり、現在の規則として流用しない（[東京メトロ 2008年ニュースリリース](https://www.tokyometro.jp/news/2008/2008-17_2.html)）。
+- 2026-03-14の改正資料は現行ダイヤ・S-TRAINの時刻を案内するが、今回の調査範囲では通常列車の全駅停車ルールを撤回する記載は確認できなかった（[東京メトロ改正資料](https://www.tokyometro.jp/info/files/20260314_daiyakaisei.pdf)）。有楽町線S-TRAINは停車駅が限定され、池袋で乗車できない（[東京メトロFAQ](https://ssl.tokyometro.jp/support/faq_answer?faqno=OpenFAQ-007736&lang=ja)）。今回の適用は池袋で乗車する通常営業列車の有楽町線区間に限定し、直通先区間の列車種別を意味しない。
+- 公式時刻表の凡例も、東京メトロ線内の種別と直通他社線内の種別を別に扱う（[2023年有楽町線時刻表案内](https://www.tokyometro.jp/notice/20230318/yurakucho/index.html)、[池袋駅時刻表PDF](https://www.tokyometro.jp/notice/20230318/pdf/Y22.pdf)）。2010年の明示資料以降の包括的なルール再掲は確認できていないため、将来のダイヤ改正時に公式資料と対象区間を再確認する。
+
+**実装条件・保留条件**
+
+- `official_route_rule` はODPTのraw種別を上書きせず、別の根拠sourceとして `typeLabel=各駅停車` / 内部type `Local` を付ける。有楽町線GTFS route `6`、ODPT `unique_match`、ODPT線内type未確定かつraw through-service typeあり、池袋で有効に乗車可能、要町 `608`・千川 `607`・小竹向原 `606` の一意で有効な停車記録、順序・時刻整合、S-TRAIN/愛称なし、停車矛盾なしを要求する。
+- さらにpreviewに有効な池袋→氷川台旅程がない便は表示対象外として補完しない。今回この条件で安全側に戻る1便を確認した。GTFSに氷川台stopがないこと自体は通過根拠としない。この表示上の追加ゲートは、旅程不能データに表示用種別だけを付けないための保守条件である。
+- 照合失敗、ODPT元type欠損、必要停車データ欠損・重複・時刻逆転、S-TRAIN、service brand、その他の矛盾は従来どおり不明または既存表示とする。15対象tripのIDは実装条件にハードコードしていない。
+
+**代表日結果と表示**
+
+- 表示可能な旅程に限る種別不明は、平日9/435→0/435、土曜6/396→0/396、祝日6/396→0/396。補完sourceは各日9/6/6。S-TRAINや無効旅程は補完対象外。ODPT照合状態とraw ODPT type codeは維持する。
+- 種別名と行先は別要素に分ける。各駅停車は通常色、急行・通勤急行は太字＋下線、Fライナーは愛称として別の太字破線下線、GTFS停車パターンの急行型/全駅停車は補助表示色と点線下線、種別不明は控えめな色で明示する。最早着の緑色とは別系統で、意味を色だけに依存させない。カード寸法・広告dock・safe-areaは変更していない。
+- 公開モックのroot `index.html` / `styles.css` / `app.js` は変更していない。CSSの実機視認性、幅、縦寸法、広告dock、iOS safe areaはMac/iPhone Safariで最終確認する。

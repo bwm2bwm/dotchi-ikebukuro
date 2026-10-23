@@ -30,7 +30,7 @@ const TRAIN_TYPE_LABELS = Object.freeze({
   'F-Liner': 'Fライナー',
   'S-TRAIN': 'S-TRAIN',
 });
-const TYPE_SOURCES = new Set(['odpt_confirmed', 'gtfs_stop_pattern', 'unknown']);
+const TYPE_SOURCES = new Set(['odpt_confirmed', 'official_route_rule', 'gtfs_stop_pattern', 'unknown']);
 const TYPE_VALIDATIONS = new Set(['consistent', 'unverifiable', 'conflict', 'not_applicable', 'unmatched']);
 
 export class PayloadValidationError extends TypeError {
