@@ -24,6 +24,8 @@ class LocalPayloadExportTests(unittest.TestCase):
         self.assertEqual(payload["timezone"], "Asia/Tokyo")
         self.assertEqual(payload["applicationPeriod"]["startsAt"], "2026-09-19T00:00:00+09:00")
         self.assertEqual(payload["applicationPeriod"]["endsAt"], "2027-03-13T00:00:00+09:00")
+        self.assertEqual(payload["serviceDays"][0]["originStationId"], "Ikebukuro")
+        self.assertEqual(payload["serviceDays"][0]["destinationStationId"], "Hikawadai")
         self.assertIsNone(payload["feed"]["sourceUpdatedAt"])
         self.assertIsNone(payload["odpt"]["sourceUpdatedAt"])
         self.assertIsNone(payload["webApp"]["builtAt"])
@@ -34,6 +36,7 @@ class LocalPayloadExportTests(unittest.TestCase):
         self.assertIn("primary", departure)
         self.assertIn("directAlternative", departure)
         self.assertIn("bestTransferAlternative", departure)
+        self.assertEqual(departure["primary"]["arrivalStationId"], "Hikawadai")
         self.assertIn("reportedTrainType", departure)
         self.assertIn("serviceBrand", departure)
         self.assertIn(departure["typeSource"],

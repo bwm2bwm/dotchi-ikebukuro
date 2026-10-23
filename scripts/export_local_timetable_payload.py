@@ -27,7 +27,7 @@ def _journey(itinerary):
         "arrivalServiceSeconds": itinerary.arrival_seconds,
         "departureText": itinerary.departure_text,
         "arrivalText": itinerary.arrival_text,
-        "arrivalStationId": "Hikawadai",
+        "arrivalStationId": itinerary.arrival_station_id,
         "transfer": None if second_trip is None else {
             "stationId": "KotakeMukaihara",
             "stationName": itinerary.transfer_station,
@@ -67,7 +67,7 @@ def build_payload(generator: ItineraryGenerator, service_dates: list[str]) -> di
         day_payloads.append({
             "serviceDate": day.isoformat(),
             "originStationId": "Ikebukuro",
-            "destinationStationId": "Hikawadai",
+            "destinationStationId": generator.destination_station_id,
             "departures": [{
                 "id": f"{result.service_date}:{result.origin_trip_id}",
                 "originTripId": result.origin_trip_id,

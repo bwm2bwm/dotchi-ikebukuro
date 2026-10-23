@@ -12,8 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from odpt_itinerary import (  # noqa: E402
     DEFAULT_DATA_DIR,
     DEFAULT_GTFS,
+    DESTINATIONS,
+    DestinationNotReadyError,
     FeedDateError,
     ItineraryGenerator,
+    ROUTE_STOP_IDS,
     choose_primary,
     format_service_time,
     parse_gtfs_time,
@@ -27,6 +30,45 @@ class LocalFeedItineraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)
+
+    def test_phase1_destination_catalog_has_route_scoped_ids_and_outbound_order(self):
+        expected = {
+            "Kanamecho": ("608", "908"), "Senkawa": ("607", "907"),
+            "KotakeMukaihara": ("606", "906"), "Hikawadai": ("605", "905"),
+            "Heiwadai": ("604", "904"), "ChikatetsuAkatsuka": ("603", "903"),
+            "ChikatetsuNarimasu": ("602", "902"), "Wakoshi": ("601", "901"),
+        }
+        self.assertEqual(set(DESTINATIONS), set(expected))
+        for station_id, (y_stop, f_stop) in expected.items():
+            with self.subTest(station_id=station_id):
+                destination = DESTINATIONS[station_id]
+                self.assertEqual(destination["routeStopIds"], {"6": y_stop, "9": f_stop})
+                self.assertIn(y_stop, self.generator.stops)
+                self.assertIn(f_stop, self.generator.stops)
+                self.assertEqual(self.generator.stops[y_stop]["stop_name"], destination["name"])
+                self.assertEqual(self.generator.stops[f_stop]["stop_name"], destination["name"])
+        self.assertEqual([DESTINATIONS[key]["outboundOrder"] for key in expected],
+                         list(range(1, 9)))
+        for route_id in ("6", "9"):
+            for trip_id, trip in self.generator.trips.items():
+                if trip.get("route_id") != route_id:
+                    continue
+                events = self.generator.events[trip_id]
+                ikebukuro = next((event for event in events
+                                  if event.stop_id in ROUTE_STOP_IDS[route_id]["ikebukuro"]), None)
+                if ikebukuro is None:
+                    continue
+                order_by_stop = {value["routeStopIds"][route_id]: value["outboundOrder"]
+                                 for value in DESTINATIONS.values()}
+                observed = [order_by_stop[event.stop_id] for event in events
+                            if event.sequence > ikebukuro.sequence and event.stop_id in order_by_stop]
+                self.assertEqual(observed, sorted(observed))
+
+    def test_unverified_destination_is_rejected_before_generation(self):
+        with self.assertRaises(DestinationNotReadyError):
+            ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR, destination_station_id="Kanamecho")
+        with self.assertRaisesRegex(ValueError, "Unknown destination"):
+            ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR, destination_station_id="ShinjukuSanchome")
 
     def test_service_time_keeps_after_midnight_service_seconds(self):
         self.assertEqual(parse_gtfs_time("24:02:00"), 86520)

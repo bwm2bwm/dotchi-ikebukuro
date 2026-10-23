@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build local, date-specific Ikebukuro–Hikawadai itineraries from Tokyo Metro GTFS.
+"""Build local, date-specific Ikebukuro itineraries from Tokyo Metro GTFS.
 
 This module is deliberately offline: it reads the supplied GTFS zip and optional
 saved ODPT timetable JSON files. It never performs network requests or prints raw
@@ -24,14 +24,40 @@ DEFAULT_GTFS = DEFAULT_DATA_DIR / "TokyoMetro-Train-GTFS.zip"
 
 ROUTES = {"6": "有楽町線", "9": "副都心線"}
 OPPOSITE_ROUTE = {"6": "9", "9": "6"}
+# Phase 1 station catalog. Stop IDs are route-scoped; a station is never
+# inferred from its display name or from the other route's stop ID.
+DESTINATIONS = {
+    "Kanamecho": {"name": "要町", "stationKey": "kanamecho", "routeStopIds": {"6": "608", "9": "908"}, "outboundOrder": 1},
+    "Senkawa": {"name": "千川", "stationKey": "senkawa", "routeStopIds": {"6": "607", "9": "907"}, "outboundOrder": 2},
+    "KotakeMukaihara": {"name": "小竹向原", "stationKey": "kotake_mukaihara", "routeStopIds": {"6": "606", "9": "906"}, "outboundOrder": 3},
+    "Hikawadai": {"name": "氷川台", "stationKey": "hikawadai", "routeStopIds": {"6": "605", "9": "905"}, "outboundOrder": 4},
+    "Heiwadai": {"name": "平和台", "stationKey": "heiwadai", "routeStopIds": {"6": "604", "9": "904"}, "outboundOrder": 5},
+    "ChikatetsuAkatsuka": {"name": "地下鉄赤塚", "stationKey": "chikatetsu_akatsuka", "routeStopIds": {"6": "603", "9": "903"}, "outboundOrder": 6},
+    "ChikatetsuNarimasu": {"name": "地下鉄成増", "stationKey": "chikatetsu_narimasu", "routeStopIds": {"6": "602", "9": "902"}, "outboundOrder": 7},
+    "Wakoshi": {"name": "和光市", "stationKey": "wakoshi", "routeStopIds": {"6": "601", "9": "901"}, "outboundOrder": 8},
+}
+DEFAULT_DESTINATION_ID = "Hikawadai"
+# Other catalog entries are intentionally gated until Phase 2/3 validates their
+# stop order, pass-through semantics, and journey coverage against local feeds.
+VERIFIED_DESTINATION_IDS = frozenset({DEFAULT_DESTINATION_ID})
 STATION_STOP_IDS = {
     "ikebukuro": {"228", "609", "909"},
+    "kanamecho": {"608", "908"},
+    "senkawa": {"607", "907"},
     "kotake_mukaihara": {"606", "906"},
     "hikawadai": {"605", "905"},
+    "heiwadai": {"604", "904"},
+    "chikatetsu_akatsuka": {"603", "903"},
+    "chikatetsu_narimasu": {"602", "902"},
+    "wakoshi": {"601", "901"},
 }
 ROUTE_STOP_IDS = {
-    "6": {"ikebukuro": {"228", "609"}, "kotake_mukaihara": {"606"}, "hikawadai": {"605"}},
-    "9": {"ikebukuro": {"228", "909"}, "kotake_mukaihara": {"906"}, "hikawadai": {"905"}},
+    "6": {"ikebukuro": {"228", "609"}, **{
+        target["stationKey"]: {target["routeStopIds"]["6"]}
+        for target in DESTINATIONS.values()}},
+    "9": {"ikebukuro": {"228", "909"}, **{
+        target["stationKey"]: {target["routeStopIds"]["9"]}
+        for target in DESTINATIONS.values()}},
 }
 LINE_ODPT = {"6": "Yurakucho", "9": "Fukutoshin"}
 ODPT_CALENDAR = {"0": "Weekday", "1": "SaturdayHoliday"}
@@ -43,6 +69,10 @@ class FeedError(ValueError):
 
 class FeedDateError(ValueError):
     """Requested service date is outside the feed validity period."""
+
+
+class DestinationNotReadyError(ValueError):
+    """Destination exists in the Phase 1 catalog but is not journey-validated."""
 
 
 @dataclass(frozen=True)
@@ -119,6 +149,7 @@ class Itinerary:
     transfer_wait_seconds: int | None
     platform_status: str = "unknown"
     connection_guaranteed: bool = False
+    arrival_station_id: str = DEFAULT_DESTINATION_ID
 
 
 @dataclass
@@ -258,9 +289,17 @@ class ItineraryGenerator:
     """Reusable in-memory GTFS timetable and itinerary generator."""
 
     def __init__(self, gtfs_zip: str | Path = DEFAULT_GTFS, odpt_dir: str | Path | None = DEFAULT_DATA_DIR,
-                 min_transfer_seconds: int = 60, max_transfer_seconds: int = 600):
+                 min_transfer_seconds: int = 60, max_transfer_seconds: int = 600,
+                 destination_station_id: str = DEFAULT_DESTINATION_ID):
         if min_transfer_seconds < 0 or max_transfer_seconds < min_transfer_seconds:
             raise ValueError("Transfer limits must satisfy 0 <= minimum <= maximum")
+        if destination_station_id not in DESTINATIONS:
+            raise ValueError(f"Unknown destination station ID: {destination_station_id}")
+        if destination_station_id not in VERIFIED_DESTINATION_IDS:
+            raise DestinationNotReadyError(
+                f"{DESTINATIONS[destination_station_id]['name']} is cataloged but not journey-validated yet"
+            )
+        self.destination_station_id = destination_station_id
         self.gtfs_zip = Path(gtfs_zip)
         self.odpt_dir = Path(odpt_dir) if odpt_dir is not None else None
         self.min_transfer_seconds = min_transfer_seconds
@@ -568,7 +607,8 @@ class ItineraryGenerator:
 
         for trip_id, trip in trips.items():
             route_stops = ROUTE_STOP_IDS[trip.route_id]
-            h_event = self._event_after(trip.events, route_stops["hikawadai"], trip.origin_event.sequence)
+            destination_stop_id = DESTINATIONS[self.destination_station_id]["routeStopIds"][trip.route_id]
+            h_event = self._event_after(trip.events, {destination_stop_id}, trip.origin_event.sequence)
             if h_event:
                 if h_event.arrival_seconds is None:
                     diagnostics[trip_id].add("destination_arrival_missing")
@@ -579,6 +619,7 @@ class ItineraryGenerator:
                     direct_by_origin[trip_id] = Itinerary(
                         "direct", trip.departure_seconds, h_event.arrival_seconds, trip.departure_text,
                         format_service_time(h_event.arrival_seconds) or "", first, None, None, None,
+                        arrival_station_id=self.destination_station_id,
                     )
 
             k_event = next((event for event in trip.events
@@ -594,7 +635,8 @@ class ItineraryGenerator:
                 diagnostics[trip_id].add("kotake_alighting_prohibited")
 
             if k_event.departure_seconds is not None and k_event.can_board:
-                h_after_k = self._event_after(trip.events, route_stops["hikawadai"], k_event.sequence)
+                destination_stop_id = DESTINATIONS[self.destination_station_id]["routeStopIds"][trip.route_id]
+                h_after_k = self._event_after(trip.events, {destination_stop_id}, k_event.sequence)
                 if h_after_k and h_after_k.arrival_seconds is not None and h_after_k.can_alight:
                     departures[trip_id] = k_event
 
@@ -616,7 +658,8 @@ class ItineraryGenerator:
                 raw_pairs += 1
                 if wait < self.min_transfer_seconds:
                     continue
-                h_event = self._event_after(out_trip.events, ROUTE_STOP_IDS[out_trip.route_id]["hikawadai"], out_event.sequence)
+                destination_stop_id = DESTINATIONS[self.destination_station_id]["routeStopIds"][out_trip.route_id]
+                h_event = self._event_after(out_trip.events, {destination_stop_id}, out_event.sequence)
                 if h_event is None or h_event.arrival_seconds is None or not h_event.can_alight:
                     continue
                 first = Leg(in_trip, in_trip.origin_event, in_event, in_trip.departure_seconds, in_event.arrival_seconds)
@@ -624,6 +667,7 @@ class ItineraryGenerator:
                 transfer_by_origin[in_id].append(Itinerary(
                     "transfer", in_trip.departure_seconds, h_event.arrival_seconds, in_trip.departure_text,
                     format_service_time(h_event.arrival_seconds) or "", first, second, "小竹向原", wait,
+                    arrival_station_id=self.destination_station_id,
                 ))
         self.last_wait_histogram = dict(wait_histogram)
         self.last_raw_transfer_pairs = raw_pairs

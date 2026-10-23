@@ -249,3 +249,10 @@
 - 保存済みGTFS/ODPTのみで代表日集計。preview表示候補の種別不明は平日9/435→0/435、土曜6/396→0/396、祝日6/396→0/396。source `official_route_rule` は9/6/6。旅程不能で非表示のunknownレコードは各日1/3/3件残す。別日も含む更新済みpreview（2026-10-22〜24）は `~/Library/Application Support/dotchi-ikebukuro-preview/site`。
 - 自動検証: `python3 -B -m unittest discover -s tests -v` 38件成功。`node --test tests/*.test.mjs` 30件成功。スタティックUI契約でカード寸法、広告dock/safe-area、表示スタイル、別要素化を確認。Safari実機目視・物理iPhoneの横幅/縦寸法確認は未実施。手順は作業報告に記載。
 - 公式根拠のURL、適用範囲、例外、改正時の再検証条件は [`odpt_research.md`](odpt_research.md)。外部通信・APIキー読取・元データ編集・公開デモ変更・Git追加・commit/push/mergeなし。
+
+## 2026-10-23 — T14 目的地対応範囲 Phase 1
+
+- Phase 1として、要町・千川・小竹向原・氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市の8駅を内部カタログ化。有楽町線／副都心線の別々のGTFS stop IDと池袋からの順序を管理する。
+- `ItineraryGenerator` に `destination_station_id` を追加。既定は氷川台で、氷川台だけを旅程検証済みとして許可。他7駅は明示的な未検証エラーで止めるため、未検証の通過・欠損記録を到着と見なさない。
+- exporterは旅程の到着駅IDを参照するようにし、既定氷川台のpayload内容を維持。氷川台の候補便数・旅程選択・表示、adapter/preview/UI、T01更新処理には変更なし。追加駅の旅程生成や目的地選択UIは次Phase。
+- 外部通信・APIキー・ODPT/GTFS原データ・公開モックには触れず、実payloadを生成せず、commit/push/mergeなし。

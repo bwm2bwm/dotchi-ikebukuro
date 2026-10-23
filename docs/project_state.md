@@ -20,6 +20,13 @@
 
 更新日: 2026-10-23
 
+## T14 目的地拡張 Phase 1
+
+- `scripts/odpt_itinerary.py` に対象8駅の駅カタログを追加し、有楽町線／副都心線それぞれのGTFS stop IDと池袋からの進行順を内部管理する。対象は要町・千川・小竹向原・氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市。
+- 旅程生成器は `destination_station_id` を受け取れる。旅程検証済みの既定値は氷川台のみで、他7駅は「カタログ済み・旅程未検証」として生成を拒否する。これにより未検証駅の通過列車を到着候補に誤認しない。
+- exporterは旅程の到着駅IDを使うが、既定氷川台のpayload値は維持。preview UI・adapter・selection・T01更新手順・公開モックは変更しない。
+- 追加駅の経路成立／データ不足の詳細分類はPhase 2/3でGTFSの停車・乗降・運行日カバレッジ検証と併せて実装する。GTFSの別tripを直通扱いする拡張は行っていない。
+
 ## ローカル実ダイヤpreview・T02/T03（2026-10-23）
 
 - 永続previewソースを [`_local_preview/`](../_local_preview/) に置く。GitHub PagesはリポジトリrootをJekyllで配信する構成（Pages workflow、`.nojekyll`、Jekyll設定ファイルなし）で、underscore始まりのpreviewディレクトリはJekyll出力対象外。公開デモのroot `index.html` / `app.js` / `data.js` / `styles.css` は変更しない。
