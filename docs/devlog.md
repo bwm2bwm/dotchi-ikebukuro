@@ -266,3 +266,12 @@
 - ODPT match結果とraw reported typeは全共通tripで一致。平日Y線1件は氷川台の既存旅程なしで表示をunknownに保留していた公式route-rule種別が、Phase 2目的地では有効な直通旅程のため `各駅停車` 表示へ解決された。raw ODPT値 (`SemiExpress`) とunique matchは維持。土曜・祝日は種別表示差なし。
 - 検証: Python unittest 43件成功。Node全体33件成功、adapter UTC 23件成功。代表3日の候補・passカウント、データ不足の合成停止、残り4駅と未知ID拒否、headsign/選択目的地分離、T02適用期間・必要運行日停止、既存最早着/直通filter回帰を確認。
 - 公開mock、preview UI/生成物、ODPT/GTFS元データは変更せず、目的地別payloadは一時領域の検証後削除。外部API・秘密情報なし、commit/push/mergeなし。
+
+## 2026-10-23 — T14 Phase 3 平和台・地下鉄赤塚・地下鉄成増・和光市
+
+- 検証済み目的地allowlistへ残り4駅を追加。Phase 2と同じ共通判定を使い、池袋から目的地まで同一GTFS trip内のstop ID、進行順、到着時刻、降車可、イベント時刻単調性を確認する。別tripの連結・小竹向原乗換候補は生成しない。既定の氷川台分岐やexporter/adapter/UIは変更なし。
+- 代表日（平日2026-10-22、土曜2026-10-24、祝日2026-11-03）のY/F件数は平和台・地下鉄赤塚が150/137、129/111、129/111。地下鉄成増も同数。和光市は150/150、129/145、129/145。土曜と祝日は同じGTFS service種別で便数・通過数が一致。
+- 明示通過除外は平和台・地下鉄赤塚・地下鉄成増で副都心線13/34/34、和光市と有楽町線各駅は0。必要停車・時刻・降車・順序不足は全4駅・全代表日で0。24時超の到着は目的地順に平日7/7/8/8、土曜・祝日8/8/9/9件を含み、service secondsを保持。
+- 生成状態は既存名の `normal`。`no_candidates`、`data_insufficient`、`unsupported`、`invalid` の意味・adapter fail-closed方針は維持。目的地別payloadはリポジトリ外へ出力でき、通常preview既定は氷川台のまま。READMEに8駅payload生成用CLI optionを追記。
+- 4駅の日別route/pass/24時超件数と同一trip・降車・stop ID、Wakoshi payloadの目的地/status/headsign分離をテストへ追加。既存Phase 2件数テストも従来期待値を維持。
+- GTFS/ODPT原データ、永続preview出力、公開モックは変更しない。実payload検証は一時領域に限定。

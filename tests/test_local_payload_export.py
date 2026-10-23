@@ -101,6 +101,20 @@ class LocalPayloadExportTests(unittest.TestCase):
                 self.assertEqual(item["primary"]["arrivalStationId"], "KotakeMukaihara")
                 self.assertEqual(item["destination"], item["headsign"])
 
+    def test_phase3_destination_payload_uses_selected_stop_and_daily_status(self):
+        generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                       destination_station_id="Wakoshi")
+        payload = build_payload(generator, ["2026-10-22"])
+        day = payload["serviceDays"][0]
+        self.assertEqual(day["destinationStationId"], "Wakoshi")
+        self.assertEqual(day["destinationStatus"]["status"], "normal")
+        self.assertEqual(day["destinationStatus"]["routes"]["6"]["candidateCount"], 150)
+        self.assertEqual(day["destinationStatus"]["routes"]["9"]["candidateCount"], 150)
+        candidate = next(item for item in day["departures"] if item["primary"])
+        self.assertEqual(candidate["primary"]["arrivalStationId"], "Wakoshi")
+        self.assertEqual(candidate["destination"], candidate["headsign"])
+        self.assertEqual(candidate["destinationSource"], "gtfs_headsign")
+
 
 class ExportPathGuardTests(unittest.TestCase):
     def test_repository_output_path_is_rejected_before_generation(self):

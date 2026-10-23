@@ -200,6 +200,13 @@
 
 実ダイヤ導入までは架空データの警告を残す。ODPT仕様、データ提供状況、利用条件や外部サービスの仕様は確認前に断定しない。詳細な判断経緯・作業・検証結果は devlog.md に追記する。
 
+## T14 Phase 3 — 並走区間8駅の目的地payload（2026-10-23）
+
+- 8駅すべてを `VERIFIED_DESTINATION_IDS` に登録。追加4駅（平和台・地下鉄赤塚・地下鉄成増・和光市）はPhase 2と同じ同一GTFS trip限定の直通判定で有効化。小竹向原等で別tripを接続する処理は追加していない。
+- 代表3日で全追加駅が `normal`。データ不足0。平和台・地下鉄赤塚・地下鉄成増は副都心線に明示通過便（平日13、土曜/祝日34）があり除外。和光市には明示通過なし。24時超到着は維持。
+- CLI `scripts/export_local_timetable_payload.py --destination-station-id <ID>` で各駅の検証payloadを生成可能。`_local_preview/prepare_preview.py` とpreview UIの既定目的地は氷川台のまま。選択UIはPhase 4。
+- T01–T03の期間/service day/status安全判定、ODPT照合、raw type・F-Liner分離、有楽町線route ruleに変更なし。T14詳細集計とPhase 3テストは `docs/devlog.md`。
+
 ## 有楽町線種別補完・T08/T09表示改善（2026-10-23）
 
 - 有楽町線のroute 6に限り、ODPT `unique_match`・池袋乗車可能・要町/千川/小竹向原の有効かつ順序整合した停車記録・raw through-service type保持・例外/矛盾なしを満たし、氷川台まで有効な旅程がある便を `各駅停車` と表示する。sourceは `official_route_rule`。ODPT raw code、照合結果は維持。15 tripのID置換は行わない。

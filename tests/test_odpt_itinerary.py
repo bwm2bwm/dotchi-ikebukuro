@@ -13,10 +13,10 @@ from odpt_itinerary import (  # noqa: E402
     DEFAULT_DATA_DIR,
     DEFAULT_GTFS,
     DESTINATIONS,
-    DestinationNotReadyError,
     FeedDateError,
     ItineraryGenerator,
     ROUTE_STOP_IDS,
+    VERIFIED_DESTINATION_IDS,
     choose_primary,
     format_service_time,
     parse_gtfs_time,
@@ -64,14 +64,77 @@ class LocalFeedItineraryTests(unittest.TestCase):
                             if event.sequence > ikebukuro.sequence and event.stop_id in order_by_stop]
                 self.assertEqual(observed, sorted(observed))
 
-    def test_unverified_destination_is_rejected_before_generation(self):
+    def test_phase3_destinations_are_verified_and_unknown_id_is_rejected(self):
         for destination_id in ("Heiwadai", "ChikatetsuAkatsuka", "ChikatetsuNarimasu", "Wakoshi"):
             with self.subTest(destination_id=destination_id):
-                with self.assertRaises(DestinationNotReadyError):
-                    ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
-                                       destination_station_id=destination_id)
+                self.assertIn(destination_id, VERIFIED_DESTINATION_IDS)
+                ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                   destination_station_id=destination_id)
         with self.assertRaisesRegex(ValueError, "Unknown destination"):
             ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR, destination_station_id="ShinjukuSanchome")
+
+    def test_phase3_targets_generate_only_valid_same_trip_direct_journeys(self):
+        expected = {
+            "Heiwadai": {"2026-10-22": (150, 137, 13, 7),
+                         "2026-10-24": (129, 111, 34, 8),
+                         "2026-11-03": (129, 111, 34, 8)},
+            "ChikatetsuAkatsuka": {"2026-10-22": (150, 137, 13, 7),
+                                   "2026-10-24": (129, 111, 34, 8),
+                                   "2026-11-03": (129, 111, 34, 8)},
+            "ChikatetsuNarimasu": {"2026-10-22": (150, 137, 13, 8),
+                                   "2026-10-24": (129, 111, 34, 9),
+                                   "2026-11-03": (129, 111, 34, 9)},
+            "Wakoshi": {"2026-10-22": (150, 150, 0, 8),
+                        "2026-10-24": (129, 145, 0, 9),
+                        "2026-11-03": (129, 145, 0, 9)},
+        }
+        for destination_id, by_day in expected.items():
+            generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                           destination_station_id=destination_id)
+            target = DESTINATIONS[destination_id]
+            for service_date, (y_count, f_count, pass_count, after_midnight) in by_day.items():
+                with self.subTest(destination=destination_id, service_date=service_date):
+                    rows = generator.generate(service_date)
+                    coverage = generator.last_destination_status
+                    self.assertEqual(coverage["status"], "normal")
+                    self.assertEqual(coverage["candidateCount"], y_count + f_count)
+                    self.assertEqual(coverage["passThroughCount"], pass_count)
+                    self.assertEqual(coverage["dataInsufficientCount"], 0)
+                    self.assertEqual(coverage["routes"]["6"]["candidateCount"], y_count)
+                    self.assertEqual(coverage["routes"]["9"]["candidateCount"], f_count)
+                    self.assertEqual(coverage["routes"]["6"]["passThroughCount"] +
+                                     coverage["routes"]["9"]["passThroughCount"], pass_count)
+                    candidates = [row for row in rows if row.primary_itinerary]
+                    self.assertEqual(len(candidates), y_count + f_count)
+                    self.assertEqual(sum(row.primary_itinerary.arrival_seconds >= 86400
+                                         for row in candidates), after_midnight)
+                    for row in candidates:
+                        itinerary = row.primary_itinerary
+                        self.assertEqual(itinerary.kind, "direct")
+                        self.assertIsNone(itinerary.second_leg)
+                        self.assertEqual(itinerary.first_leg.trip.trip_id, row.origin_trip_id)
+                        self.assertEqual(itinerary.arrival_station_id, destination_id)
+                        self.assertEqual(itinerary.first_leg.alight.stop_id,
+                                         target["routeStopIds"][row.route_id])
+                        self.assertTrue(itinerary.first_leg.alight.can_alight)
+                        self.assertIsNotNone(itinerary.first_leg.alight.arrival_seconds)
+                        route_order = {value["routeStopIds"][row.route_id]: value["outboundOrder"]
+                                       for value in DESTINATIONS.values()}
+                        path_events = [event for event in itinerary.first_leg.trip.events
+                                       if itinerary.first_leg.board.sequence <= event.sequence
+                                       <= itinerary.first_leg.alight.sequence
+                                       and event.stop_id in route_order]
+                        self.assertEqual([route_order[event.stop_id] for event in path_events],
+                                         sorted(route_order[event.stop_id] for event in path_events))
+                        path_times = [seconds for event in path_events
+                                      for seconds in (event.arrival_seconds, event.departure_seconds)
+                                      if seconds is not None]
+                        self.assertTrue(all(later >= earlier for earlier, later in
+                                            zip(path_times, path_times[1:])))
+                    passed = [row for row in rows
+                              if "destination_explicit_pass" in row.data_quality]
+                    self.assertEqual(len(passed), pass_count)
+                    self.assertTrue(all(row.primary_itinerary is None for row in passed))
 
     def test_phase2_targets_generate_same_trip_direct_only_and_classify_data(self):
         expected = {

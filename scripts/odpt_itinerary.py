@@ -37,10 +37,10 @@ DESTINATIONS = {
     "Wakoshi": {"name": "和光市", "stationKey": "wakoshi", "routeStopIds": {"6": "601", "9": "901"}, "outboundOrder": 8},
 }
 DEFAULT_DESTINATION_ID = "Hikawadai"
-# Phase 2 validates same-trip direct journeys for the first three stations.
-# The remaining four stay gated until Phase 3.
+# Phases 2–3 validate same-trip direct journeys for the parallel corridor.
 VERIFIED_DESTINATION_IDS = frozenset({
     "Kanamecho", "Senkawa", "KotakeMukaihara", DEFAULT_DESTINATION_ID,
+    "Heiwadai", "ChikatetsuAkatsuka", "ChikatetsuNarimasu", "Wakoshi",
 })
 STATION_STOP_IDS = {
     "ikebukuro": {"228", "609", "909"},
