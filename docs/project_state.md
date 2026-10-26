@@ -1,5 +1,12 @@
 # プロジェクト状態
 
+## T11/T12/T13/T15 状況（2026-10-26）
+
+- **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
+- **T12 正式配信方式・ホスティング: 未着手。** 今回はドキュメント上の設計調査のみ完了し、実装・アカウント設定・デプロイは未着手。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T13: 未着手。T15: 未着手。**
+- 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
+
 ## iPhone Safari目的地切替計測（ローカルpreview限定）
 
 - URLに `?perf=1` を付けると、目的地切替後に最新結果と直近10件の履歴を表示する。`debugNow`と併用可能。通常アクセスでは計測欄を隠し、目的地別の計測結果はページメモリ内だけに保持する。
@@ -253,7 +260,7 @@
 
 - 目的地候補として10駅案があるが、最終リストではない。
 - 目的地選択・最近使った駅の保存は予定で、方式は未決定。
-- Cloudflare Pages + Workers等は正式ホスティング候補に留まる。
+- 正式ホスティング設計調査の推奨はCloudflare Pages静的配信 + GitHub Actions build/update（Workersなし）。実装・採用・公開は未着手。詳細は [`hosting_research.md`](hosting_research.md)。
 - Google AdSense等の広告、任意支援サービス、公共交通オープンデータチャレンジ応募は検討段階。採用・応募は未決定。
 - 版数／アプリ更新日時を表示する案がある。時刻表データ更新日時とは分けて検討する。
 

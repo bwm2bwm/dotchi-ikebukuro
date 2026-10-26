@@ -413,3 +413,11 @@
 
 - `?perf=1` の最新結果と履歴／コピー出力に既存loader値の `fetchMs`（fetch開始〜応答header受信）と`bodyReadMs`（`response.text()`本文読込完了）を追加。`networkMs`は両者の合計で、失敗時は到達済み区間のみを合計し未実行値は未実行表示。cache HITは各値0。
 - 変更は診断表示・計測record・対応テスト・説明に限定。通常表示、列車カード、終電判定、cache機構、payload生成処理は変更なし。
+
+## 2026-10-26 — T11利用条件回答・T12配信設計調査
+
+- ODPT事務局から共有された利用条件回答を `docs/odpt_research.md` に記録し、T11を完了扱いにした。想定利用の範囲を超えた包括許可とは解釈せず、既存の基本ライセンス・ガイドラインとデータ更新表示義務を引き続き記載。
+- GitHub Pages + Actions、Cloudflare Pages + Workers、GitHub Pages + 外部更新処理を14観点で比較。Cloudflare Pages静的配信 + GitHub Actions build/updateを推奨し、Workersなしの静的構成で足りると整理。実装はT12未着手、T13/T15も未着手。
+- 現行root mock、private preview、payload loader、offline exporter、atomic preview generator、validator、`.gitignore`を読み取り専用で確認。workspaceに`.github/workflows`と`package.json`はなく、remote GitHub settings・secretの有無は未確認。APIキー・ODPT API・公開root mockには触れていない。
+- 2026-10-26時点の公式料金・制限・圧縮/cache、Direct Upload/rollback、GitHub Pages用途制限、i-mobile ads.txt仕様を公式URLと確認日付きで `docs/hosting_research.md` に記載。payload容量値はローカル生成物のfile sizeとzlib圧縮概算のみを参照し、実ダイヤ本文は文書へ転載していない。
+- 公開mockとprivate previewを維持。コード変更、CI設定、deployment、ODPT API通信、secret参照、commit/push/mergeなし。
