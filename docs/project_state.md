@@ -3,9 +3,18 @@
 ## T11/T12/T13/T15 状況（2026-10-26）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 未着手。** 今回はドキュメント上の設計調査のみ完了し、実装・アカウント設定・デプロイは未着手。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影とsynthetic tests）を実装済み。Cloudflare接続、公開site構築、adapter/loader/UI統合、CI、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
+
+## T12 Phase 1 公開用payload profile（2026-10-26）
+
+- `scripts/public_payload_profile.py` にschema v1 `local-preview-only`入力から `public-display-v1` へ射影するオフライン変換関数を追加。許可フィールドだけを新しいオブジェクトへコピーし、入力を変更しない。未知のフィールドは深い階層でも出力しない。
+- serviceDate、運行駅、時刻表metadata、候補ID (`id` / `originTripId`)、route、発車秒数、primary/direct/transfer itinerary、transfer wait、データ状態、destinationStatusのroute countsなどadapterが要求する構造を維持。25時台service secondsもそのまま保持する。
+- raw ODPT train type URI、照合理由・方式、stop-pattern診断、内部ログ、任意未知項目、API key風フィールド、絶対パスはallowlist対象外。adapterが必須としている `odptDestinationIds` / `outgoingDestinationIds` は識別値として保持する。公開前の再構成可能性・利用条件reviewは引き続き必要。
+- synthetic fixtureと `tests/test_public_payload_profile.py` を追加。local/public scope混同、必須値・日付・時刻・ID・直通/乗換、空データ、不正値、未知項目除外、決定性、入力不変を検証する。
+- テスト: synthetic-only Python subset 35件成功。実ダイヤを生成する既存Python test classesは今回の制約により実行対象外。Node全体78件成功、`TZ=UTC`でも78件成功。
+- 既存private preview、adapter、loader、UI、公開root mock、payload生成処理は変更なし。profile出力は現行adapterのscope validatorではまだ受理されないため、Phase 2でpublic scopeを明示対応し、候補・終電/始発動作を回帰確認する。Cloudflare・実ダイヤ変換・外部送信・deploymentなし。
 
 ## iPhone Safari目的地切替計測（ローカルpreview限定）
 

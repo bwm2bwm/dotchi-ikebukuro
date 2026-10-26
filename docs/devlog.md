@@ -421,3 +421,11 @@
 - 現行root mock、private preview、payload loader、offline exporter、atomic preview generator、validator、`.gitignore`を読み取り専用で確認。workspaceに`.github/workflows`と`package.json`はなく、remote GitHub settings・secretの有無は未確認。APIキー・ODPT API・公開root mockには触れていない。
 - 2026-10-26時点の公式料金・制限・圧縮/cache、Direct Upload/rollback、GitHub Pages用途制限、i-mobile ads.txt仕様を公式URLと確認日付きで `docs/hosting_research.md` に記載。payload容量値はローカル生成物のfile sizeとzlib圧縮概算のみを参照し、実ダイヤ本文は文書へ転載していない。
 - 公開mockとprivate previewを維持。コード変更、CI設定、deployment、ODPT API通信、secret参照、commit/push/mergeなし。
+
+## 2026-10-26 — T12 Phase 1 公開用payload profile
+
+- `scripts/public_payload_profile.py` を追加。schema v1の `local-preview-only` 入力だけを受け付け、新しい `public-display-v1` scopeへallowlist射影する。未知項目は出力せず、元入力は変更しない。不正schema/scope、欠落必須値、不正日付・時刻・ID、重複serviceDate、目的地不一致、空service dataを明示エラーにする。
+- adapter必須項目と候補判定に必要な `id` / `originTripId`、serviceDate、発車・到着秒数、primary/direct/transfer、transfer wait、destination statusを維持。時刻表示値と25時台service secondsも保持する。raw ODPT train type URI、照合診断、stop-pattern診断、内部ログ、API key風値、絶対パス、未知項目は除外。adapter必須のODPT destination ID配列は保持する。
+- `tests/fixtures/public_payload_profile_input.json` と `tests/test_public_payload_profile.py` はsynthetic値のみで追加。allowlist・未知field除外、scope分離、ID/旅程構造、serviceDate/時刻、空・不正入力、決定性、入力不変を確認。
+- テスト結果: synthetic-only Python subset 35件成功。保存済み実ダイヤを扱う既存Python test classesは実ダイヤ変換禁止のため未実行。Node全体78件成功、`TZ=UTC`でも78件成功。
+- Phase 1単独では公開profileは現行adapterに未接続。Phase 2でadapter/loaderへpublic scope対応を加え、ローカルprofileの拒否維持と候補・終電/始発判定をsynthetic payloadで回帰確認する。private preview、adapter、loader、UI、公開root mock、Cloudflare設定は変更せず、実ダイヤ変換・ODPT API・秘密情報参照・deployment・Git操作なし。

@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "dataScope": "local-preview-only",
+  "generatedAt": "2026-10-26T03:00:00Z",
+  "timezone": "Asia/Tokyo",
+  "feed": {
+    "version": "synthetic-feed-v1",
+    "validFrom": "2026-10-01",
+    "validThrough": "2026-10-31",
+    "sourceUpdatedAt": null,
+    "privateFeedNote": "drop"
+  },
+  "odpt": {"sourceUpdatedAt": null, "apiKey": "synthetic-secret-must-drop"},
+  "applicationPeriod": {
+    "startsAt": "2026-10-01T00:00:00+09:00",
+    "endsAt": "2026-11-01T00:00:00+09:00",
+    "localPath": "/synthetic/private/input"
+  },
+  "webApp": {"builtAt": null, "debugLog": "drop"},
+  "connectionPolicy": {
+    "minimumWaitSeconds": 60,
+    "maximumWaitSeconds": 600,
+    "platformStatus": "unknown",
+    "connectionGuaranteed": false,
+    "diagnostic": "drop"
+  },
+  "serviceDays": [
+    {
+      "serviceDate": "2026-10-26",
+      "originStationId": "Ikebukuro",
+      "destinationStationId": "Hikawadai",
+      "departures": [
+        {
+          "id": "synthetic:trip-a:1",
+          "originTripId": "synthetic-trip-a",
+          "routeId": "6",
+          "routeName": "有楽町線",
+          "headsign": "和光市",
+          "trainType": "Local",
+          "reportedTrainType": "Local",
+          "serviceBrand": null,
+          "typeLabel": "各駅停車",
+          "typeSource": "odpt_confirmed",
+          "destination": "和光市",
+          "destinationSource": "gtfs_headsign",
+          "odptDestinationIds": ["synthetic-destination-id"],
+          "odptMatchStatus": "unique_match",
+          "departureServiceSeconds": 22200,
+          "departureText": "06:10:00",
+          "primary": {
+            "kind": "direct",
+            "departureServiceSeconds": 22200,
+            "arrivalServiceSeconds": 22800,
+            "departureText": "06:10:00",
+            "arrivalText": "06:20:00",
+            "arrivalStationId": "Hikawadai",
+            "transfer": null,
+            "platformStatus": "unknown",
+            "connectionGuaranteed": false,
+            "internalDiagnostic": "drop"
+          },
+          "directAlternative": {
+            "kind": "direct",
+            "departureServiceSeconds": 22200,
+            "arrivalServiceSeconds": 22800,
+            "departureText": "06:10:00",
+            "arrivalText": "06:20:00",
+            "arrivalStationId": "Hikawadai",
+            "transfer": null,
+            "platformStatus": "unknown",
+            "connectionGuaranteed": false
+          },
+          "bestTransferAlternative": {
+            "kind": "transfer",
+            "departureServiceSeconds": 22200,
+            "arrivalServiceSeconds": 22980,
+            "departureText": "06:10:00",
+            "arrivalText": "06:23:00",
+            "arrivalStationId": "Hikawadai",
+            "transfer": {
+              "stationId": "KotakeMukaihara",
+              "stationName": "小竹向原",
+              "waitSeconds": 120,
+              "outgoingRouteId": "9",
+              "outgoingRouteName": "副都心線",
+              "outgoingHeadsign": "和光市",
+              "outgoingTrainType": "Local",
+              "outgoingReportedTrainType": "Local",
+              "outgoingServiceBrand": null,
+              "outgoingTypeLabel": "各駅停車",
+              "outgoingDestinationIds": ["synthetic-destination-id"],
+              "outgoingOdptTrainTypeUri": "drop-this-raw-uri",
+              "apiKey": "synthetic-secret-must-drop"
+            },
+            "platformStatus": "unknown",
+            "connectionGuaranteed": false
+          },
+          "transferCandidateCount": 1,
+          "status": "candidate",
+          "dataQuality": [],
+          "odptTrainTypeUri": "drop-this-raw-uri",
+          "odptMatchReason": "drop diagnostic provenance",
+          "stopPatternStates": {"diagnostic": "drop"},
+          "typeDiagnostic": "drop",
+          "apiKey": "synthetic-secret-must-drop",
+          "localAbsolutePath": "/synthetic/private/payload.json",
+          "futureUnknownField": {"mustNotLeak": true}
+        }
+      ],
+      "destinationStatus": {
+        "status": "normal",
+        "candidateCount": 1,
+        "passThroughCount": 0,
+        "dataInsufficientCount": 0,
+        "routes": {
+          "6": {"originTripCount": 1, "candidateCount": 1, "passThroughCount": 0, "dataInsufficientCount": 0},
+          "9": {"originTripCount": 0, "candidateCount": 0, "passThroughCount": 0, "dataInsufficientCount": 0}
+        },
+        "diagnostic": "drop"
+      },
+      "terminalDiagnostic": {"mustNotLeak": true}
+    },
+    {
+      "serviceDate": "2026-10-27",
+      "originStationId": "Ikebukuro",
+      "destinationStationId": "Hikawadai",
+      "departures": [
+        {
+          "id": "synthetic:trip-b:1",
+          "originTripId": "synthetic-trip-b",
+          "routeId": "9",
+          "routeName": "副都心線",
+          "headsign": "和光市",
+          "trainType": "Local",
+          "destination": "和光市",
+          "odptDestinationIds": [],
+          "odptMatchStatus": "unmatched",
+          "departureServiceSeconds": 93000,
+          "departureText": "25:50:00",
+          "primary": {
+            "kind": "direct",
+            "departureServiceSeconds": 93000,
+            "arrivalServiceSeconds": 93600,
+            "departureText": "25:50:00",
+            "arrivalText": "26:00:00",
+            "arrivalStationId": "Hikawadai",
+            "transfer": null,
+            "platformStatus": "unknown",
+            "connectionGuaranteed": false
+          },
+          "directAlternative": {
+            "kind": "direct",
+            "departureServiceSeconds": 93000,
+            "arrivalServiceSeconds": 93600,
+            "departureText": "25:50:00",
+            "arrivalText": "26:00:00",
+            "arrivalStationId": "Hikawadai",
+            "transfer": null,
+            "platformStatus": "unknown",
+            "connectionGuaranteed": false
+          },
+          "bestTransferAlternative": null,
+          "transferCandidateCount": 0,
+          "status": "candidate",
+          "dataQuality": []
+        }
+      ],
+      "destinationStatus": {
+        "status": "normal",
+        "candidateCount": 1,
+        "passThroughCount": 0,
+        "dataInsufficientCount": 0,
+        "routes": {
+          "6": {"originTripCount": 0, "candidateCount": 0, "passThroughCount": 0, "dataInsufficientCount": 0},
+          "9": {"originTripCount": 1, "candidateCount": 1, "passThroughCount": 0, "dataInsufficientCount": 0}
+        }
+      }
+    }
+  ],
+  "excludedServiceDates": [],
+  "internalLog": "drop",
+  "secret": "synthetic-secret-must-drop"
+}
