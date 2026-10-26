@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-26）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）とPhase 2（adapter・loader対応、synthetic互換性確認）を実装済み。Cloudflare接続、公開site構築、CI、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）を実装済み。Phase 3-2のproduction HTML/CSS分離、静的builder、Cloudflare接続、CI、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -25,6 +25,25 @@
 - synthetic fixtureで発車順・最早着・路線分類・直通/乗換・乗換待ち・direct-only・路線別終電/直通終電・終電後・前serviceDateの25時台・翌朝の各路線60分前gate・HeiwadaiのdestinationStatus/candidate countが一致することを検証。表示判断の比較は一致し、診断フィールドは射影により意図どおり異なる。
 - テスト結果: Node全体87件、`TZ=UTC`でも87件成功。実データ非依存Python subset 35件成功。JavaScript/Python syntax確認と`git diff --check`成功。実ダイヤを生成する既存Python test classesは対象外。
 - 実ダイヤ変換・API/secret参照・外部送信・Cloudflare設定/デプロイなし。保存済みprivate previewとQA previewは再生成・変更していない。公開root mockとGit操作もなし。
+
+## T12 Phase 3-1 runtime分離（2026-10-26）
+
+- 通常の目的地選択、表示順・直通filter、payload load、stale制御、adapter候補判定、カード／状態描画を`_local_preview/preview_core.mjs`へ移した。DOM要素を初期化時に列挙して不足要素を明示エラーにし、現在時刻provider・診断hookを呼び出し側から渡す。
+- `_local_preview/preview.js`はlocal bootstrapとして維持し、`LOCAL_DATA_SCOPE` + `cacheMode: 'no-store'`、`debugNow`、`perf=1`、計測履歴・コピーを担当。診断moduleのimportはこのentrypointに限定した。
+- `_local_preview/preview_public.js`は`PUBLIC_DATA_SCOPE` + `cacheMode: 'default'`と実時刻providerを固定する。設定上書き引数を公開せず、local仮想時刻・計測moduleをimportしない。production HTML/builderは本Phaseでは作っていない。
+- `prepare_preview.py`のlocal preview file allowlistに共有coreを追加した。既存private preview・QA previewの生成物は再生成していない。候補ロジック、DOM文言、CSS、公開root mockは変更していない。
+- `tests/preview_runtime_split.test.mjs`でprofile/cache契約、DOM依存検証、entrypoint間の診断境界・時刻/hook注入を確認。既存のsynthetic profile互換性テストがlocal/publicの候補・終電／始発判断を比較する。
+- 確認: Node.js 91件成功（通常・`TZ=UTC`）。実データ非依存のPython subset 35件成功。3 JavaScript module構文確認と`git diff --check`成功。保存済み実データを読むPythonテスト群はsynthetic-only制約により未実行。
+- Phase 3-2以降: production HTML/CSS分離、synthetic-only静的builder、成果物allowlist/診断混入検査、実装後のartifact検証。Cloudflare Pages・CI・production payload生成は未実施。
+
+## T12 Phase 3-1 初期表示不具合の修正（2026-10-26）
+
+- 原因: `collectElements()`がDOM ID文字列（例`destination-trigger`）をproperty keyにしたobjectを返していたが、runtime初期化がcamelCaseの`destinationTrigger`等を直接destructureしていた。その結果、listener登録時に同期TypeErrorとなり、loader呼び出し前にentrypointが停止してHTML初期文言「読み込み中…」が残った。
+- 修正: DOM IDをcamelCase変数へ明示的にaliasするdestructuringへ変更。初期loader promiseの予期しないrejectは既存のload error表示へ遷移させ、local/public bootstrapの同期初期化失敗も状態欄へエラー表示する。profile/cache契約・候補計算・表示ロジックは変更なし。
+- synthetic初期表示テストを追加し、local (`no-store`)・public (`default`)の両runtimeで初回fetchが行われ、loadingを抜けて状態DOMが更新されること、予期しないloader rejectがerror表示になることを検証。
+- 通常private previewを再生成。2026-10-25〜27、8駅、22,115,799 bytes。全駅payload validator成功し、生成bundleの`preview_core.mjs`・entrypoint・module source一致を確認。HTTP server経由でSafariに実表示し、列車カードが表示されることを目視。HTML/JS/core/payloadのHTTP応答は200。
+- 確認: Node.js 94件成功（通常・`TZ=UTC`）。実データ非依存Python subset 35件成功。source/generated JS構文確認と`git diff --check`成功。Console panelのエラー収集は実施していない。
+- QA専用previewと公開root mockはこの処理の出力対象外。ODPT/API key参照、外部送信、deployment、Git操作なし。
 
 ## iPhone Safari目的地切替計測（ローカルpreview限定）
 

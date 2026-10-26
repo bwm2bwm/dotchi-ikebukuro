@@ -82,6 +82,7 @@ class PreparePreviewTests(unittest.TestCase):
                          set(prepare_preview.DESTINATION_PAYLOADS.values()))
         self.assertEqual((self.output / "styles.css").read_bytes(), (ROOT / "styles.css").read_bytes())
         self.assertEqual((self.output / "index.html").read_text(), "index.html")
+        self.assertEqual((self.output / "preview_core.mjs").read_text(), "preview_core.mjs")
         self.assertEqual((self.output / "terminal_ui.mjs").read_text(), "terminal_ui.mjs")
         self.assertEqual((self.output / "virtual_now.mjs").read_text(), "virtual_now.mjs")
         self.assertEqual((self.output / "performance_metrics.mjs").read_text(), "performance_metrics.mjs")

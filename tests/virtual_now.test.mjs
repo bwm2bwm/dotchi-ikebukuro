@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { effectiveNowMs, parseVirtualNow } from '../_local_preview/virtual_now.mjs';
 
-const [html, script, css, mockCss] = await Promise.all([
+const [html, script, core, css, mockCss] = await Promise.all([
   readFile(new URL('../_local_preview/index.html', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.js', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/preview_core.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.css', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
 ]);
@@ -54,10 +55,10 @@ test('night and morning QA examples preserve their JST date and time', () => {
 
 test('preview exposes the override only when valid and keeps normal layout unchanged', () => {
   assert.match(script, /parseVirtualNow\(window\.location\.search\)/);
-  assert.match(script, /effectiveNowMs\(virtualNow\)/);
+  assert.match(script, /nowProvider: \(\) => effectiveNowMs\(virtualNow\)/);
   assert.match(script, /debugNowBanner\.textContent = `テスト日時：\$\{virtualNow\.displayText\}`/);
   assert.match(script, /debugNowBanner\.hidden = false/);
-  assert.match(script, /setInterval\(\(\) => tick\(\), 1000\)/);
+  assert.match(core, /windowRef\.setInterval\(\(\) => tick\(\), 1000\)/);
   assert.match(html, /id="debug-now-banner" class="debug-now-banner" hidden/);
   assert.match(css, /\.debug-now-banner\s*\{[^}]*font-size:\s*10px/);
   assert.match(mockCss, /height:\s*50px/);

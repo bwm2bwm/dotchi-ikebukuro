@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { emptyBoardText, terminalBadgeText } from '../_local_preview/terminal_ui.mjs';
 
-const [script, css, mockCss] = await Promise.all([
+const [entry, core, css, mockCss] = await Promise.all([
   readFile(new URL('../_local_preview/preview.js', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/preview_core.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.css', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
 ]);
+const script = `${entry}\n${core}`;
 
 test('terminal badges require a true terminal flag and a recognized basis', () => {
   assert.equal(terminalBadgeText({ isLastDeparture: true, terminalBasis: 'all_reachable' }), '終電');

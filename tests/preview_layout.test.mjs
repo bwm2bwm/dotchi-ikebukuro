@@ -2,13 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [html, css, mockCss, script, perfMetrics] = await Promise.all([
+const [html, css, mockCss, localEntry, core, perfMetrics] = await Promise.all([
   readFile(new URL('../_local_preview/index.html', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.css', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.js', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/preview_core.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/performance_metrics.mjs', import.meta.url), 'utf8'),
 ]);
+const script = `${localEntry}\n${core}`;
 
 test('preview uses the public mock structure and fixed ad dock with safe-area reserve', () => {
   for (const marker of ['viewport-fit=cover', 'class="top"', 'class="demo"', 'class="selectbox destination-trigger"',
@@ -97,10 +99,10 @@ test('opt-in performance panel stays in page flow and is absent from normal disp
   assert.match(html, /id="performance-history"[^>]*readonly/);
   assert.ok(html.indexOf('class="performance-panel"') < html.indexOf('class="ad-dock"'));
   assert.match(script, /const performanceMode = isPerformanceMode\(window\.location\.search\)/);
-  assert.match(script, /if \(performanceMode\) performancePanel\.hidden = false/);
+  assert.match(localEntry, /if \(performanceMode\) \{\s*performancePanel\.hidden = false/);
   assert.match(script, /Network \$\{duration\(latest\.networkMs\)\}（fetch \$\{duration\(latest\.fetchMs\)\}＋本文 \$\{duration\(latest\.bodyReadMs\)\}）/);
-  assert.match(script, /changed && performanceMode[\s\S]*beginSwitchMeasurement/);
-  assert.match(script, /if \(!performanceMode \|\| !measurement\) return/);
+  assert.match(core, /changed \? hooks\.beginSwitch\?\.\(destination\.name\)/);
+  assert.match(localEntry, /if \(!performanceMode \|\| !measurement\) return/);
   assert.match(css, /\.performance-history[\s\S]*max-height:\s*180px;[^}]*overflow:\s*auto/);
   assert.match(perfMetrics, /slice\(-limit\)/);
   assert.doesNotMatch(perfMetrics, /localStorage|sessionStorage|fetch\(/);

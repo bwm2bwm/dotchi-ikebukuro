@@ -1,5 +1,23 @@
 # 開発ログ
 
+## 2026-10-26 — T12 Phase 3-1 初期表示停止の調査・修正
+
+- 再現: synthetic DOM/runtime testで、共有runtimeのDOM初期化が同期例外になることを確認。`collectElements()`は`destination-trigger`などIDをproperty keyに返すが、呼出側は`destinationTrigger`など存在しないkeyでdestructureしていた。event listener設定前にTypeErrorとなるので、初回payload fetchへ進まず、HTML既定の「読み込み中…」が残る。
+- 修正: DOM IDからruntime変数への明示aliasを追加。初期load promiseの予期しないrejectはload errorへ変換し、local/public entrypointの初期化失敗時にもstatus欄へエラー表示する。候補判定・カード描画・service dayの判定は変更なし。
+- 回帰test: synthetic payloadでlocal/public各runtimeの初回fetch・loading終了・DOM更新を確認。synthetic fetch API取得例外でerror状態に遷移することも確認。public profile/`default`とlocal profile/`no-store`の契約、local診断依存の分離を維持。
+- 通常private previewを`python3 _local_preview/prepare_preview.py`で再生成: `~/Library/Application Support/dotchi-ikebukuro-preview/site`、serviceDate 2026-10-25〜27、8駅、22,115,799 bytes。各payload検証成功。sourceとのbundle一致、`preview.js`からのmodule graph解決、HTTP 200を確認。Safariをloopback serverで開いて列車カードの表示を目視確認。Web Inspector Consoleの取得はOS automationが利用できず未実施。
+- テスト: Node.js 94件成功（通常および`TZ=UTC`）、実データ非依存Python 35件成功、JS構文確認、`git diff --check`成功。
+- QA previewは別出力先で未変更。公開root mock・Cloudflare・外部送信・API・secret参照・commit/push/mergeなし。
+
+## 2026-10-26 — T12 Phase 3-1 runtime分離
+
+- 通常表示処理を`_local_preview/preview_core.mjs`へ切り出し、目的地・表示モード・直通filter、loaderとstale制御、候補選定、カード・状態描画、localStorage設定を共通runtimeに集約。初期化時に必要DOMを検証し、不足IDを列挙する。論理時刻はprovider、任意の性能計測はhooksで注入する。
+- `_local_preview/preview.js`はlocal専用bootstrapとして残し、`LOCAL_DATA_SCOPE`と`no-store`を指定。従来の`debugNow`、`perf=1`、計測履歴、コピーをここだけで処理し、仮想時刻providerと計測hooksを共有runtimeへ渡す。
+- `_local_preview/preview_public.js`を追加し、`PUBLIC_DATA_SCOPE`、`default` HTTP cache、`Date.now()`を固定。public bootstrapから`debugNow`・`perf=1`・local診断moduleを参照しない。公開HTML/CSS・静的builder・Cloudflare接続は未実装。
+- local preview生成file allowlistへ`preview_core.mjs`を追加し、次回の通常private preview生成でも新entrypointが参照する共有moduleを同梱するようにした。private/QA preview生成物は今回変更していない。
+- 回帰確認: Node.js 91 tests passed（通常・`TZ=UTC`）。実データを参照しないPython subset 35 tests passed。3 JavaScript entry/moduleの`node --check`成功、`git diff --check`成功。
+- Phase 3-2ではpublic shell/CSSの分離と、synthetic payloadだけを入力するstatic builder・artifact allowlist検証を別段階で行う。root mockと実ダイヤ公開は引き続き対象外。
+
 ## 2026-10-22 — Phase 3 小竹向原乗換・旅程生成の詳細検証
 
 - 取得済みGTFS ZIPの停留所・停車時刻・カレンダー関連ファイルを調査。`platform_code` は185件すべて空で、ZIPに `transfers.txt` / `pathways.txt` 等もなく、3・4番線や個別列車のホームは判定不能と記録。
