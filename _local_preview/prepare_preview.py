@@ -26,7 +26,7 @@ REQUIRED_INPUTS = (
     DATA_DIR / "TrainTimetable_Fukutoshin.json",
     DATA_DIR / "Station_all.json",
 )
-PREVIEW_FILES = ("index.html", "preview.js", "preview.css", "selection.mjs")
+PREVIEW_FILES = ("index.html", "preview.js", "preview.css", "selection.mjs", "terminal_ui.mjs", "virtual_now.mjs")
 DESTINATION_PAYLOADS = {
     "Kanamecho": "timetable-Kanamecho.json",
     "Senkawa": "timetable-Senkawa.json",

@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from export_local_timetable_payload import build_payload  # noqa: E402
-from odpt_itinerary import DEFAULT_DATA_DIR, DEFAULT_GTFS, ItineraryGenerator  # noqa: E402
+from odpt_itinerary import DEFAULT_DATA_DIR, DEFAULT_GTFS, DESTINATIONS, ItineraryGenerator  # noqa: E402
 
 
 @unittest.skipUnless(DEFAULT_GTFS.exists(), "local Tokyo Metro GTFS ZIP is not present")
@@ -100,6 +100,20 @@ class LocalPayloadExportTests(unittest.TestCase):
                 self.assertEqual(item["primary"]["transfer"], None)
                 self.assertEqual(item["primary"]["arrivalStationId"], "KotakeMukaihara")
                 self.assertEqual(item["destination"], item["headsign"])
+
+    def test_all_destinations_export_route_service_coverage_for_terminal_control(self):
+        for destination_id in DESTINATIONS:
+            with self.subTest(destination_id=destination_id):
+                generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                               destination_station_id=destination_id)
+                day = build_payload(generator, ["2026-10-22"])["serviceDays"][0]
+                self.assertEqual(day["destinationStationId"], destination_id)
+                status = day["destinationStatus"]
+                self.assertEqual(set(status["routes"]), {"6", "9"})
+                for route in status["routes"].values():
+                    self.assertGreaterEqual(route["scheduledTripCount"], route["originTripCount"])
+                    self.assertGreaterEqual(route["originTripCount"], route["candidateCount"])
+                    self.assertIn("transferDataInsufficientCount", route)
 
     def test_phase3_destination_payload_uses_selected_stop_and_daily_status(self):
         generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,

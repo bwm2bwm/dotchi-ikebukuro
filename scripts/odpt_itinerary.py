@@ -64,6 +64,42 @@ ROUTE_STOP_IDS = {
 LINE_ODPT = {"6": "Yurakucho", "9": "Fukutoshin"}
 ODPT_CALENDAR = {"0": "Weekday", "1": "SaturdayHoliday"}
 
+DESTINATION_DATA_ISSUE_CODES = frozenset({
+    "destination_stop_record_missing", "destination_stop_record_ambiguous",
+    "destination_arrival_missing", "destination_alighting_restricted",
+    "destination_alighting_unknown", "destination_time_order_conflict",
+    "destination_stop_order_conflict",
+})
+
+
+def _legacy_destination_event_diagnostics(event: StopEvent) -> set[str]:
+    """Keep legacy Hikawadai diagnostics while identifying explicit pass-throughs."""
+    diagnostics: set[str] = set()
+    if event.arrival_seconds is None:
+        diagnostics.add("destination_arrival_missing")
+    if event.drop_off_type == "1":
+        diagnostics.add("destination_explicit_pass")
+        diagnostics.add("destination_alighting_prohibited")
+    elif event.drop_off_type in ("2", "3"):
+        diagnostics.add("destination_alighting_restricted")
+        diagnostics.add("destination_alighting_prohibited")
+    elif event.drop_off_type not in ("", "0"):
+        diagnostics.add("destination_alighting_unknown")
+        diagnostics.add("destination_alighting_prohibited")
+    elif not event.can_alight:
+        # Defensive fallback if can_alight semantics are extended later.
+        diagnostics.add("destination_alighting_unknown")
+        diagnostics.add("destination_alighting_prohibited")
+    return diagnostics
+
+
+def _destination_data_issues(diagnostics: set[str]) -> set[str]:
+    """Return unresolved destination issues; a missing time at an explicit pass is informational."""
+    issues = set(diagnostics) & DESTINATION_DATA_ISSUE_CODES
+    if "destination_explicit_pass" in diagnostics:
+        issues.discard("destination_arrival_missing")
+    return issues
+
 
 class FeedError(ValueError):
     """Invalid or unsupported GTFS feed."""
@@ -610,9 +646,13 @@ class ItineraryGenerator:
         active = self.active_service_ids(day)
         calendar = self._day_calendar(active)
         trips: dict[str, TripInstance] = {}
+        scheduled_trip_counts = {route_id: 0 for route_id in ROUTES}
         for trip_id, row in self.trips.items():
             if row.get("service_id") not in active:
                 continue
+            route_id = row.get("route_id", "")
+            if route_id in ROUTES:
+                scheduled_trip_counts[route_id] += 1
             instance = self._make_trip(trip_id, row, day, self.events.get(trip_id, ()))
             if instance:
                 trips[trip_id] = instance
@@ -632,19 +672,14 @@ class ItineraryGenerator:
         departure_destinations: dict[str, StopEvent] = {}
         transfer_data_insufficient_trip_ids: set[str] = set()
         transfer_pass_through_count = 0
-        destination_issue_codes = {
-            "destination_stop_record_missing", "destination_stop_record_ambiguous",
-            "destination_arrival_missing", "destination_alighting_restricted",
-            "destination_alighting_unknown", "destination_time_order_conflict",
-            "destination_stop_order_conflict",
-        }
         route_destination_counts = {
-            route_id: {"originTripCount": 0, "candidateCount": 0, "passThroughCount": 0,
-                       "dataInsufficientCount": 0}
+            route_id: {"scheduledTripCount": scheduled_trip_counts[route_id],
+                       "originTripCount": 0, "candidateCount": 0, "passThroughCount": 0,
+                       "dataInsufficientCount": 0, "transferDataInsufficientCount": 0}
             for route_id in ROUTES
         }
         direct_data_issue_trip_ids: set[str] = set()
-        if transfer_enabled and self.destination_station_id != DEFAULT_DESTINATION_ID:
+        if transfer_enabled:
             for counts in route_destination_counts.values():
                 counts.update({"directCandidateCount": 0, "transferCandidateCount": 0,
                                "transferPairCount": 0, "transferOnlyCount": 0})
@@ -654,7 +689,31 @@ class ItineraryGenerator:
             destination_stop_id = DESTINATIONS[self.destination_station_id]["routeStopIds"][trip.route_id]
             route_destination_counts[trip.route_id]["originTripCount"] += 1
             if self.destination_station_id == DEFAULT_DESTINATION_ID:
-                h_event = self._event_after(trip.events, {destination_stop_id}, trip.origin_event.sequence)
+                target_order = destination["outboundOrder"]
+                station_order = {
+                    item["routeStopIds"][trip.route_id]: item["outboundOrder"]
+                    for item in DESTINATIONS.values()
+                }
+                forward_events = [event for event in trip.events
+                                  if event.sequence > trip.origin_event.sequence
+                                  and event.stop_id in station_order]
+                ordered_values = [station_order[event.stop_id] for event in forward_events]
+                destination_events = [event for event in forward_events
+                                      if event.stop_id == destination_stop_id]
+                if ordered_values != sorted(ordered_values):
+                    diagnostics[trip_id].add("destination_stop_order_conflict")
+                    h_event = None
+                elif len(destination_events) > 1:
+                    diagnostics[trip_id].add("destination_stop_record_ambiguous")
+                    h_event = None
+                elif destination_events:
+                    h_event = destination_events[0]
+                else:
+                    # A later listed station proves the trip continues past the
+                    # target; do not mistake a missing target row for pass-through.
+                    if any(order > target_order for order in ordered_values):
+                        diagnostics[trip_id].add("destination_stop_record_missing")
+                    h_event = None
             else:
                 target_order = DESTINATIONS[self.destination_station_id]["outboundOrder"]
                 station_order = {
@@ -684,11 +743,11 @@ class ItineraryGenerator:
             if h_event:
                 is_phase2_destination = self.destination_station_id != DEFAULT_DESTINATION_ID
                 if not is_phase2_destination:
-                    # Preserve both legacy Hikawadai diagnostics independently.
-                    if h_event.arrival_seconds is None:
-                        diagnostics[trip_id].add("destination_arrival_missing")
-                    if not h_event.can_alight:
-                        diagnostics[trip_id].add("destination_alighting_prohibited")
+                    # Keep legacy row diagnostics, but count an absent time at an
+                    # explicitly non-alightable stop as a known pass, not a gap.
+                    diagnostics[trip_id].update(_legacy_destination_event_diagnostics(h_event))
+                    if h_event.drop_off_type == "1":
+                        route_destination_counts[trip.route_id]["passThroughCount"] += 1
                 elif h_event.drop_off_type == "1":
                     diagnostics[trip_id].add("destination_explicit_pass")
                     route_destination_counts[trip.route_id]["passThroughCount"] += 1
@@ -714,7 +773,7 @@ class ItineraryGenerator:
                         arrival_station_id=self.destination_station_id,
                     )
 
-            if diagnostics[trip_id] & destination_issue_codes:
+            if _destination_data_issues(diagnostics[trip_id]):
                 route_destination_counts[trip.route_id]["dataInsufficientCount"] += 1
                 direct_data_issue_trip_ids.add(trip_id)
             if not transfer_enabled:
@@ -881,9 +940,7 @@ class ItineraryGenerator:
                 primary_itinerary=primary, direct_alternative=direct, best_transfer_alternative=best_transfer,
                 transfer_candidates_count=len(transfers), status=status, data_quality=data_quality,
             ))
-        if self.destination_station_id == DEFAULT_DESTINATION_ID:
-            self.last_destination_status = {}
-        elif transfer_enabled:
+        if transfer_enabled:
             transfer_data_insufficient_count = len(
                 transfer_data_insufficient_trip_ids - direct_data_issue_trip_ids)
             direct_candidate_count = sum(row.direct_alternative is not None for row in results)
@@ -905,6 +962,13 @@ class ItineraryGenerator:
                 counts["transferPairCount"] += result.transfer_candidates_count
                 counts["transferOnlyCount"] += (
                     result.direct_alternative is None and result.best_transfer_alternative is not None)
+            transfer_issues_by_route = {route_id: 0 for route_id in ROUTES}
+            for trip_id in transfer_data_insufficient_trip_ids - direct_data_issue_trip_ids:
+                issue_trip = trips.get(trip_id)
+                if issue_trip is not None:
+                    transfer_issues_by_route[issue_trip.route_id] += 1
+            for route_id, count in transfer_issues_by_route.items():
+                route_destination_counts[route_id]["transferDataInsufficientCount"] = count
             status = ("normal" if candidate_count else
                       "data_insufficient" if insufficient_count else "no_candidates")
             self.last_destination_status = {

@@ -1,5 +1,37 @@
 # プロジェクト状態
 
+## 通常private preview最終確認準備（2026-10-26）
+
+- 保存済みローカルGTFS/ODPT入力から通常private previewを再生成。通常出力先はApplication Support内の `dotchi-ikebukuro-preview/site`、運行日は2026-10-25〜27、8駅、payload合計22,115,799 bytes。生成45.6秒、payload検証2.1秒。
+- GTFSの適用期間は2026-09-19〜2027-03-12。今回必要なservice day（10/25・10/26・10/27）は全て収録され、現在日時で全8駅の通常／直通のみpayload評価がvalid。8駅すべてのpayloadをschema・metadata validatorで検証。
+- 配信bundle内のHTML、CSS、JS、adapter、loader、validator、`terminal_ui.mjs`、`virtual_now.mjs`は各ソースと一致。氷川台の10/26副都心線はGTFS明示通過13件を`passThroughCount`へ計上し、`dataInsufficientCount` 0、乗換候補213件を保持。終電・始発判定も最新adapterとUIを含む通常previewへ反映。
+- 利用者からMac Chrome／iPhone Safari実機QA完了の報告あり。終電badge、片路線・両路線終了、始発60分前の路線別再開、路線別／発車順、目的地切替、iPhoneの6件表示・カード配置・広告dockを目視し問題なしとのこと。
+- QA専用previewは通常previewと別ディレクトリのまま未変更。公開root mock・公開配信先への変更なし。
+
+## 終電・翌運行日の候補表示 Phase 1（2026-10-26）
+
+- `scripts/timetable_adapter.mjs` は、目的地へ到達可能な候補をserviceDate・池袋発路線ごとに集計し、最終発車を`isLastDeparture`で返す。通常表示はprimary候補（直通／乗換）、直通filter時は直通候補のみから判定する。終電判定は池袋発時刻で行い、最早着選定とは独立。
+- 運行日別状態は`routeStates`、全体状態は`serviceState`で返す。`ended`は両路線のroute stateがendedの場合だけ。運休日、到達候補なし、データ不足、旧payload／不完全metadataは別状態にし、候補ゼロを終電終了とはみなさない。
+- serviceDate・路線の最初の到達可能候補の発車60分前から当該日の候補を表示する。前日serviceDateの24時超の候補はserviceDateを維持し、翌serviceDateとは別に判定する。既存の24時間horizon、期限・必要service day検証、最早着選定は維持。
+- 表示件数の制限前に終電候補を判定する。selectionは従来どおり路線別の直近3件／発車順の直近6件を返し、終電候補が範囲内にある場合だけ`isLastDeparture`が選択結果に残る。表示範囲外の終電候補は通常候補を押し出さない。
+- Phase 2 UIは`isLastDeparture`と認識済み`terminalBasis`からカードに「終電」／「直通終電」を表示し、`serviceState === 'ended'`の場合だけ終了文を表示する。エラー／データ不足は既存の警告・安全停止へ流し、目的地切替の読込中は旧カードを消去する。毎秒の既存tickで始発60分前ゲート・終電後状態を反映する。
+- 終電badgeは種別・行先と同じ領域にコンパクトに追加。発車・countdown・到着列、カード最小高68px／間隔4px、6件制限、広告dock・safe-areaと公開root mockは未変更。
+- ローカルpreviewの配信bundleへ`terminal_ui.mjs`と`virtual_now.mjs`を含め、2026-10-25〜27の保存済み入力からprivate Application Support previewを再生成済み。公開配信は行っていない。
+- exporterは全8駅でroute別`scheduledTripCount`、池袋発trip、到達候補、直通／乗換データ不足をpayloadへ出力する。氷川台も日別`destinationStatus`を持つ。古いpayloadもschema validatorでは読めるが、終電根拠がないserviceDateはunknownとして扱い、未来日の候補は安全のため出さない。
+- 自動テスト追加: 路線別終電・片路線終了・遅い乗換・直通filter、24/25時、23:50/00:10/00:40/01:30/05:00、発車境界、始発60分前境界、serviceDate分離、データ不足／運休日／到達候補なし、8駅payload形状、表示上限への終電保持。
+- 確認: Python unittest 50件成功。Node全体60件成功、`TZ=UTC`でも60件成功。テストはローカルGTFS/ODPT保存データを読み、外部API通信はしていない。preview payloadは別途ローカル保存データから再生成済み。
+
+## ローカルpreviewの仮想日時QA
+
+- `_local_preview/virtual_now.mjs` はURLの`debugNow=YYYY-MM-DDTHH:mm[:ss]`をAsia/Tokyoの壁時計として解釈し、`buildBoard`に渡す`nowMs`だけを固定する。端末TZに依存せず、日付不正・時刻不正・タイムゾーン接尾辞付きなどは無視して実時刻へ戻す。
+- 有効な指定時だけ「テスト日時：YYYY/MM/DD HH:mm」を表示。指定時の時計・列車・カウントダウンは進まず、通常利用はパラメータを外すかページを再読込する。
+- Mac Safari例: `http://127.0.0.1:8765/index.html?debugNow=2026-10-27T00:10:00`。iPhone SafariはMacと同じLAN上で、preview serverをMacのLAN IPへbindして`http://<MacのLAN IP>:8765/index.html?debugNow=2026-10-27T00:10:00`を開く。確認後は`debugNow`をURLから外して再読込する。公開ホストへ配置しない。
+- 仮想日時が現在のpayload適用期間・必要service dayに収まらない場合は、既存の安全停止で列車を表示しない。ロジックは日付を補完しない。
+- QA後の修正: 次serviceDateの候補は60分ゲート前に`running`を引き起こさない。前serviceDateが両路線ended、当日路線がnot_startedの間はserviceState=`ended`。路線別の始発ゲート到達でそのrouteだけrunningとなり、全体はpartial、両路線が到達したらrunning。前serviceDateの24/25時便が未発車ならroute stateはrunningを保つ。
+- 運休日・到達候補なしはno_service/no_candidatesを維持し、前serviceDateの終電証拠が不足ならunknown。payload不足・期限切れは既存のunavailable安全停止を維持。
+- 修正確認: Python unittest 50件成功。Node全体70件成功、`TZ=UTC`でも70件成功。ODPT APIアクセス・root mock変更なし。
+- 修正adapterを含むprivate previewを保存済み入力から再生成済み（8駅、2026-10-25〜27）。公開先への実ダイヤ配置なし。
+
 ## 公開モック準拠のローカルpreview UI
 
 - `_local_preview/index.html` は公開モックと同じヘッダー／時計、注意表示、ルート枠、44px操作行、カードDOM、下部広告dockの構成。`prepare_preview.py` はroot `styles.css` をローカル出力へコピーし、preview.cssで状態表示・折りたたみmetadataを補う。
@@ -218,6 +250,13 @@
 ## 作業上の注意
 
 実ダイヤ導入までは架空データの警告を残す。ODPT仕様、データ提供状況、利用条件や外部サービスの仕様は確認前に断定しない。詳細な判断経緯・作業・検証結果は devlog.md に追記する。
+
+## 2026-10-27 — 仮想日時QA専用preview
+
+- `_local_preview/prepare_qa_preview.py --target-date YYYY-MM-DD` は保存済みローカルGTFS/ODPT入力から、QA対象日の前日・当日・翌serviceDateを含むpreviewをApplication Support配下の `qa/YYYY-MM-DD/site` に生成する。通常previewの `site` は出力先にしない。
+- 生成は既存 `prepare_preview.prepare()` のステージング・payload検証・入替/rollbackを利用する。QA validatorだけは対象日のJST日時を基準にrequired serviceDateを検証する。GTFS適用期間外の日は拒否され、既存QA出力を保持する。外部APIへは接続しない。
+- 仮想日時QAには対象日の両隣のserviceDateが必要。通常previewの固定日付幅（生成時のJST前日・当日・翌日）と仮想時計が別日になると `missing_service_days` になることがあった。
+- 2026-10-27 QA payloadは10/26〜28の3日分で生成・検証済み。GTFS `drop_off_type=1`の明示通過と到着時刻欠落を区別するよう修正し、氷川台・副都心線の13件はpassThroughCountに分類、dataInsufficientCountは0。00:40/01:30とも通常・直通のみで両路線ended。詳細はdevlogの2026-10-27分類修正記録。
 
 ## T14 Phase 3 — 並走区間8駅の目的地payload（2026-10-23）
 

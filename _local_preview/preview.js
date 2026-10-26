@@ -3,8 +3,12 @@ import { createLatestDestinationLoader, createPreparedPayloadCache, loadTimetabl
   readSavedDestinationId, saveDestinationId, readSavedDisplayMode, saveDisplayMode,
   DESTINATION_PAYLOADS } from './local_preview_payload_loader.mjs';
 import { countdownText, earliestVisible, selectPreviewGroups } from './selection.mjs';
+import { emptyBoardText, terminalBadgeText } from './terminal_ui.mjs';
+import { effectiveNowMs, parseVirtualNow } from './virtual_now.mjs';
 
 const clock = document.getElementById('clock');
+const debugNowBanner = document.getElementById('debug-now-banner');
+const virtualNow = parseVirtualNow(window.location.search);
 const statusEl = document.getElementById('timetable-status');
 const metadataEl = document.getElementById('payload-metadata');
 const boardEl = document.getElementById('board');
@@ -151,41 +155,45 @@ function typeStyle(item) {
   return 'type-normal';
 }
 
-function renderGroups(groups, nowMs) {
+function renderGroups(groups, nowMs, serviceState) {
   const visible = groups.flatMap(group => group.items);
   const best = earliestVisible(groups);
-  const signature = `${mode}|${directOnlyEl.checked}|${visible.map(item => item.id).join(',')}|${best?.id ?? ''}`;
+  const signature = `${mode}|${directOnlyEl.checked}|${serviceState}|${visible.map(item => `${item.id}:${item.isLastDeparture === true}:${item.terminalBasis ?? ''}`).join(',')}|${best?.id ?? ''}`;
   if (signature !== selectedSignature) {
     const fragment = document.createDocumentFragment();
-    for (const group of groups) {
-      const section = document.createElement('section');
-      section.className = 'line';
-      for (const item of group.items) {
-        const card = document.createElement('article');
-        card.className = `train${item.id === best?.id ? ' best' : ''}`;
-        card.style.setProperty('--line-color', item.color);
-        card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text time-value"></span><span class="depart-suffix">発</span><span class="type-destination"><span class="type-label"></span><span class="destination-label"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="minitxt">発車まで</div><div class="count"></div></div><div class="arrival-wrap"><div class="minitxt arrival-caption">到着</div><div class="arrival time-value"></div></div>`;
-        card.querySelector('.route').textContent = item.line;
-        card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
-        card.querySelector('.departure-text').textContent = item.departureText;
-        const typeLabel = card.querySelector('.type-label');
-        typeLabel.textContent = item.kind;
-        typeLabel.className = `type-label ${typeStyle(item)}`;
-        typeLabel.dataset.typeSource = item.typeSource;
-        card.querySelector('.destination-label').textContent = `${item.destination}行`;
-        card.querySelector('.sub').textContent = item.journeyKind === 'direct'
-          ? '直通・乗換なし' : `小竹向原乗換・待ち約${Math.round(item.transfer.waitMinutes)}分`;
-        card.querySelector('.arrival').textContent = item.arrivalText ?? '—';
-        card.querySelector('.arrival-caption').textContent = '到着';
-        card.dataset.departureAt = String(item.departureAtMs);
-        section.appendChild(card);
+    if (serviceState !== 'ended') {
+      for (const group of groups) {
+        const section = document.createElement('section');
+        section.className = 'line';
+        for (const item of group.items) {
+          const card = document.createElement('article');
+          card.className = `train${item.id === best?.id ? ' best' : ''}`;
+          card.style.setProperty('--line-color', item.color);
+          card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text time-value"></span><span class="depart-suffix">発</span><span class="type-destination"><span class="type-label"></span><span class="destination-label"></span><span class="terminal-badge"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="minitxt">発車まで</div><div class="count"></div></div><div class="arrival-wrap"><div class="minitxt arrival-caption">到着</div><div class="arrival time-value"></div></div>`;
+          card.querySelector('.route').textContent = item.line;
+          card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
+          card.querySelector('.departure-text').textContent = item.departureText;
+          const typeLabel = card.querySelector('.type-label');
+          typeLabel.textContent = item.kind;
+          typeLabel.className = `type-label ${typeStyle(item)}`;
+          typeLabel.dataset.typeSource = item.typeSource;
+          card.querySelector('.destination-label').textContent = `${item.destination}行`;
+          card.querySelector('.terminal-badge').textContent = terminalBadgeText(item);
+          card.querySelector('.sub').textContent = item.journeyKind === 'direct'
+            ? '直通・乗換なし' : `小竹向原乗換・待ち約${Math.round(item.transfer.waitMinutes)}分`;
+          card.querySelector('.arrival').textContent = item.arrivalText ?? '—';
+          card.querySelector('.arrival-caption').textContent = '到着';
+          card.dataset.departureAt = String(item.departureAtMs);
+          section.appendChild(card);
+        }
+        fragment.appendChild(section);
       }
-      fragment.appendChild(section);
     }
-    if (!visible.length) {
+    if (!visible.length || serviceState === 'ended') {
       const empty = document.createElement('p');
-      empty.className = 'empty';
-      empty.textContent = '現在から24時間以内に表示できる列車はありません。';
+      empty.className = serviceState === 'ended' ? 'empty terminal-ended' : 'empty';
+      empty.setAttribute('role', 'status');
+      empty.textContent = emptyBoardText(serviceState);
       fragment.appendChild(empty);
     }
     boardEl.replaceChildren(fragment);
@@ -210,7 +218,7 @@ function recordLoadPerf(entry) {
 }
 
 function tick(eventStarted = performance.now()) {
-  const nowMs = Date.now();
+  const nowMs = effectiveNowMs(virtualNow);
   clock.textContent = clockFormatter.format(new Date(nowMs));
   const started = performance.now();
   if (loadFailure) {
@@ -243,7 +251,7 @@ function tick(eventStarted = performance.now()) {
       selectedSignature = '';
       boardEl.replaceChildren();
     } else {
-      renderGroups(groups, nowMs);
+      renderGroups(groups, nowMs, result.serviceState);
     }
     const domMs = performance.now() - domStarted;
     recordPerf({ at: nowMs, eventToDomMs: performance.now() - eventStarted, adapterMs, selectionMs, domMs });
@@ -329,5 +337,9 @@ directOnlyEl.addEventListener('change', () => tick());
 
 updateModeButtons();
 updateDestinationLabel();
+if (virtualNow) {
+  debugNowBanner.textContent = `テスト日時：${virtualNow.displayText}`;
+  debugNowBanner.hidden = false;
+}
 loadDestination(selectedDestinationId);
 setInterval(() => tick(), 1000);

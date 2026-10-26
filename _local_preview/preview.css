@@ -1,6 +1,17 @@
 /* Preview-only state and metadata additions layered over the public mock styles. */
 main { padding-top: 2px; }
 .demo { margin-top: 3px; margin-bottom: 3px; padding-top: 3px; padding-bottom: 3px; }
+.debug-now-banner {
+  margin: 3px 0;
+  padding: 3px 8px;
+  border: 1px solid #e5d8b5;
+  border-radius: 6px;
+  color: #73551f;
+  background: #fff7df;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+}
 .selectbox { min-height: 38px; padding-top: 4px; padding-bottom: 4px; }
 .destination-trigger {
   width: 100%;
@@ -140,6 +151,23 @@ body.destination-modal-open { overflow: hidden; }
   white-space: normal;
 }
 .type-label, .destination-label { min-width: 0; overflow-wrap: anywhere; }
+.terminal-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  align-self: flex-start;
+  border: 1px solid #c7a967;
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: #73551f;
+  background: #fff7df;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.terminal-badge:empty { display: none; }
+.terminal-ended { border: 1px solid #e5d8b5; color: #66552f; background: #fffaf0; text-align: center; }
 .type-normal { color: #55565B; font-weight: 600; }
 .type-express, .type-brand { color: #B84E49; font-weight: 800; }
 .type-supplement { color: #68727a; font-weight: 500; }

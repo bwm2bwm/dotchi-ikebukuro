@@ -368,11 +368,25 @@ export function validateTimetablePayload(payload) {
       for (const key of ['candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
         requireInteger(state[key], `${path}.destinationStatus.${key}`);
       }
+      if (state.transferDataInsufficientCount !== undefined) {
+        requireInteger(state.transferDataInsufficientCount,
+          `${path}.destinationStatus.transferDataInsufficientCount`);
+      }
       const routes = requireObject(state.routes, `${path}.destinationStatus.routes`);
       for (const routeId of Object.keys(ROUTE_PRESENTATION)) {
         const counts = requireObject(routes[routeId], `${path}.destinationStatus.routes.${routeId}`);
         for (const key of ['originTripCount', 'candidateCount', 'passThroughCount', 'dataInsufficientCount']) {
           requireInteger(counts[key], `${path}.destinationStatus.routes.${routeId}.${key}`);
+        }
+        for (const key of ['scheduledTripCount', 'transferDataInsufficientCount']) {
+          if (counts[key] !== undefined) {
+            requireInteger(counts[key], `${path}.destinationStatus.routes.${routeId}.${key}`);
+          }
+        }
+        if (counts.scheduledTripCount !== undefined
+            && counts.scheduledTripCount < counts.originTripCount) {
+          fail(`${path}.destinationStatus.routes.${routeId}.scheduledTripCount`,
+            'must cover origin trip count');
         }
         if (transferMetricsRequired) {
           for (const key of ['directCandidateCount', 'transferCandidateCount', 'transferPairCount',
@@ -416,6 +430,13 @@ export function validateTimetablePayload(payload) {
         if (state.dataInsufficientCount !== routeTotals.dataInsufficientCount
             + state.transferDataInsufficientCount) {
           fail(`${path}.destinationStatus.dataInsufficientCount`, 'must include transfer data insufficiency');
+        }
+        const routeTransferIssues = Object.values(routes).reduce((sum, counts) =>
+          sum + (counts.transferDataInsufficientCount ?? 0), 0);
+        if (routeTransferIssues !== 0
+            && routeTransferIssues !== state.transferDataInsufficientCount) {
+          fail(`${path}.destinationStatus.transferDataInsufficientCount`,
+            'must match route transfer data insufficiency');
         }
       }
       if (state.candidateCount !== day.departures.filter(item => item.primary !== null).length) {
@@ -531,6 +552,98 @@ function compareIdentity(a, b) {
     || a.sourceId.localeCompare(b.sourceId);
 }
 
+const ROUTE_IDS = Object.freeze(['6', '9']);
+const SERVICE_START_LEAD_MS = 60 * 60 * 1000;
+
+function routeDayKey(routeId, serviceDate) {
+  return `${routeId}|${serviceDate}`;
+}
+
+function routeDayCoverage(day, routeId, directOnly) {
+  // Terminal claims require feed-generated counts. Legacy/malformed coverage is
+  // unknown, and zero destination candidates can never prove an ended service.
+  const route = day.destinationStatus?.routes?.[routeId];
+  if (!route || !Number.isSafeInteger(route.scheduledTripCount)
+      || !Number.isSafeInteger(route.originTripCount)
+      || !Number.isSafeInteger(route.candidateCount)
+      || !Number.isSafeInteger(route.dataInsufficientCount)) {
+    return { state: 'unknown', candidates: 0 };
+  }
+  const candidates = directOnly
+    ? (Number.isSafeInteger(route.directCandidateCount) ? route.directCandidateCount : route.candidateCount)
+    : route.candidateCount;
+  const transferIssues = Number.isSafeInteger(route.transferDataInsufficientCount)
+    ? route.transferDataInsufficientCount : null;
+  if (route.scheduledTripCount === 0) return { state: 'no_service', candidates };
+  if (route.dataInsufficientCount > 0
+      || (!directOnly && (transferIssues === null || transferIssues > 0))) {
+    return { state: 'data_insufficient', candidates };
+  }
+  if (candidates === 0) return { state: 'no_candidates', candidates };
+  return { state: 'scheduled', candidates };
+}
+
+function summarizeRouteStates(routeDayStates, todayTokyo) {
+  // routeStates exposes one current state per boarding route plus each
+  // serviceDate's state; serviceState is 'ended' only when both routes ended.
+  const routeStates = {};
+  for (const routeId of ROUTE_IDS) {
+    const days = [...routeDayStates.values()]
+      .filter(day => day.routeId === routeId)
+      .sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+    const today = days.find(day => day.serviceDate === todayTokyo);
+    const previous = days.find(day => day.serviceDate === addCalendarDays(todayTokyo, -1));
+    const upcoming = days.find(day => day.serviceDate === addCalendarDays(todayTokyo, 1));
+    let state = 'unknown';
+
+    if (upcoming?.state === 'data_insufficient' || upcoming?.state === 'unknown') {
+      state = 'unknown';
+    } else if (today?.state === 'data_insufficient' || today?.state === 'unknown') {
+      state = today.state;
+    } else if (today?.state === 'running') {
+      state = 'running';
+    } else if (today?.state === 'ended') {
+      state = 'ended';
+    } else if (today?.state === 'not_started') {
+      // The next service date's future departures do not mean trains are
+      // currently running. Keep the prior day's ended state until this route's
+      // own 60-minute gate changes today's state to running.
+      if (previous?.state === 'running') state = 'running';
+      else if (previous?.state === 'ended') state = 'ended';
+      else if (previous?.state === 'data_insufficient' || previous?.state === 'unknown') state = 'unknown';
+      else state = 'not_started';
+    } else if (today?.state === 'no_service' || today?.state === 'no_candidates') {
+      // A previous 24:xx/25:xx service can still be active after midnight.
+      // Preserve that only while its own final departure is still ahead.
+      state = previous?.state === 'running' ? 'running' : today.state;
+    } else if (upcoming?.state === 'not_started') {
+      state = 'not_started';
+    }
+
+    routeStates[routeId] = {
+      state,
+      serviceDates: days.map(day => ({
+        serviceDate: day.serviceDate,
+        state: day.state,
+        firstDepartureAtMs: day.firstDepartureAtMs,
+        lastDepartureAtMs: day.lastDepartureAtMs,
+        terminalCandidateId: day.terminalCandidateId,
+      })),
+    };
+  }
+  const states = Object.values(routeStates).map(value => value.state);
+  let serviceState = 'unknown';
+  if (states.every(state => state === 'ended')) serviceState = 'ended';
+  else if (states.includes('data_insufficient') || states.includes('unknown')) serviceState = 'unknown';
+  else if (states.every(state => state === 'no_service')) serviceState = 'no_service';
+  else if (states.every(state => state === 'no_candidates')) serviceState = 'no_candidates';
+  else if (states.includes('running')) serviceState = states.includes('ended') ? 'partial' : 'running';
+  else if (states.includes('ended')) serviceState = 'partial';
+  else if (states.includes('not_started')) serviceState = 'not_started';
+  else if (states.includes('no_service') || states.includes('no_candidates')) serviceState = 'partial';
+  return { routeStates, serviceState };
+}
+
 /**
  * Make presentable candidates from one or more service days.
  * Options: nowMs, horizonMs (default 24h), directOnly, mode ('line'|'departure').
@@ -559,6 +672,7 @@ export function buildBoard(payload, {
   ]);
   const excluded = [];
   const deduplicated = new Map();
+  const routeDayCandidates = new Map();
   let duplicateCount = 0;
 
   const sourceEntries = prepared?.entries ?? payload.serviceDays.flatMap(day =>
@@ -595,6 +709,8 @@ export function buildBoard(payload, {
   if (validity !== 'valid') {
     return {
       mode, nowMs, windowEndMs: nowMs + horizonMs, items: [], groups: [], bestId: null, excluded: [],
+      serviceState: 'unavailable',
+      routeStates: Object.fromEntries(ROUTE_IDS.map(routeId => [routeId, { state: 'unavailable', serviceDates: [] }])),
       destinationStationId: sourcePayload.serviceDays[0]?.destinationStationId ?? null, destinationStates,
       validity, ...presentation,
       diagnostics: {
@@ -639,15 +755,6 @@ export function buildBoard(payload, {
       const card = prepared
         ? (directOnly ? entry.direct : entry.primary)
         : makeCard(day, departure, journey);
-      if (card.departureAtMs <= nowMs) {
-        excluded.push({ id: departure.id, reason: 'already_departed' });
-        continue;
-      }
-      if (card.departureAtMs > endMs) {
-        excluded.push({ id: departure.id, reason: 'outside_display_window' });
-        continue;
-      }
-
       const identity = `${card.routeId}|${card.originTripId}|${card.departureAtMs}`;
       const previous = deduplicated.get(identity);
       if (previous) {
@@ -658,9 +765,67 @@ export function buildBoard(payload, {
       }
   }
 
+  const routeDayMeta = new Map();
+  for (const serviceDate of requiredServiceDates.filter(value => allowedServiceDates.has(value))) {
+    const day = sourcePayload.serviceDays.find(item => item.serviceDate === serviceDate);
+    for (const routeId of ROUTE_IDS) {
+      const coverage = routeDayCoverage(day, routeId, directOnly);
+      routeDayMeta.set(routeDayKey(routeId, serviceDate), {
+        routeId, serviceDate, nowMs, ...coverage,
+      });
+      routeDayCandidates.set(routeDayKey(routeId, serviceDate), []);
+    }
+  }
+  for (const card of deduplicated.values()) {
+    const key = routeDayKey(card.routeId, card.serviceDate);
+    routeDayCandidates.get(key)?.push(card);
+  }
+  for (const [key, meta] of routeDayMeta) {
+    const cards = routeDayCandidates.get(key) ?? [];
+    cards.sort(compareDeparture);
+    const coverage = meta.state;
+    if (cards.length > 0) meta.firstDepartureAtMs = cards[0].departureAtMs;
+    if (['scheduled', 'no_service', 'no_candidates'].includes(coverage)
+        && cards.length !== meta.candidates) {
+      meta.state = 'unknown';
+    } else if (coverage === 'scheduled' && cards.length > 0) {
+      const last = cards[cards.length - 1];
+      meta.lastDepartureAtMs = last.departureAtMs;
+      meta.terminalCandidateId = last.id;
+      meta.state = nowMs < meta.firstDepartureAtMs - SERVICE_START_LEAD_MS
+        ? 'not_started'
+        : nowMs < meta.lastDepartureAtMs ? 'running' : 'ended';
+    }
+  }
+  const { routeStates, serviceState } = summarizeRouteStates(routeDayMeta, todayTokyo);
+
+  const candidates = [];
+  for (const card of deduplicated.values()) {
+    const meta = routeDayMeta.get(routeDayKey(card.routeId, card.serviceDate));
+    const showStartWindow = meta?.firstDepartureAtMs !== undefined
+      && nowMs >= meta.firstDepartureAtMs - SERVICE_START_LEAD_MS;
+    if (!showStartWindow) {
+      excluded.push({ id: card.sourceId, reason: 'before_service_start_window' });
+      continue;
+    }
+    if (card.departureAtMs <= nowMs) {
+      excluded.push({ id: card.sourceId, reason: 'already_departed' });
+      continue;
+    }
+    if (card.departureAtMs > endMs) {
+      excluded.push({ id: card.sourceId, reason: 'outside_display_window' });
+      continue;
+    }
+    candidates.push({
+      ...card,
+      isLastDeparture: meta?.state !== 'unknown' && meta?.terminalCandidateId === card.id,
+      terminalBasis: directOnly ? 'direct_only' : 'all_reachable',
+    });
+  }
+
   const candidateMs = onTiming ? performance.now() - candidateStarted : null;
   const sortStarted = onTiming ? performance.now() : 0;
-  const candidates = [...deduplicated.values()].sort(compareDeparture);
+  candidates.sort(compareDeparture);
   const earliest = candidates.reduce((best, card) => !best
     || card.arrivalAtMs < best.arrivalAtMs
     || (card.arrivalAtMs === best.arrivalAtMs && compareDeparture(card, best) < 0)
@@ -686,6 +851,8 @@ export function buildBoard(payload, {
     items,
     groups,
     bestId: earliest?.id ?? null,
+    serviceState,
+    routeStates,
     destinationStationId: sourcePayload.serviceDays[0]?.destinationStationId ?? null,
     destinationStates,
     validity,

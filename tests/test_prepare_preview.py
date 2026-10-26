@@ -82,6 +82,8 @@ class PreparePreviewTests(unittest.TestCase):
                          set(prepare_preview.DESTINATION_PAYLOADS.values()))
         self.assertEqual((self.output / "styles.css").read_bytes(), (ROOT / "styles.css").read_bytes())
         self.assertEqual((self.output / "index.html").read_text(), "index.html")
+        self.assertEqual((self.output / "terminal_ui.mjs").read_text(), "terminal_ui.mjs")
+        self.assertEqual((self.output / "virtual_now.mjs").read_text(), "virtual_now.mjs")
         self.assertGreaterEqual((self.output / "preview.js").stat().st_mtime, started_at)
 
     def test_failure_while_generating_one_destination_keeps_existing_preview(self):

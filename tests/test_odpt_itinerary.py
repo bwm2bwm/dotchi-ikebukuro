@@ -16,13 +16,50 @@ from odpt_itinerary import (  # noqa: E402
     FeedDateError,
     ItineraryGenerator,
     ROUTE_STOP_IDS,
+    StopEvent,
     VERIFIED_DESTINATION_IDS,
+    _destination_data_issues,
+    _legacy_destination_event_diagnostics,
     choose_primary,
     format_service_time,
     parse_gtfs_time,
     to_dict,
 )
 from odpt_stop_patterns import classify, resolve_type  # noqa: E402
+
+
+class DestinationEventDiagnosticTests(unittest.TestCase):
+    @staticmethod
+    def event(drop_off_type: str, arrival_seconds: int | None = None) -> StopEvent:
+        return StopEvent("destination", None, 2, arrival_seconds, None, "0", drop_off_type, None)
+
+    def test_explicit_no_alighting_with_missing_arrival_is_known_pass_not_incomplete(self):
+        diagnostics = _legacy_destination_event_diagnostics(self.event("1"))
+        self.assertIn("destination_explicit_pass", diagnostics)
+        self.assertIn("destination_arrival_missing", diagnostics)
+        self.assertIn("destination_alighting_prohibited", diagnostics)
+        self.assertEqual(_destination_data_issues(diagnostics), set())
+
+    def test_explicit_pass_does_not_mask_an_independent_destination_issue(self):
+        diagnostics = _legacy_destination_event_diagnostics(self.event("1"))
+        diagnostics.add("destination_stop_record_ambiguous")
+        self.assertEqual(_destination_data_issues(diagnostics), {"destination_stop_record_ambiguous"})
+
+    def test_conditional_unknown_and_missing_stop_data_remain_incomplete(self):
+        for drop_off_type in ("2", "3"):
+            with self.subTest(drop_off_type=drop_off_type):
+                diagnostics = _legacy_destination_event_diagnostics(self.event(drop_off_type))
+                self.assertIn("destination_alighting_restricted", diagnostics)
+                self.assertTrue(_destination_data_issues(diagnostics))
+        unknown = _legacy_destination_event_diagnostics(self.event("9"))
+        self.assertIn("destination_alighting_unknown", unknown)
+        self.assertTrue(_destination_data_issues(unknown))
+        missing_record = {"destination_stop_record_missing"}
+        self.assertTrue(_destination_data_issues(missing_record))
+
+    def test_regular_alighting_with_missing_arrival_remains_incomplete(self):
+        diagnostics = _legacy_destination_event_diagnostics(self.event("0"))
+        self.assertEqual(_destination_data_issues(diagnostics), {"destination_arrival_missing"})
 
 
 @unittest.skipUnless(DEFAULT_GTFS.exists(), "local Tokyo Metro GTFS ZIP is not present")
@@ -310,6 +347,17 @@ class LocalFeedItineraryTests(unittest.TestCase):
         self.assertGreater(generator.last_destination_status["dataInsufficientCount"], 0)
         self.assertTrue(all("destination_explicit_pass" not in row.data_quality for row in rows))
 
+    def test_missing_hikawadai_record_before_a_later_station_remains_incomplete(self):
+        generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)
+        target_ids = set(DESTINATIONS["Hikawadai"]["routeStopIds"].values())
+        for trip_id, events in list(generator.events.items()):
+            if generator.trips[trip_id].get("route_id") in ("6", "9"):
+                generator.events[trip_id] = tuple(event for event in events if event.stop_id not in target_ids)
+        rows = generator.generate("2026-10-22")
+        self.assertIn("destination_stop_record_missing",
+                      {code for row in rows for code in row.data_quality})
+        self.assertGreater(generator.last_destination_status["dataInsufficientCount"], 0)
+
     def test_service_time_keeps_after_midnight_service_seconds(self):
         self.assertEqual(parse_gtfs_time("24:02:00"), 86520)
         self.assertEqual(format_service_time(86520), "24:02:00")
@@ -356,6 +404,24 @@ class LocalFeedItineraryTests(unittest.TestCase):
             for result in results:
                 if result.status == "no_valid_arrival":
                     self.assertIsNone(result.primary_itinerary)
+
+    def test_hikawadai_explicit_pass_missing_arrival_is_not_a_coverage_gap(self):
+        for day in ("2026-10-26", "2026-10-27", "2026-10-28"):
+            with self.subTest(service_date=day):
+                rows = self.generator.generate(day)
+                passed = [row for row in rows if row.route_id == "9"
+                          and "destination_explicit_pass" in row.data_quality]
+                route = self.generator.last_destination_status["routes"]["9"]
+                self.assertEqual(len(passed), 13)
+                self.assertEqual(route["dataInsufficientCount"], 0)
+                self.assertEqual(route["passThroughCount"], 13)
+                self.assertEqual(self.generator.last_destination_status["dataInsufficientCount"], 0)
+                for row in passed:
+                    self.assertEqual(row.odpt.status, "unique_match")
+                    self.assertIn("destination_arrival_missing", row.data_quality)
+                    self.assertIsNone(row.direct_alternative)
+                    self.assertIsNotNone(row.best_transfer_alternative)
+                    self.assertEqual(row.primary_itinerary.kind, "transfer")
 
     def test_primary_is_single_and_ties_prefer_direct(self):
         results = self.generator.generate("2026-10-22")
