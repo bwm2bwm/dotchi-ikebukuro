@@ -398,3 +398,18 @@
 - QA専用previewは別の `qa/2026-10-27/site` に維持し、今回の処理前後で18ファイルのaggregate hash一致を確認。公開root mock・公開配信先は変更していない。
 - テスト: `python3 -B -m unittest discover -s tests` 59件成功（163.4秒）、`node --test tests/*.test.mjs` 71件成功、`TZ=UTC node --test tests/*.test.mjs` 71件成功。外部APIアクセス・秘密情報読取・commitなし。
 - 通常preview起動例: `python3 -m http.server 8765 --bind 127.0.0.1 --directory "$HOME/Library/Application Support/dotchi-ikebukuro-preview/site"`。実ダイヤはprivate local preview内のみ。
+
+## 2026-10-26 — iPhone Safari切替性能計測（private previewのみ）
+
+- `_local_preview/performance_metrics.mjs` とpreview UIにopt-in計測を追加。`?perf=1` 時だけ、目的地切替の最新値・直近10件履歴・コピー操作を表示。通常アクセスは欄をhiddenにし、switch計測を作成しない。結果はページメモリに限定し外部送信・永続保存なし。`debugNow` queryは併用可能。
+- 既存loader計測を再利用し、未実行のloader段階は `null`、LRU cache HITはnetwork/body/JSON/prepareを0として区別。Networkはfetch応答待ち＋`response.text()`本文完了（転送・文字列化を含む）。JSON parseとschema検証・カード事前生成は別段階。payload byteはContent-Length取得時に記録。
+- 切替clickからの総時間は最終描画更新後の2回目 `requestAnimationFrame` まで。`renderMs`は最終DOM同期開始から同時点までの画面反映近似。board、selection、renderの区間計測はstage間で重複しない。`totalMs`はそれらを含むwall timeのためstage値と合計しない。staleな応答は独立した駅名とロード段階だけを記録し、total/renderは未実行として扱う。
+- 履歴は選択開始時刻順に最大10件。連続切替の最新要求IDと駅ごとのclosureにより古いresponseは画面結果に混ぜず、画面反映前に後続選択が始まった場合もsupersededとする。診断欄はカードDOMの後、広告dockの前の通常document flowに置き、診断中も6件上限・dock・safe areaのroot CSSは変更しない。
+- 通常private previewの `PREVIEW_FILES` にmoduleを追加し、Application Support内の通常siteを保存済み入力から更新。2026-10-25〜27、8駅、22,115,799 bytes、最終同期は生成42.3秒、検証1.7秒。配信bundleの新UI・module・loader・adapterはsourceとbyte一致。QA previewの18ファイルaggregate hashは前後一致。
+- テスト: Python unittest 59件成功（189.2秒）、Node 78件成功、`TZ=UTC`のNode 78件成功。JavaScript syntax checkと`git diff --check`成功。`preview_layout`で通常時hidden・page flow・広告dock周り、perf flag/`debugNow`併用、loaderのcache/miss/error、stale結果、10件上限を確認。iPhone Safari実機の新計測値は未採取で、利用方法は `?perf=1` を付けてiPhoneで切替後、ページ下部の診断欄を確認する。
+- iPhone起動例: `python3 -m http.server 8765 --bind 0.0.0.0 --directory "$HOME/Library/Application Support/dotchi-ikebukuro-preview/site"`。同一Wi‑FiのiPhoneで `http://<MacのLAN IP>:8765/index.html?perf=1` を開く。終了後server停止。ODPT API・API key・公開root mock・公開配信先・commit/push/mergeなし。
+
+## 2026-10-26 — preview計測のNetwork内訳
+
+- `?perf=1` の最新結果と履歴／コピー出力に既存loader値の `fetchMs`（fetch開始〜応答header受信）と`bodyReadMs`（`response.text()`本文読込完了）を追加。`networkMs`は両者の合計で、失敗時は到達済み区間のみを合計し未実行値は未実行表示。cache HITは各値0。
+- 変更は診断表示・計測record・対応テスト・説明に限定。通常表示、列車カード、終電判定、cache機構、payload生成処理は変更なし。

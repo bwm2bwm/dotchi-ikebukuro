@@ -42,6 +42,17 @@
       </div>
       <div id="board" aria-live="off"><p class="empty">読み込み中…</p></div>
     </section>
+    <section id="performance-panel" class="performance-panel" hidden aria-labelledby="performance-title">
+      <div class="performance-head">
+        <h2 id="performance-title">目的地切替の計測</h2>
+        <button id="performance-copy" class="performance-copy" type="button">結果をコピー</button>
+      </div>
+      <p id="performance-latest" class="performance-latest" aria-live="polite">目的地を切り替えると結果が表示されます。</p>
+      <p class="performance-note">fetchは開始から応答header受信まで、bodyはresponse.text()完了まで（本文転送・文字列化を含む）。Networkはfetch＋bodyの合計です。描画時間はDOM更新後のrequestAnimationFrame 2回までの近似です。各段階は重複しませんが、総時間は各段階を含むため加算しないでください。</p>
+      <textarea id="performance-history" class="performance-history" rows="6" readonly
+        aria-label="目的地切替の計測履歴">目的地を切り替えると、ここに結果が表示されます。</textarea>
+      <p id="performance-copy-status" class="performance-copy-status" aria-live="polite"></p>
+    </section>
   </main>
   <dialog id="destination-dialog" class="destination-dialog" aria-labelledby="destination-dialog-title">
     <div class="destination-dialog-head">

@@ -5,10 +5,18 @@ import { createLatestDestinationLoader, createPreparedPayloadCache, loadTimetabl
 import { countdownText, earliestVisible, selectPreviewGroups } from './selection.mjs';
 import { emptyBoardText, terminalBadgeText } from './terminal_ui.mjs';
 import { effectiveNowMs, parseVirtualNow } from './virtual_now.mjs';
+import { appendSwitchMeasurement, beginSwitchMeasurement, finishSwitchMeasurement,
+  formatSwitchMeasurements, isPerformanceMode, PERFORMANCE_HISTORY_LIMIT } from './performance_metrics.mjs';
 
 const clock = document.getElementById('clock');
 const debugNowBanner = document.getElementById('debug-now-banner');
 const virtualNow = parseVirtualNow(window.location.search);
+const performanceMode = isPerformanceMode(window.location.search);
+const performancePanel = document.getElementById('performance-panel');
+const performanceLatest = document.getElementById('performance-latest');
+const performanceHistoryField = document.getElementById('performance-history');
+const performanceCopy = document.getElementById('performance-copy');
+const performanceCopyStatus = document.getElementById('performance-copy-status');
 const statusEl = document.getElementById('timetable-status');
 const metadataEl = document.getElementById('payload-metadata');
 const boardEl = document.getElementById('board');
@@ -59,6 +67,8 @@ const loadLatestDestination = createLatestDestinationLoader(async destinationId 
 let selectedSignature = '';
 let perfHistory = [];
 let loadPerfHistory = [];
+let switchPerfHistory = [];
+let latestPerformanceRequestId = 0;
 let fetchCount = 0;
 let metadataSignature = '';
 
@@ -67,7 +77,35 @@ window.__dotchiPreviewPerf = {
   loadHistory: loadPerfHistory,
   get fetchCount() { return fetchCount; },
   get cachedDestinationIds() { return preparedPayloadCache.keys(); },
+  get switchHistory() { return switchPerfHistory; },
 };
+
+if (performanceMode) performancePanel.hidden = false;
+
+function addSwitchMeasurement(record) {
+  switchPerfHistory = appendSwitchMeasurement(switchPerfHistory, record, PERFORMANCE_HISTORY_LIMIT);
+  const latest = switchPerfHistory.at(-1);
+  const outcome = latest.outcome === 'superseded' ? '別駅へ切替済み' : latest.outcome;
+  const duration = value => Number.isFinite(value) ? `${value.toFixed(1)} ms` : '未実行';
+  performanceLatest.textContent = `${latest.destinationName}：${outcome}／総時間 ${duration(latest.totalMs)}／Network ${duration(latest.networkMs)}（fetch ${duration(latest.fetchMs)}＋本文 ${duration(latest.bodyReadMs)}）／cache ${latest.cacheHit ? 'HIT' : 'MISS'}`;
+  performanceHistoryField.value = formatSwitchMeasurements(switchPerfHistory);
+  performanceHistoryField.scrollTop = 0;
+}
+
+function finishMeasurementAfterRender(measurement, renderStartedAt, outcome, error = null) {
+  if (!performanceMode || !measurement) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const completedAt = performance.now();
+    const superseded = measurement.requestId !== latestPerformanceRequestId;
+    addSwitchMeasurement(finishSwitchMeasurement(measurement, {
+      timings: measurement.timings,
+      completedAt,
+      renderStartedAt: superseded ? null : renderStartedAt,
+      outcome: superseded ? 'superseded' : outcome,
+      error: superseded ? null : error,
+    }));
+  }));
+}
 
 function setStatus(message, state) {
   if (statusEl.textContent !== message) statusEl.textContent = message;
@@ -80,6 +118,25 @@ function updateModeButtons() {
   departureButton.classList.toggle('sel', !lineSelected);
   lineButton.setAttribute('aria-pressed', String(lineSelected));
   departureButton.setAttribute('aria-pressed', String(!lineSelected));
+}
+
+if (performanceMode) {
+  performanceCopy.addEventListener('click', async () => {
+    const value = performanceHistoryField.value;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(value);
+      performanceCopyStatus.textContent = '計測履歴をコピーしました。';
+    } catch {
+      performanceHistoryField.focus();
+      performanceHistoryField.select();
+      let copied = false;
+      try { copied = document.execCommand('copy'); } catch { /* keep the selection for manual copy */ }
+      performanceCopyStatus.textContent = copied
+        ? '計測履歴をコピーしました。'
+        : 'テキストを選択しました。長押しメニューからコピーしてください。';
+    }
+  });
 }
 
 function selectedDestination() {
@@ -105,8 +162,11 @@ function renderDestinationOptions() {
     button.append(label, state);
     button.addEventListener('click', () => {
       const changed = selectedDestinationId !== destination.id;
+      const measurement = changed && performanceMode
+        ? beginSwitchMeasurement(destination.name, performance.now()) : null;
+      if (measurement) measurement.requestId = ++latestPerformanceRequestId;
       saveDestinationId(destination.id);
-      if (changed) loadDestination(destination.id);
+      if (changed) loadDestination(destination.id, measurement);
       destinationDialog.close();
       if (!changed) destinationTrigger.focus({ preventScroll: true });
     });
@@ -217,15 +277,17 @@ function recordLoadPerf(entry) {
   if (loadPerfHistory.length > 50) loadPerfHistory.shift();
 }
 
-function tick(eventStarted = performance.now()) {
+function tick(eventStarted = performance.now(), measurement = null) {
   const nowMs = effectiveNowMs(virtualNow);
   clock.textContent = clockFormatter.format(new Date(nowMs));
   const started = performance.now();
   if (loadFailure) {
+    const renderStartedAt = measurement ? performance.now() : null;
     setStatus(loadFailure, 'error');
     boardEl.replaceChildren();
     selectedSignature = '';
     recordPerf({ at: nowMs, eventToDomMs: performance.now() - eventStarted, adapterMs: 0, selectionMs: 0, domMs: 0 });
+    if (measurement) finishMeasurementAfterRender(measurement, renderStartedAt, '読込エラー', loadFailure);
     return;
   }
   if (loading) {
@@ -235,13 +297,17 @@ function tick(eventStarted = performance.now()) {
     recordPerf({ at: nowMs, eventToDomMs: performance.now() - eventStarted, adapterMs: 0, selectionMs: 0, domMs: 0 });
     return;
   }
+  let adapterStartedAt = null;
   try {
     const adapterStarted = performance.now();
+    adapterStartedAt = adapterStarted;
     const result = buildBoard(prepared, { nowMs, directOnly: directOnlyEl.checked, mode });
     const adapterMs = performance.now() - adapterStarted;
+    if (measurement) measurement.boardMs = adapterMs;
     const selectionStarted = performance.now();
     const groups = selectPreviewGroups(result, mode);
     const selectionMs = performance.now() - selectionStarted;
+    if (measurement) measurement.selectionMs = selectionMs;
     const domStarted = performance.now();
     const state = result.validity === 'valid' ? 'ok' : 'warning';
     setStatus(result.statusMessage, state);
@@ -255,13 +321,19 @@ function tick(eventStarted = performance.now()) {
     }
     const domMs = performance.now() - domStarted;
     recordPerf({ at: nowMs, eventToDomMs: performance.now() - eventStarted, adapterMs, selectionMs, domMs });
+    const outcome = result.validity === 'valid' ? '表示完了' : '表示停止';
+    const message = result.validity === 'valid' ? null : result.statusMessage;
+    if (measurement) finishMeasurementAfterRender(measurement, domStarted, outcome, message);
   } catch {
+    if (measurement && adapterStartedAt !== null && measurement.boardMs === null) {
+      measurement.boardMs = performance.now() - adapterStartedAt;
+    }
     loadFailure = 'payloadの形式または必須メタデータを確認できません。プレビューを再生成してください。';
-    tick(eventStarted);
+    tick(eventStarted, measurement);
   }
 }
 
-async function loadDestination(destinationId) {
+async function loadDestination(destinationId, measurement = null) {
   if (!DESTINATIONS.some(destination => destination.id === destinationId)) {
     void loadLatestDestination(destinationId);
     selectedDestinationId = destinationId;
@@ -288,12 +360,22 @@ async function loadDestination(destinationId) {
     at: Date.now(), destinationStationId: destinationId, stale: result.stale,
     ...(result.timings ?? {}),
   });
-  if (result.stale) return;
+  if (measurement) measurement.timings = result.timings ?? null;
+  if (result.stale) {
+    if (measurement) {
+      addSwitchMeasurement(finishSwitchMeasurement(measurement, {
+        timings: measurement.timings,
+        completedAt: performance.now(),
+        outcome: 'superseded',
+      }));
+    }
+    return;
+  }
   prepared = result.prepared;
   loadFailure = result.failure;
   loading = false;
   if (prepared) preparedPayloadCache.set(destinationId, prepared);
-  tick();
+  tick(measurement?.startedAt ?? performance.now(), measurement);
 }
 
 destinationTrigger.addEventListener('click', () => {

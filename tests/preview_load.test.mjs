@@ -73,6 +73,15 @@ test('fetch, HTTP, and JSON failures return a load error without a payload', asy
     assert.equal(result.prepared, null);
     assert.match(result.failure, /読み込めませんでした/);
   }
+  const fetchFailure = await loadTimetablePayload('Hikawadai', failures[0]);
+  assert.equal(typeof fetchFailure.timings.fetchMs, 'number');
+  assert.equal(fetchFailure.timings.bodyReadMs, null);
+  assert.equal(fetchFailure.timings.jsonParseMs, null);
+  assert.equal(fetchFailure.timings.adapterMs, null);
+  const bodyFailure = await loadTimetablePayload('Hikawadai', failures[2]);
+  assert.equal(typeof bodyFailure.timings.bodyReadMs, 'number');
+  assert.equal(bodyFailure.timings.jsonParseMs, null);
+  assert.equal(bodyFailure.timings.adapterMs, null);
 });
 
 test('invalid JSON reports a parse error and is not prepared', async () => {
@@ -80,6 +89,7 @@ test('invalid JSON reports a parse error and is not prepared', async () => {
   assert.equal(result.prepared, null);
   assert.match(result.failure, /JSON形式/);
   assert.equal(typeof result.timings.jsonParseMs, 'number');
+  assert.equal(result.timings.adapterMs, null);
 });
 
 test('invalid or incomplete metadata returns a data error without a payload', async () => {
@@ -88,6 +98,7 @@ test('invalid or incomplete metadata returns a data error without a payload', as
   const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(invalid));
   assert.equal(result.prepared, null);
   assert.match(result.failure, /必須メタデータ/);
+  assert.equal(typeof result.timings.adapterMs, 'number');
 });
 
 test('fixed destination mapping loads only the selected payload and rejects an unknown ID', async () => {

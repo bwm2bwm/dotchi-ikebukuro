@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [html, css, mockCss, script] = await Promise.all([
+const [html, css, mockCss, script, perfMetrics] = await Promise.all([
   readFile(new URL('../_local_preview/index.html', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.css', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.js', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/performance_metrics.mjs', import.meta.url), 'utf8'),
 ]);
 
 test('preview uses the public mock structure and fixed ad dock with safe-area reserve', () => {
@@ -82,10 +83,29 @@ test('destination preference stores only a whitelisted ID and exposes developmen
   assert.match(script, /selectedDestinationId = readSavedDestinationId\(\)/);
   assert.match(script, /saveDestinationId\(destination\.id\)/);
   assert.match(script, /const preparedPayloadCache = createPreparedPayloadCache\(2\)/);
-  assert.match(script, /if \(result\.stale\) return/);
+  assert.match(script, /if \(result\.stale\) \{/);
   assert.match(script, /loadHistory: loadPerfHistory/);
   assert.match(script, /cachedDestinationIds/);
   assert.doesNotMatch(script, /localStorage|sessionStorage/);
+});
+
+test('opt-in performance panel stays in page flow and is absent from normal display', () => {
+  const main = html.match(/<main>[\s\S]*?<\/main>/)?.[0] ?? '';
+  assert.match(main, /id="board"[\s\S]*?id="performance-panel" class="performance-panel" hidden/);
+  assert.match(html, /id="performance-latest"/);
+  assert.match(html, /id="performance-copy"/);
+  assert.match(html, /id="performance-history"[^>]*readonly/);
+  assert.ok(html.indexOf('class="performance-panel"') < html.indexOf('class="ad-dock"'));
+  assert.match(script, /const performanceMode = isPerformanceMode\(window\.location\.search\)/);
+  assert.match(script, /if \(performanceMode\) performancePanel\.hidden = false/);
+  assert.match(script, /Network \$\{duration\(latest\.networkMs\)\}（fetch \$\{duration\(latest\.fetchMs\)\}＋本文 \$\{duration\(latest\.bodyReadMs\)\}）/);
+  assert.match(script, /changed && performanceMode[\s\S]*beginSwitchMeasurement/);
+  assert.match(script, /if \(!performanceMode \|\| !measurement\) return/);
+  assert.match(css, /\.performance-history[\s\S]*max-height:\s*180px;[^}]*overflow:\s*auto/);
+  assert.match(perfMetrics, /slice\(-limit\)/);
+  assert.doesNotMatch(perfMetrics, /localStorage|sessionStorage|fetch\(/);
+  assert.match(script, /navigator\.clipboard\?\.writeText/);
+  assert.match(script, /document\.execCommand\('copy'\)/);
 });
 
 test('Phase 4B control order, mode default, and card labels match the compact layout spec', () => {

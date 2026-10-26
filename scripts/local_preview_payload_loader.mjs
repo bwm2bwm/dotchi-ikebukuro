@@ -90,7 +90,7 @@ export function createLatestDestinationLoader(loadPayload) {
 }
 
 export async function loadTimetablePayload(destinationStationId = DEFAULT_DESTINATION_ID, fetchImpl = fetch) {
-  const timing = { fetchMs: 0, bodyReadMs: 0, jsonParseMs: 0, adapterMs: 0, totalMs: 0,
+  const timing = { fetchMs: null, bodyReadMs: null, jsonParseMs: null, adapterMs: null, totalMs: 0,
     payloadBytes: null, cacheHit: false };
   const startedAt = performance.now();
   const finish = result => ({ ...result, timings: { ...timing, totalMs: performance.now() - startedAt } });

@@ -1,5 +1,15 @@
 # プロジェクト状態
 
+## iPhone Safari目的地切替計測（ローカルpreview限定）
+
+- URLに `?perf=1` を付けると、目的地切替後に最新結果と直近10件の履歴を表示する。`debugNow`と併用可能。通常アクセスでは計測欄を隠し、目的地別の計測結果はページメモリ内だけに保持する。
+- 記録値は目的地名、総時間、Network、`fetchMs`、`bodyReadMs`、JSON parse、schema検証・カード事前生成、board、表示selection、描画、メモリcache hit/miss、payload byte、結果状態。最新値・履歴の両方にfetch/body内訳を表示し、計測履歴はテキストでコピーできる。外部送信・計測結果のlocalStorage保存なし。
+- `fetchMs`はfetch開始からHTTP応答ヘッダー受信まで、`bodyReadMs`は`response.text()`開始から本文文字列読込完了まで。本文読込には転送と文字列化を含む。`networkMs`は両者の合計（失敗時は到達済み区間の合計、未実行区間は未実行）。`prepareMs`は目的地整合確認・schema検証・カード事前生成。`boardMs`はbuildBoard全体、`selectionMs`は3+3件／6件の表示選択。
+- `renderMs`は最終DOM更新開始からrequestAnimationFrame 2回目までの画面反映近似。`totalMs`は選択操作開始から同時点までであり、各段階を含むwall time。段階値同士は重複しないが、totalと個別値は加算しない。ロードエラー時は未実行段階を「未実行」とし、画面にエラー状態を反映するまでの時間を記録。古い応答はその駅自身の負荷だけを記録して「別駅へ切替済み」とし、総時間・描画時間は出さない。
+- 目的地切替履歴は最新10件で、直近2駅LRUのcache HIT時はNetwork・JSON・prepareを0、payload byteを未取得として表示する。再読込後は履歴・メモリcacheとも消える。簡易HTTP・Wi‑Fi・端末状態・SafariのrequestAnimationFrame間隔は計測結果に影響する。
+- `prepare_preview.py`が新しい計測moduleをprivate Application Support previewへコピーする。公開root mockと実ダイヤ配信先には反映しない。
+- iPhoneはMacと同じWi‑Fi上で、通常previewを `python3 -m http.server 8765 --bind 0.0.0.0 --directory "$HOME/Library/Application Support/dotchi-ikebukuro-preview/site"` で配信し、`http://<MacのLAN IP>:8765/index.html?perf=1` を開く。仮想日時QAは `&debugNow=...` を続けて指定できる。確認後はserverを停止する。
+
 ## 通常private preview最終確認準備（2026-10-26）
 
 - 保存済みローカルGTFS/ODPT入力から通常private previewを再生成。通常出力先はApplication Support内の `dotchi-ikebukuro-preview/site`、運行日は2026-10-25〜27、8駅、payload合計22,115,799 bytes。生成45.6秒、payload検証2.1秒。
