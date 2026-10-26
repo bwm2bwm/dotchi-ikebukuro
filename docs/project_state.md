@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-26）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builderとartifact検証）を実装済み。Cloudflare接続、CI、自動更新、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）を実装済み。Cloudflare接続、CI、自動更新、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -62,6 +62,15 @@
 - `tests/test_public_site_build.py`は既存local-profile synthetic fixtureからテスト時にpublic 8駅payloadを生成し、成功、scope/秘密sentinel/駅/date/JSON/欠損異常、import汚染、output保護、root mock/local source不変を確認する。実ダイヤ・保存済みpreview・QA previewはbuilder入力にも出力にも使わない。
 - Phase 3-4に残る事項: 本builderの本番用合成fixture以外での利用禁止を運用上維持すること、公開前の独立artifact review、依存module変更時のallowlist review、Cloudflare Pages staging認証・headers/ETag・deploy/rollback・CI secret最小権限の検討。本Phaseでは実ダイヤ生成、Cloudflare接続、CI、自動deployを行わない。
 - テスト結果: Node.js 96件成功（通常・`TZ=UTC`）。実データ非依存Python subset 42件成功（builder異常系含む）。JavaScript/Python構文確認と`git diff --check`成功。
+
+## T12 Phase 3-4 公開成果物の独立検証（2026-10-26）
+
+- `scripts/validate_public_artifact.py`を追加。builderをimport・実行せず、指定ディレクトリを読み取り専用で検査する。Phase 1のpublic schema/allowlist検証関数だけを共有し、ファイル・HTML・import・payload参照・secret/診断混入検査は独立して行う。
+- 検査コマンド: `python3 scripts/validate_public_artifact.py <artifact-directory>`。成功時exit 0で17ファイル・8駅・serviceDateを表示。失敗時exit 1で検査理由のみ出し、対象ファイルの内容・secret値・パスを出力しない。Node.jsがない場合はJavaScript構文検査不能としてfail closed。
+- symlink、未許可/欠落/余分ファイル、外部/CSS/import範囲外参照、dynamic import、HTML entrypoint/style不一致、payload mapping/profile/schema/serviceDate/station不一致、diagnostic DOM/CSS/仮想時刻・perf module、secret/API-key-like sentinel、local absolute pathを検出する。JSONの未知fieldもpublic allowlistで拒否。
+- synthetic artifactへの正常系と、欠落・余分・破損JSON・scope/date/station mismatch・missing/unlisted import・diagnostic module/DOM・secret sentinel・API-key pattern・absolute path・symlink・root mock shell混入の異常系を検証。validator実行前後のartifact bytesが同一であることも確認。
+- 運用手順: builder成功後に別コマンドでartifact validatorを実行し、exit 0の場合だけ後続の手動確認へ進む。fail時は成果物を公開せず、原因を修正してbuildとvalidationを再実施する。Cloudflare接続/deploy・CI・実payload利用は未実施。
+- テスト結果: Node.js 96件成功（通常・`TZ=UTC`）、実データ非依存Python subset 50件成功。JavaScript/Python構文確認と`git diff --check`成功。
 
 ## iPhone Safari目的地切替計測（ローカルpreview限定）
 

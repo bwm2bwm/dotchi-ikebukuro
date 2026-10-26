@@ -1,5 +1,13 @@
 # 開発ログ
 
+## 2026-10-26 — T12 Phase 3-4 公開成果物の独立検証
+
+- builderとは別の`scripts/validate_public_artifact.py`を追加。指定済みartifact directoryをread-onlyで検査し、builder/temp staging/ODPT・GTFS/private・QA previewには依存しない。共有するのはPhase 1 public schema/allowlist validatorだけ。
+- 17-file exact allowlist、public HTML entrypointとCSS順、6 moduleのstatic import graphとNode構文、loaderから8 JSONへの参照、public scope/schema/候補構造/駅名・起点・serviceDate一致、診断ファイル/DOM/CSS/仮想時刻・perf mode、credential/API-key-like sentinel、local absolute path、外部resource、symlinkを検査する。errorには秘密値やartifact pathを出さない。Node未導入時はsyntax check不可として拒否。
+- `python3 scripts/validate_public_artifact.py /private/tmp/dotchi-ikebukuro-public-synthetic-20261026/site`を実行し、17 files・8 stations・2026-10-25〜27で合格。これは前段階のsynthetic builder成果物のみで、保存済み実ダイヤは参照していない。
+- `tests/test_public_artifact_validation.py`でbuilderを呼ばず独立synthetic artifactを組み立て、成功、読取専用性、欠落/余分file、壊れたJSON、local scope、serviceDate/station mismatch、import欠落/範囲外、診断コード/DOM、secret sentinel/API-key pattern、絶対path、symlink、root mock shellを検査する。
+- テスト: Node.js 96件成功（通常・`TZ=UTC`）。実データ非依存Python subset 50件成功（既存builder含む）。JavaScript/Python構文確認と`git diff --check`成功。Cloudflare、root mock、private/QA preview、実データ、外部APIにはアクセスせず、commit/push/mergeなし。
+
 ## 2026-10-26 — T12 Phase 3-3 公開用静的サイトbuilder
 
 - `scripts/build_public_site.py`を追加。明示した`--fixtures`と`--output`だけを使い、出力はrepository外に限定。fixture directoryには固定synthetic markerと8駅分の所定JSONだけを要求し、ODPT/GTFS探索、private/QA preview generator呼び出し、API通信はない。
