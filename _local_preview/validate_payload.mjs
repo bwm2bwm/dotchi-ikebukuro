@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 const adapterUrl = new URL(existsSync(new URL('./timetable_adapter.mjs', import.meta.url))
   ? './timetable_adapter.mjs' : '../scripts/timetable_adapter.mjs', import.meta.url);
-const { buildBoard, prepareTimetablePayload } = await import(adapterUrl.href);
+const { buildBoard, LOCAL_DATA_SCOPE, prepareTimetablePayload } = await import(adapterUrl.href);
 
 const filename = process.argv[2];
 if (!filename) throw new Error('payload path is required');
@@ -15,8 +15,8 @@ try {
 } catch (error) {
   throw new Error(`payload JSONを読めません: ${error.message}`);
 }
-const prepared = prepareTimetablePayload(payload);
-const board = buildBoard(prepared, { nowMs: validationNow });
+const prepared = prepareTimetablePayload(payload, LOCAL_DATA_SCOPE);
+const board = buildBoard(prepared, { nowMs: validationNow, expectedProfile: LOCAL_DATA_SCOPE });
 if (board.validity !== 'valid') {
   const missing = board.diagnostics?.missingServiceDates ?? [];
   throw new Error(`payloadが現在利用できません (${board.validity})${missing.length ? `: 不足運行日 ${missing.join(', ')}` : ''}`);

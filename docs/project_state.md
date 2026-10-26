@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-26）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影とsynthetic tests）を実装済み。Cloudflare接続、公開site構築、adapter/loader/UI統合、CI、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）とPhase 2（adapter・loader対応、synthetic互換性確認）を実装済み。Cloudflare接続、公開site構築、CI、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -14,7 +14,17 @@
 - raw ODPT train type URI、照合理由・方式、stop-pattern診断、内部ログ、任意未知項目、API key風フィールド、絶対パスはallowlist対象外。adapterが必須としている `odptDestinationIds` / `outgoingDestinationIds` は識別値として保持する。公開前の再構成可能性・利用条件reviewは引き続き必要。
 - synthetic fixtureと `tests/test_public_payload_profile.py` を追加。local/public scope混同、必須値・日付・時刻・ID・直通/乗換、空データ、不正値、未知項目除外、決定性、入力不変を検証する。
 - テスト: synthetic-only Python subset 35件成功。実ダイヤを生成する既存Python test classesは今回の制約により実行対象外。Node全体78件成功、`TZ=UTC`でも78件成功。
-- 既存private preview、adapter、loader、UI、公開root mock、payload生成処理は変更なし。profile出力は現行adapterのscope validatorではまだ受理されないため、Phase 2でpublic scopeを明示対応し、候補・終電/始発動作を回帰確認する。Cloudflare・実ダイヤ変換・外部送信・deploymentなし。
+- Phase 1の時点ではprivate preview、adapter、loader、UI、公開root mock、payload生成処理を変更せず、profile出力のadapter接続は未実施だった。Phase 2でpublic scopeを明示対応し、候補・終電/始発動作をsynthetic payloadで回帰確認済み。Cloudflare・実ダイヤ変換・外部送信・deploymentなし。
+
+## T12 Phase 2 adapter・loader公開profile対応（2026-10-26）
+
+- adapterの`validateTimetablePayload`・`prepareTimetablePayload`・`buildBoard`に期待profile引数を追加。local scopeが既定で、public scopeは呼び出し側が`public-display-v1`を明示した場合だけ受理。prepared payloadにもprofileを結び付け、別profileでの再利用を拒否する。schema・payload内容検証と共通候補判定を維持。
+- loaderは`expectedProfile`と`cacheMode`を受け取る。localは`no-store`、publicは明示された`default`（ブラウザーHTTP cache経由、Pages ETag再検証を想定）に限定。公開profileでcacheMode省略、localに異なるcacheMode、未知profileはエラー。駅別取得・2駅LRU・stale判定・既存計測・失敗処理は維持。
+- local preview entrypointとpayload検証scriptもlocal profile / `no-store`を明示するよう更新。UI表示・文言・レイアウトは変更せず、private/QA previewを再生成していない。
+- Phase 1射影との比較中、直通のみのroute終電判定が必要とする`destinationStatus.routes[*].directCandidateCount`をPhase 1 allowlistが落としていたことを検出。候補判定コードは変更せず、Phase 1 profileでこのfieldを全目的地向けに保持し、25時台・direct-only terminalを含むlocal/public比較を追加。
+- synthetic fixtureで発車順・最早着・路線分類・直通/乗換・乗換待ち・direct-only・路線別終電/直通終電・終電後・前serviceDateの25時台・翌朝の各路線60分前gate・HeiwadaiのdestinationStatus/candidate countが一致することを検証。表示判断の比較は一致し、診断フィールドは射影により意図どおり異なる。
+- テスト結果: Node全体87件、`TZ=UTC`でも87件成功。実データ非依存Python subset 35件成功。JavaScript/Python syntax確認と`git diff --check`成功。実ダイヤを生成する既存Python test classesは対象外。
+- 実ダイヤ変換・API/secret参照・外部送信・Cloudflare設定/デプロイなし。保存済みprivate previewとQA previewは再生成・変更していない。公開root mockとGit操作もなし。
 
 ## iPhone Safari目的地切替計測（ローカルpreview限定）
 

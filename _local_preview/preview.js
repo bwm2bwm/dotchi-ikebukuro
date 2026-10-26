@@ -1,4 +1,4 @@
-import { buildBoard, TOKYO_TIME_ZONE } from './timetable_adapter.mjs';
+import { buildBoard, LOCAL_DATA_SCOPE, TOKYO_TIME_ZONE } from './timetable_adapter.mjs';
 import { createLatestDestinationLoader, createPreparedPayloadCache, loadTimetablePayload,
   readSavedDestinationId, saveDestinationId, readSavedDisplayMode, saveDisplayMode,
   DESTINATION_PAYLOADS } from './local_preview_payload_loader.mjs';
@@ -62,7 +62,8 @@ const loadLatestDestination = createLatestDestinationLoader(async destinationId 
     } };
   }
   if (Object.hasOwn(DESTINATION_PAYLOADS, destinationId)) fetchCount += 1;
-  return loadTimetablePayload(destinationId, fetch);
+  return loadTimetablePayload(destinationId, fetch,
+    { expectedProfile: LOCAL_DATA_SCOPE, cacheMode: 'no-store' });
 });
 let selectedSignature = '';
 let perfHistory = [];
@@ -301,7 +302,8 @@ function tick(eventStarted = performance.now(), measurement = null) {
   try {
     const adapterStarted = performance.now();
     adapterStartedAt = adapterStarted;
-    const result = buildBoard(prepared, { nowMs, directOnly: directOnlyEl.checked, mode });
+    const result = buildBoard(prepared, { nowMs, directOnly: directOnlyEl.checked, mode,
+      expectedProfile: LOCAL_DATA_SCOPE });
     const adapterMs = performance.now() - adapterStarted;
     if (measurement) measurement.boardMs = adapterMs;
     const selectionStarted = performance.now();

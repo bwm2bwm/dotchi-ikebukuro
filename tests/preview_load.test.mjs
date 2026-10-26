@@ -5,6 +5,9 @@ import { createLatestDestinationLoader, createPreparedPayloadCache, DEFAULT_DEST
   DEFAULT_DISPLAY_MODE, DESTINATION_PAYLOADS, DESTINATION_STORAGE_KEY, DISPLAY_MODE_STORAGE_KEY,
   loadTimetablePayload, readSavedDestinationId, readSavedDisplayMode, saveDestinationId,
   saveDisplayMode } from '../scripts/local_preview_payload_loader.mjs';
+import { LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE, validateTimetablePayload } from '../scripts/timetable_adapter.mjs';
+
+const LOCAL_LOAD_OPTIONS = { expectedProfile: LOCAL_DATA_SCOPE, cacheMode: 'no-store' };
 
 function emptyPayload(destinationStationId = 'Hikawadai') {
   const transferCapable = ['Heiwadai', 'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi']
@@ -52,7 +55,7 @@ test('valid payload loads and is prepared once', async () => {
     assert.equal(path, DESTINATION_PAYLOADS.Hikawadai);
     assert.equal(options.cache, 'no-store');
     return payloadResponse(emptyPayload('Hikawadai'), { contentLength: '1234' });
-  });
+  }, LOCAL_LOAD_OPTIONS);
   assert.ok(result.prepared);
   assert.equal(result.failure, null);
   assert.equal(calls, 1);
@@ -62,6 +65,51 @@ test('valid payload loads and is prepared once', async () => {
   }
 });
 
+test('public loader requires public profile plus default HTTP cache and rejects local payloads', async () => {
+  const publicPayload = emptyPayload('Hikawadai');
+  publicPayload.dataScope = PUBLIC_DATA_SCOPE;
+  const result = await loadTimetablePayload('Hikawadai', async (_path, options) => {
+    assert.equal(options.cache, 'default');
+    return payloadResponse(publicPayload);
+  }, { expectedProfile: PUBLIC_DATA_SCOPE, cacheMode: 'default' });
+  assert.ok(result.prepared);
+  assert.equal(result.failure, null);
+
+  const wrongScope = await loadTimetablePayload('Hikawadai', async (_path, options) => {
+    assert.equal(options.cache, 'default');
+    return payloadResponse(emptyPayload('Hikawadai'));
+  }, { expectedProfile: PUBLIC_DATA_SCOPE, cacheMode: 'default' });
+  assert.equal(wrongScope.prepared, null);
+  assert.match(wrongScope.failure, /必須メタデータ/);
+});
+
+test('local and public validators require the caller expected profile', () => {
+  const local = emptyPayload();
+  const publicPayload = { ...local, dataScope: PUBLIC_DATA_SCOPE };
+  assert.equal(validateTimetablePayload(local, LOCAL_DATA_SCOPE), local);
+  assert.equal(validateTimetablePayload(publicPayload, PUBLIC_DATA_SCOPE), publicPayload);
+  assert.throws(() => validateTimetablePayload(publicPayload, LOCAL_DATA_SCOPE), /local-preview-only required/);
+  assert.throws(() => validateTimetablePayload(local, PUBLIC_DATA_SCOPE), /public-display-v1 required/);
+  assert.throws(() => validateTimetablePayload(local, 'unknown-profile'), /unsupported data profile/);
+});
+
+test('public loader requires explicit cache mode and profile/cache combinations stay separated', async () => {
+  await assert.rejects(loadTimetablePayload('Hikawadai', async () => payloadResponse(null), {
+    expectedProfile: PUBLIC_DATA_SCOPE,
+  }), /explicit cacheMode default/);
+  await assert.rejects(loadTimetablePayload('Hikawadai', async () => payloadResponse(null)),
+    /explicit supported expected payload profile required/);
+  await assert.rejects(loadTimetablePayload('Hikawadai', async () => payloadResponse(null), {
+    expectedProfile: LOCAL_DATA_SCOPE,
+  }), /local profile requires cacheMode no-store/);
+  await assert.rejects(loadTimetablePayload('Hikawadai', async () => payloadResponse(null), {
+    expectedProfile: LOCAL_DATA_SCOPE, cacheMode: 'default',
+  }), /local profile requires cacheMode no-store/);
+  await assert.rejects(loadTimetablePayload('Hikawadai', async () => payloadResponse(null), {
+    expectedProfile: 'unknown-profile', cacheMode: 'default',
+  }), /explicit supported expected payload profile required/);
+});
+
 test('fetch, HTTP, and JSON failures return a load error without a payload', async () => {
   const failures = [
     () => Promise.reject(new Error('offline')),
@@ -69,23 +117,24 @@ test('fetch, HTTP, and JSON failures return a load error without a payload', asy
     async () => payloadResponse(null, { textError: new Error('read failed') }),
   ];
   for (const fetchImpl of failures) {
-    const result = await loadTimetablePayload('Hikawadai', fetchImpl);
+    const result = await loadTimetablePayload('Hikawadai', fetchImpl, LOCAL_LOAD_OPTIONS);
     assert.equal(result.prepared, null);
     assert.match(result.failure, /読み込めませんでした/);
   }
-  const fetchFailure = await loadTimetablePayload('Hikawadai', failures[0]);
+  const fetchFailure = await loadTimetablePayload('Hikawadai', failures[0], LOCAL_LOAD_OPTIONS);
   assert.equal(typeof fetchFailure.timings.fetchMs, 'number');
   assert.equal(fetchFailure.timings.bodyReadMs, null);
   assert.equal(fetchFailure.timings.jsonParseMs, null);
   assert.equal(fetchFailure.timings.adapterMs, null);
-  const bodyFailure = await loadTimetablePayload('Hikawadai', failures[2]);
+  const bodyFailure = await loadTimetablePayload('Hikawadai', failures[2], LOCAL_LOAD_OPTIONS);
   assert.equal(typeof bodyFailure.timings.bodyReadMs, 'number');
   assert.equal(bodyFailure.timings.jsonParseMs, null);
   assert.equal(bodyFailure.timings.adapterMs, null);
 });
 
 test('invalid JSON reports a parse error and is not prepared', async () => {
-  const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(null, { textBody: '{' }));
+  const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(null, { textBody: '{' }),
+    LOCAL_LOAD_OPTIONS);
   assert.equal(result.prepared, null);
   assert.match(result.failure, /JSON形式/);
   assert.equal(typeof result.timings.jsonParseMs, 'number');
@@ -95,7 +144,7 @@ test('invalid JSON reports a parse error and is not prepared', async () => {
 test('invalid or incomplete metadata returns a data error without a payload', async () => {
   const invalid = emptyPayload();
   delete invalid.applicationPeriod;
-  const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(invalid));
+  const result = await loadTimetablePayload('Hikawadai', async () => payloadResponse(invalid), LOCAL_LOAD_OPTIONS);
   assert.equal(result.prepared, null);
   assert.match(result.failure, /必須メタデータ/);
   assert.equal(typeof result.timings.adapterMs, 'number');
@@ -108,11 +157,11 @@ test('fixed destination mapping loads only the selected payload and rejects an u
   for (const id of ids) {
     const result = await loadTimetablePayload(id, async path => ({
       ...payloadResponse(emptyPayload(id)), path,
-    }));
+    }), LOCAL_LOAD_OPTIONS);
     assert.ok(result.prepared, id);
   }
   let calls = 0;
-  const invalid = await loadTimetablePayload('../Wakoshi', async () => { calls += 1; });
+  const invalid = await loadTimetablePayload('../Wakoshi', async () => { calls += 1; }, LOCAL_LOAD_OPTIONS);
   assert.equal(invalid.prepared, null);
   assert.match(invalid.failure, /不正/);
   assert.equal(calls, 0);
@@ -121,7 +170,7 @@ test('fixed destination mapping loads only the selected payload and rejects an u
 test('payload destination mismatch is rejected without a fallback', async () => {
   const result = await loadTimetablePayload('Wakoshi', async () => ({
     ...payloadResponse(emptyPayload('Hikawadai')),
-  }));
+  }), LOCAL_LOAD_OPTIONS);
   assert.equal(result.prepared, null);
   assert.match(result.failure, /必須メタデータ/);
 });

@@ -429,3 +429,12 @@
 - `tests/fixtures/public_payload_profile_input.json` と `tests/test_public_payload_profile.py` はsynthetic値のみで追加。allowlist・未知field除外、scope分離、ID/旅程構造、serviceDate/時刻、空・不正入力、決定性、入力不変を確認。
 - テスト結果: synthetic-only Python subset 35件成功。保存済み実ダイヤを扱う既存Python test classesは実ダイヤ変換禁止のため未実行。Node全体78件成功、`TZ=UTC`でも78件成功。
 - Phase 1単独では公開profileは現行adapterに未接続。Phase 2でadapter/loaderへpublic scope対応を加え、ローカルprofileの拒否維持と候補・終電/始発判定をsynthetic payloadで回帰確認する。private preview、adapter、loader、UI、公開root mock、Cloudflare設定は変更せず、実ダイヤ変換・ODPT API・秘密情報参照・deployment・Git操作なし。
+
+## 2026-10-26 — T12 Phase 2 adapter・loader公開profile対応
+
+- adapterのvalidation/preparation/board APIで期待profileを受け取り、未指定時の安全なlocal既定を維持しつつ、public payloadは呼び出し側が`public-display-v1`を明示した場合だけ受理。prepared payloadとboard要求profileの不一致、未知profile、scope不一致を拒否。
+- loaderでprofile別HTTP cache modeを分離。localは`no-store`、publicはcallerが明示する`default`をfetchへ渡し、ETag再検証可能なブラウザーcache経路を使う。publicでcache mode省略、localのcache mode変更、未知profileは拒否。既存駅別fetch、2駅LRU、stale処理、性能計測、失敗処理は維持。
+- `_local_preview/preview.js`と`_local_preview/validate_payload.mjs`はlocal profileを明示。画面文言・レイアウトは無変更で、private/QA previewは再生成していない。
+- Phase 1 allowlistの互換性テストで`destinationStatus.routes[*].directCandidateCount`が直通のみ時のroute coverageに必要と判明。Phase 1射影で同fieldを保持する変更を加えた。adapterの判定方式は変更せず、local/public比較で発車順・最早着・路線・直通/乗換・待ち時間・終電/直通終電・終了後・25時台serviceDate・翌朝60分gate・Heiwadai件数/状態の一致を確認。
+- synthetic-onlyの追加比較Node test 6件とloader/profile test 3件。Node全体87件、`TZ=UTC`でも87件成功。実データを使わないPython subset 35件成功。保存済み実ダイヤの生成・regression test classはsynthetic-only制約により未実行。JS/Python syntax確認、`git diff --check`成功。
+- ODPT API・API key/secret・実ダイヤ変換・外部送信・Cloudflare設定/デプロイなし。公開root mock、private/QA preview生成物、Git履歴は維持。

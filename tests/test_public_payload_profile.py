@@ -36,6 +36,7 @@ class PublicPayloadProfileTests(unittest.TestCase):
         self.assertEqual(projected["serviceDays"][1]["departures"][0]["departureServiceSeconds"], 93000)
         self.assertEqual(projected["serviceDays"][1]["departures"][0]["departureText"], "25:50:00")
         self.assertEqual(projected["serviceDays"][0]["destinationStatus"]["routes"]["6"]["candidateCount"], 1)
+        self.assertEqual(projected["serviceDays"][0]["destinationStatus"]["routes"]["9"]["directCandidateCount"], 0)
         self.assertEqual(projected["serviceDays"][1]["destinationStatus"]["routes"]["9"]["originTripCount"], 1)
 
         departure = projected["serviceDays"][0]["departures"][0]
@@ -119,6 +120,10 @@ class PublicPayloadProfileTests(unittest.TestCase):
         payload = synthetic_payload()
         payload["serviceDays"][0]["departures"][0]["bestTransferAlternative"]["transfer"]["waitSeconds"] = 0
         cases.append((payload, "waitSeconds"))
+
+        payload = synthetic_payload()
+        del payload["serviceDays"][0]["destinationStatus"]["routes"]["9"]["directCandidateCount"]
+        cases.append((payload, "directCandidateCount"))
 
         for payload, expected in cases:
             with self.subTest(expected=expected), self.assertRaisesRegex(PublicPayloadProfileError, expected):

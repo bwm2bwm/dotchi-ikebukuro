@@ -113,8 +113,8 @@
         "passThroughCount": 0,
         "dataInsufficientCount": 0,
         "routes": {
-          "6": {"originTripCount": 1, "candidateCount": 1, "passThroughCount": 0, "dataInsufficientCount": 0},
-          "9": {"originTripCount": 0, "candidateCount": 0, "passThroughCount": 0, "dataInsufficientCount": 0}
+          "6": {"originTripCount": 1, "candidateCount": 1, "directCandidateCount": 1, "passThroughCount": 0, "dataInsufficientCount": 0},
+          "9": {"originTripCount": 0, "candidateCount": 0, "directCandidateCount": 0, "passThroughCount": 0, "dataInsufficientCount": 0}
         },
         "diagnostic": "drop"
       },
@@ -171,8 +171,8 @@
         "passThroughCount": 0,
         "dataInsufficientCount": 0,
         "routes": {
-          "6": {"originTripCount": 0, "candidateCount": 0, "passThroughCount": 0, "dataInsufficientCount": 0},
-          "9": {"originTripCount": 1, "candidateCount": 1, "passThroughCount": 0, "dataInsufficientCount": 0}
+          "6": {"originTripCount": 0, "candidateCount": 0, "directCandidateCount": 0, "passThroughCount": 0, "dataInsufficientCount": 0},
+          "9": {"originTripCount": 1, "candidateCount": 1, "directCandidateCount": 1, "passThroughCount": 0, "dataInsufficientCount": 0}
         }
       }
     }

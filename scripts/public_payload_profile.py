@@ -145,15 +145,18 @@ def _journey(value: Any, path: str, *, expected_kind: str | None = None) -> dict
 
 
 def _route_status(value: Any, path: str, *, transfer_metrics: bool) -> dict[str, int]:
-    required = ("originTripCount", "candidateCount", "passThroughCount", "dataInsufficientCount")
+    required = ("originTripCount", "candidateCount", "directCandidateCount",
+                "passThroughCount", "dataInsufficientCount")
     optional = ("scheduledTripCount", "transferDataInsufficientCount")
     if transfer_metrics:
-        required += ("directCandidateCount", "transferCandidateCount", "transferPairCount", "transferOnlyCount")
+        required += ("transferCandidateCount", "transferPairCount", "transferOnlyCount")
     result = _fields(value, path, required, optional)
     for key, count in result.items():
         result[key] = _integer(count, f"{path}.{key}")
     if "scheduledTripCount" in result and result["scheduledTripCount"] < result["originTripCount"]:
         _fail(f"{path}.scheduledTripCount", "must cover originTripCount")
+    if "directCandidateCount" in result and result["directCandidateCount"] > result["candidateCount"]:
+        _fail(f"{path}.directCandidateCount", "must not exceed candidateCount")
     return result
 
 

@@ -2,6 +2,9 @@
 
 export const TOKYO_TIME_ZONE = 'Asia/Tokyo';
 export const DEFAULT_HORIZON_MS = 24 * 60 * 60 * 1000;
+export const LOCAL_DATA_SCOPE = 'local-preview-only';
+export const PUBLIC_DATA_SCOPE = 'public-display-v1';
+const SUPPORTED_DATA_SCOPES = new Set([LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE]);
 
 const TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   timeZone: TOKYO_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
@@ -146,8 +149,8 @@ function tokyoCalendarDate(epochMs) {
 }
 
 /** Validate once and precompute immutable display cards for fast local UI toggles. */
-export function prepareTimetablePayload(payload) {
-  validateTimetablePayload(payload);
+export function prepareTimetablePayload(payload, expectedProfile = LOCAL_DATA_SCOPE) {
+  validateTimetablePayload(payload, expectedProfile);
   const entries = [];
   for (const day of payload.serviceDays) {
     for (const departure of day.departures) {
@@ -160,7 +163,7 @@ export function prepareTimetablePayload(payload) {
     }
   }
   const prepared = Object.freeze({ schemaVersion: payload.schemaVersion });
-  PREPARED_PAYLOADS.set(prepared, { payload, entries });
+  PREPARED_PAYLOADS.set(prepared, { payload, entries, expectedProfile });
   return prepared;
 }
 
@@ -218,11 +221,16 @@ function validateJourney(value, path, expectedKind = null) {
   return journey;
 }
 
-/** Validate the versioned local payload before adapting any records. */
-export function validateTimetablePayload(payload) {
+/** Validate the versioned payload against the caller's expected data profile. */
+export function validateTimetablePayload(payload, expectedProfile = LOCAL_DATA_SCOPE) {
   requireObject(payload, 'payload');
+  if (!SUPPORTED_DATA_SCOPES.has(expectedProfile)) {
+    fail('expectedProfile', 'unsupported data profile');
+  }
   if (payload.schemaVersion !== 1) fail('payload.schemaVersion', 'unsupported schema version');
-  if (payload.dataScope !== 'local-preview-only') fail('payload.dataScope', 'local-preview-only required');
+  if (payload.dataScope !== expectedProfile) {
+    fail('payload.dataScope', `${expectedProfile} required; received ${String(payload.dataScope)}`);
+  }
   if (payload.timezone !== TOKYO_TIME_ZONE) fail('payload.timezone', `must be ${TOKYO_TIME_ZONE}`);
   if (typeof payload.generatedAt !== 'string' || !Number.isFinite(Date.parse(payload.generatedAt))) {
     fail('payload.generatedAt', 'valid timestamp required');
@@ -653,10 +661,15 @@ export function buildBoard(payload, {
   horizonMs = DEFAULT_HORIZON_MS,
   directOnly = false,
   mode = 'departure',
+  expectedProfile = LOCAL_DATA_SCOPE,
   onTiming = null,
 } = {}) {
   const prepared = PREPARED_PAYLOADS.get(payload);
-  if (!prepared) validateTimetablePayload(payload);
+  if (!SUPPORTED_DATA_SCOPES.has(expectedProfile)) fail('expectedProfile', 'unsupported data profile');
+  if (prepared && prepared.expectedProfile !== expectedProfile) {
+    fail('payload.dataScope', `${expectedProfile} expected for prepared payload`);
+  }
+  if (!prepared) validateTimetablePayload(payload, expectedProfile);
   if (!Number.isFinite(nowMs)) throw new TypeError('nowMs must be finite');
   if (!Number.isFinite(horizonMs) || horizonMs <= 0) throw new TypeError('horizonMs must be positive');
   if (typeof directOnly !== 'boolean') throw new TypeError('directOnly must be boolean');

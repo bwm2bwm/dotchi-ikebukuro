@@ -1,4 +1,4 @@
-import { prepareTimetablePayload } from './timetable_adapter.mjs';
+import { LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE, prepareTimetablePayload } from './timetable_adapter.mjs';
 
 export const DEFAULT_DESTINATION_ID = 'Hikawadai';
 export const DESTINATION_STORAGE_KEY = 'dotchi-ikebukuro.destination-id.v1';
@@ -89,11 +89,22 @@ export function createLatestDestinationLoader(loadPayload) {
   };
 }
 
-export async function loadTimetablePayload(destinationStationId = DEFAULT_DESTINATION_ID, fetchImpl = fetch) {
+export async function loadTimetablePayload(destinationStationId = DEFAULT_DESTINATION_ID, fetchImpl = fetch,
+  { expectedProfile, cacheMode } = {}) {
   const timing = { fetchMs: null, bodyReadMs: null, jsonParseMs: null, adapterMs: null, totalMs: 0,
     payloadBytes: null, cacheHit: false };
   const startedAt = performance.now();
   const finish = result => ({ ...result, timings: { ...timing, totalMs: performance.now() - startedAt } });
+  if (![LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE].includes(expectedProfile)) {
+    throw new TypeError('explicit supported expected payload profile required');
+  }
+  if (expectedProfile === LOCAL_DATA_SCOPE && cacheMode !== 'no-store') {
+    throw new TypeError('local profile requires cacheMode no-store');
+  }
+  if (expectedProfile === PUBLIC_DATA_SCOPE && cacheMode !== 'default') {
+    throw new TypeError('public profile requires explicit cacheMode default');
+  }
+  const fetchCacheMode = expectedProfile === LOCAL_DATA_SCOPE ? 'no-store' : cacheMode;
   const filename = Object.hasOwn(DESTINATION_PAYLOADS, destinationStationId)
     ? DESTINATION_PAYLOADS[destinationStationId]
     : null;
@@ -105,7 +116,7 @@ export async function loadTimetablePayload(destinationStationId = DEFAULT_DESTIN
   let response;
   let fetchStarted = performance.now();
   try {
-    response = await fetchImpl(filename, { cache: 'no-store' });
+    response = await fetchImpl(filename, { cache: fetchCacheMode });
     timing.fetchMs = performance.now() - fetchStarted;
     if (!response.ok) throw new Error('payload response is not successful');
   } catch {
@@ -140,7 +151,7 @@ export async function loadTimetablePayload(destinationStationId = DEFAULT_DESTIN
         || raw.serviceDays.some(day => day.destinationStationId !== destinationStationId)) {
       throw new TypeError('payload destination does not match the requested destination');
     }
-    const prepared = prepareTimetablePayload(raw);
+    const prepared = prepareTimetablePayload(raw, expectedProfile);
     timing.adapterMs = performance.now() - adapterStarted;
     return finish({ prepared, failure: null });
   } catch {
