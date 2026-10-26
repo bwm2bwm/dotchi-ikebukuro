@@ -1,5 +1,13 @@
 # 開発ログ
 
+## 2026-10-26 — T12 Phase 3-2 公開用HTML・CSS分離
+
+- `_local_preview/public_index.html`を追加し、通常UI用DOMと仮広告枠だけを配置。public bootstrapは`preview_public.js`を読み、local banner、debugNow表示、payload詳細、performance panelと診断用CSS/JS参照は除外した。公開root mockの`index.html`は変更していない。
+- local/publicで`preview.css`を共有し、`.demo`のlocal調整、debugNow banner、payload metadata、performance panelのスタイルを`preview_diagnostics.css`へ移動。local HTMLは診断CSSを共有CSSの後で読み込む。local preview生成file allowlistにも診断CSSを追加。
+- runtime初期化は通常DOMを必須とし、payload metadata DOMは存在する場合に全要素揃っていることを検証して利用する。publicのように診断DOMが全くないDOMでも起動できる。
+- synthetic-onlyでlocal/public HTML参照・診断要素分離・DOM要件・通常UI文言／広告仮置き枠と、local/public初回runtime表示を検証。Node.js 96件成功（通常・`TZ=UTC`）、実データ非依存Python subset 35件成功、JavaScript/Python構文確認と`git diff --check`成功。
+- private preview/QA previewは再生成せず、実ダイヤ変換、外部アクセス、Cloudflare接続、公開root mock変更、commit/push/mergeなし。
+
 ## 2026-10-26 — T12 Phase 3-1 初期表示停止の調査・修正
 
 - 再現: synthetic DOM/runtime testで、共有runtimeのDOM初期化が同期例外になることを確認。`collectElements()`は`destination-trigger`などIDをproperty keyに返すが、呼出側は`destinationTrigger`など存在しないkeyでdestructureしていた。event listener設定前にTypeErrorとなるので、初回payload fetchへ進まず、HTML既定の「読み込み中…」が残る。

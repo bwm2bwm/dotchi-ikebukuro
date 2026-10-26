@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { effectiveNowMs, parseVirtualNow } from '../_local_preview/virtual_now.mjs';
 
-const [html, script, core, css, mockCss] = await Promise.all([
+const [html, script, core, css, diagnosticsCss, mockCss] = await Promise.all([
   readFile(new URL('../_local_preview/index.html', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.js', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview_core.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.css', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/preview_diagnostics.css', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
 ]);
 
@@ -60,7 +61,7 @@ test('preview exposes the override only when valid and keeps normal layout uncha
   assert.match(script, /debugNowBanner\.hidden = false/);
   assert.match(core, /windowRef\.setInterval\(\(\) => tick\(\), 1000\)/);
   assert.match(html, /id="debug-now-banner" class="debug-now-banner" hidden/);
-  assert.match(css, /\.debug-now-banner\s*\{[^}]*font-size:\s*10px/);
+  assert.match(diagnosticsCss, /\.debug-now-banner\s*\{[^}]*font-size:\s*10px/);
   assert.match(mockCss, /height:\s*50px/);
   assert.match(mockCss, /calc\(50px \+ 20px \+ env\(safe-area-inset-bottom/);
 });

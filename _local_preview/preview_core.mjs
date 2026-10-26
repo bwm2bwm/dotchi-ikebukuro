@@ -17,16 +17,24 @@ const DESTINATIONS = Object.freeze([
 ]);
 
 const REQUIRED_ELEMENTS = Object.freeze([
-  'clock', 'timetable-status', 'payload-metadata', 'board', 'destination-trigger', 'route-display',
+  'clock', 'timetable-status', 'board', 'destination-trigger', 'route-display',
   'destination-dialog', 'destination-close', 'destination-list', 'direct-only', 'mode-line', 'mode-departure',
-  'meta-application-period', 'meta-generated-at', 'meta-feed-period', 'meta-gtfs-updated',
-  'meta-odpt-updated', 'meta-webapp-built',
+]);
+const OPTIONAL_METADATA_ELEMENTS = Object.freeze([
+  'payload-metadata', 'meta-application-period', 'meta-generated-at', 'meta-feed-period',
+  'meta-gtfs-updated', 'meta-odpt-updated', 'meta-webapp-built',
 ]);
 
 function collectElements(documentRef) {
   const elements = Object.fromEntries(REQUIRED_ELEMENTS.map(id => [id, documentRef.getElementById(id)]));
   const missing = REQUIRED_ELEMENTS.filter(id => !elements[id]);
   if (missing.length) throw new Error(`preview DOM is missing required elements: ${missing.join(', ')}`);
+  const metadataElements = Object.fromEntries(OPTIONAL_METADATA_ELEMENTS.map(id => [id, documentRef.getElementById(id)]));
+  const metadataCount = Object.values(metadataElements).filter(Boolean).length;
+  if (metadataCount > 0 && metadataCount < OPTIONAL_METADATA_ELEMENTS.length) {
+    throw new Error(`preview DOM has incomplete optional metadata elements: ${OPTIONAL_METADATA_ELEMENTS.filter(id => !metadataElements[id]).join(', ')}`);
+  }
+  Object.assign(elements, metadataElements);
   return elements;
 }
 
@@ -144,7 +152,7 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
   }
 
   function renderMetadata(diagnostics) {
-    if (!diagnostics) return;
+    if (!diagnostics || !metadataEl) return;
     const values = [
       `${displayTimestamp(diagnostics.applicationStartsAt)} 〜 ${displayTimestamp(diagnostics.applicationEndsAt)}（終了日時は含まない）`,
       displayTimestamp(diagnostics.generatedAt),
@@ -288,7 +296,7 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
       loading = false;
       loadFailure = '選択した目的地IDが不正です。氷川台へ戻ってください。';
       updateDestinationLabel();
-      metadataEl.hidden = true;
+      if (metadataEl) metadataEl.hidden = true;
       tick();
       return;
     }
@@ -299,7 +307,7 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
     loading = true;
     selectedSignature = '';
     metadataSignature = '';
-    metadataEl.hidden = true;
+    if (metadataEl) metadataEl.hidden = true;
     boardEl.replaceChildren();
     tick();
     let result;

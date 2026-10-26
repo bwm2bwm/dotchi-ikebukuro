@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [html, css, mockCss, localEntry, core, perfMetrics] = await Promise.all([
+const [html, publicHtml, css, diagnosticsCss, mockCss, localEntry, publicEntry, core, perfMetrics] = await Promise.all([
   readFile(new URL('../_local_preview/index.html', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/public_index.html', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.css', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/preview_diagnostics.css', import.meta.url), 'utf8'),
   readFile(new URL('../styles.css', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview.js', import.meta.url), 'utf8'),
+  readFile(new URL('../_local_preview/preview_public.js', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/preview_core.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../_local_preview/performance_metrics.mjs', import.meta.url), 'utf8'),
 ]);
@@ -19,6 +22,8 @@ test('preview uses the public mock structure and fixed ad dock with safe-area re
   }
   assert.match(html, /href="styles\.css"/);
   assert.match(html, /href="preview\.css"/);
+  assert.match(html, /href="preview_diagnostics\.css"/);
+  assert.ok(html.indexOf('href="preview.css"') < html.indexOf('href="preview_diagnostics.css"'));
   assert.match(mockCss, /calc\(50px \+ 20px \+ env\(safe-area-inset-bottom/);
   assert.match(mockCss, /height: 50px/);
 });
@@ -103,11 +108,33 @@ test('opt-in performance panel stays in page flow and is absent from normal disp
   assert.match(script, /Network \$\{duration\(latest\.networkMs\)\}（fetch \$\{duration\(latest\.fetchMs\)\}＋本文 \$\{duration\(latest\.bodyReadMs\)\}）/);
   assert.match(core, /changed \? hooks\.beginSwitch\?\.\(destination\.name\)/);
   assert.match(localEntry, /if \(!performanceMode \|\| !measurement\) return/);
-  assert.match(css, /\.performance-history[\s\S]*max-height:\s*180px;[^}]*overflow:\s*auto/);
+  assert.match(diagnosticsCss, /\.performance-history[\s\S]*max-height:\s*180px;[^}]*overflow:\s*auto/);
   assert.match(perfMetrics, /slice\(-limit\)/);
   assert.doesNotMatch(perfMetrics, /localStorage|sessionStorage|fetch\(/);
   assert.match(script, /navigator\.clipboard\?\.writeText/);
   assert.match(script, /document\.execCommand\('copy'\)/);
+});
+
+test('public shell shares normal UI, excludes local diagnostics, and loads its fixed entrypoint', () => {
+  assert.match(publicHtml, /href="styles\.css"/);
+  assert.match(publicHtml, /href="preview\.css"/);
+  assert.match(publicHtml, /src="preview_public\.js"/);
+  assert.ok(publicHtml.indexOf('href="styles.css"') < publicHtml.indexOf('href="preview.css"'));
+  assert.doesNotMatch(publicHtml, /preview_diagnostics\.css|preview\.js|debugNow|perf=1|debug-now-banner|payload-metadata|performance-/i);
+  for (const marker of ['id="clock"', 'id="destination-trigger"', 'id="route-display"',
+    'id="timetable-status"', 'id="mode-line"', 'id="mode-departure"', 'id="direct-only"',
+    'id="board"', 'id="destination-dialog"', 'id="destination-close"', 'id="destination-list"',
+    'class="ad-dock"', 'AD 320×50', '▼ 目的地を選択', '直通のみ表示']) {
+    assert.ok(publicHtml.includes(marker), `public shell missing ${marker}`);
+    assert.ok(html.includes(marker), `local shell missing ${marker}`);
+  }
+  assert.match(publicEntry, /PUBLIC_DATA_SCOPE/);
+  assert.match(publicEntry, /cacheMode: 'default'/);
+  assert.doesNotMatch(publicEntry, /debugNow|performance_metrics|isPerformanceMode/);
+  assert.match(diagnosticsCss, /\.debug-now-banner/);
+  assert.match(diagnosticsCss, /\.payload-metadata/);
+  assert.match(diagnosticsCss, /\.performance-panel/);
+  assert.doesNotMatch(css, /debug-now-banner|payload-metadata|performance-panel|performance-history/);
 });
 
 test('Phase 4B control order, mode default, and card labels match the compact layout spec', () => {

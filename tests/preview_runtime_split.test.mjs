@@ -38,6 +38,16 @@ test('shared runtime validates profile-specific cache policy before touching the
     /preview DOM is missing required elements/);
 });
 
+test('shared runtime accepts a public DOM without diagnostic nodes and rejects partial metadata DOM', () => {
+  const normalIds = ['clock', 'timetable-status', 'board', 'destination-trigger', 'route-display',
+    'destination-dialog', 'destination-close', 'destination-list', 'direct-only', 'mode-line', 'mode-departure'];
+  const elements = new Map(normalIds.map(id => [id, new FakeElement()]));
+  elements.set('payload-metadata', new FakeElement());
+  const documentRef = { getElementById: id => elements.get(id) ?? null };
+  assert.throws(() => createPreviewRuntime({ expectedProfile: PUBLIC_DATA_SCOPE, cacheMode: 'default', documentRef,
+    windowRef: {} }), /incomplete optional metadata elements: meta-application-period/);
+});
+
 test('local bootstrap owns virtual-time and performance diagnostics; the core imports neither', () => {
   assert.match(localEntry, /LOCAL_DATA_SCOPE/);
   assert.match(localEntry, /cacheMode: 'no-store'/);
@@ -112,10 +122,10 @@ for (const [name, expectedProfile, cacheMode] of [
   ['public', PUBLIC_DATA_SCOPE, 'default'],
 ]) {
   test(`${name} runtime performs the initial synthetic payload load and leaves loading state`, async () => {
-    const ids = ['clock', 'timetable-status', 'payload-metadata', 'board', 'destination-trigger', 'route-display',
-      'destination-dialog', 'destination-close', 'destination-list', 'direct-only', 'mode-line', 'mode-departure',
-      'meta-application-period', 'meta-generated-at', 'meta-feed-period', 'meta-gtfs-updated',
-      'meta-odpt-updated', 'meta-webapp-built'];
+    const ids = ['clock', 'timetable-status', 'board', 'destination-trigger', 'route-display',
+      'destination-dialog', 'destination-close', 'destination-list', 'direct-only', 'mode-line', 'mode-departure'];
+    if (expectedProfile === LOCAL_DATA_SCOPE) ids.push('payload-metadata', 'meta-application-period', 'meta-generated-at',
+      'meta-feed-period', 'meta-gtfs-updated', 'meta-odpt-updated', 'meta-webapp-built');
     const elements = new Map(ids.map(id => [id, new FakeElement()]));
     const documentRef = {
       getElementById: id => elements.get(id) ?? null,
@@ -146,13 +156,14 @@ for (const [name, expectedProfile, cacheMode] of [
     assert.doesNotMatch(elements.get('timetable-status').textContent, /読み込んでいます/);
     assert.notEqual(elements.get('timetable-status').dataset.state, undefined);
     assert.ok(elements.get('board').children.length > 0);
+    if (expectedProfile === PUBLIC_DATA_SCOPE) assert.equal(elements.has('payload-metadata'), false);
   });
 }
 
 test('runtime converts an unexpected initial loader rejection into a visible error state', async () => {
-  const ids = ['clock', 'timetable-status', 'payload-metadata', 'board', 'destination-trigger', 'route-display',
+  const ids = ['clock', 'timetable-status', 'board', 'destination-trigger', 'route-display',
     'destination-dialog', 'destination-close', 'destination-list', 'direct-only', 'mode-line', 'mode-departure',
-    'meta-application-period', 'meta-generated-at', 'meta-feed-period', 'meta-gtfs-updated',
+    'payload-metadata', 'meta-application-period', 'meta-generated-at', 'meta-feed-period', 'meta-gtfs-updated',
     'meta-odpt-updated', 'meta-webapp-built'];
   const elements = new Map(ids.map(id => [id, new FakeElement()]));
   const documentRef = { getElementById: id => elements.get(id) ?? null,

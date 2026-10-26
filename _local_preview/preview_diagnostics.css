@@ -1,0 +1,28 @@
+/* Local preview diagnostics only. Loaded after the shared preview UI styles. */
+.demo { margin-top: 3px; margin-bottom: 3px; padding-top: 3px; padding-bottom: 3px; }
+.debug-now-banner {
+  margin: 3px 0;
+  padding: 3px 8px;
+  border: 1px solid #e5d8b5;
+  border-radius: 6px;
+  color: #73551f;
+  background: #fff7df;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.payload-metadata { margin: 1px 2px 0; color: #59636c; font-size: 10px; }
+.payload-metadata summary { width: fit-content; cursor: pointer; }
+.payload-metadata dl { margin: 4px 0 0; padding: 6px 8px; border-radius: 6px; background: #fff; }
+.payload-metadata dl > div { display: flex; gap: 6px; margin: 2px 0; }
+.payload-metadata dt { flex: 0 0 132px; font-weight: 700; }
+.payload-metadata dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.performance-panel { margin: 12px 2px 16px; padding: 9px; border: 1px solid #d8dddf; border-radius: 9px; background: #fff; }
+.performance-panel[hidden] { display: none; }
+.performance-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.performance-head h2 { margin: 0; font-size: 13px; line-height: 1.3; }
+.performance-copy { min-height: 40px; border: 1px solid #d5dade; border-radius: 7px; padding: 5px 9px; color: #273746; background: #f2f5f6; font: inherit; font-size: 11px; font-weight: 700; }
+.performance-latest { margin: 6px 0; font-size: 11px; font-weight: 750; line-height: 1.35; overflow-wrap: anywhere; }
+.performance-note { margin: 4px 0 6px; color: #68727a; font-size: 10px; line-height: 1.35; }
+.performance-history { display: block; width: 100%; max-height: 180px; min-height: 104px; resize: vertical; overflow: auto; border: 1px solid #e2e5e6; border-radius: 6px; padding: 6px; color: #30383f; background: #fafafa; font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.performance-copy-status { min-height: 0; margin: 3px 0 0; color: #38576c; font-size: 10px; }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f7f4">
+  <title>どっちに池袋</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="preview.css">
+  <script type="module" src="preview_public.js"></script>
+</head>
+<body>
+  <main>
+    <header class="top"><div><h1 class="brand">どっちに池袋</h1></div><time id="clock" class="clock">--:--:--</time></header>
+    <button id="destination-trigger" class="selectbox destination-trigger" type="button"
+      aria-haspopup="dialog" aria-controls="destination-dialog">
+      <span id="route-display" class="route-display">池袋 → 氷川台</span>
+      <span class="hint">▼ 目的地を選択</span>
+    </button>
+    <div id="timetable-status" class="status" role="status" aria-live="polite">時刻表を読み込んでいます…</div>
+    <section>
+      <div class="controls">
+        <div class="toggle" role="group" aria-label="表示順">
+          <button id="mode-line" type="button" aria-pressed="false">路線別</button>
+          <button id="mode-departure" class="sel" type="button" aria-pressed="true">発車順</button>
+        </div>
+        <label class="filter"><input id="direct-only" type="checkbox"> 直通のみ表示</label>
+      </div>
+      <div id="board" aria-live="off"><p class="empty">読み込み中…</p></div>
+    </section>
+  </main>
+  <dialog id="destination-dialog" class="destination-dialog" aria-labelledby="destination-dialog-title">
+    <div class="destination-dialog-head">
+      <h2 id="destination-dialog-title">目的地を選択</h2>
+      <button id="destination-close" class="destination-close" type="button">閉じる</button>
+    </div>
+    <p class="destination-dialog-description">池袋からの停車順</p>
+    <ul id="destination-list" class="destination-list" aria-label="目的地一覧"></ul>
+  </dialog>
+  <div class="ad-dock"><aside class="ad-placeholder" aria-label="広告スペース（仮）">AD 320×50</aside></div>
+</body>
+</html>
