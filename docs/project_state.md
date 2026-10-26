@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-26）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）を実装済み。静的builder、Cloudflare接続、CI、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builderとartifact検証）を実装済み。Cloudflare接続、CI、自動更新、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -53,6 +53,15 @@
 - `prepare_preview.py`のlocal-only file allowlistに`preview_diagnostics.css`を追加した。private previewやQA previewは再生成していない。公開root `index.html` / `styles.css`、builder、adapter、loader、候補判定、Cloudflare設定は変更していない。
 - synthetic HTML/CSS・runtimeテストでpublic/localのscript/style参照、診断要素の有無、共通DOM契約、通常UI文言・広告枠、初期runtime表示を確認。Node.js 96件成功（通常・`TZ=UTC`）、実データ非依存Python subset 35件成功、JavaScript/Python構文確認成功、`git diff --check`成功。
 - Phase 3-3ではsynthetic入力専用の静的builderを作成し、public shell・shared assets・`public-display-v1` payloadのみの出力allowlist、成果物の秘密／診断情報検査、全payload整合性検査を追加する。実ダイヤ出力・公開は対象外。
+
+## T12 Phase 3-3 公開用静的サイトbuilder（2026-10-26）
+
+- `scripts/build_public_site.py`を追加。`--fixtures`と`--output`は必須で、fixture directoryに固定markerと8駅分の所定JSONだけがある場合に限って処理する。ODPT/GTFS探索、private/QA preview generator呼び出し、ネットワーク通信は行わない。出力はrepository外に限定し、root mockやfixtureと重なる出力先を拒否する。
+- Phase 1 allowlistを再利用する`validate_public_payload()`を追加し、`public-display-v1`の全フィールドを検証したうえで未知フィールドを拒否する。全8駅についてserviceDateの一致、池袋起点、駅ID／filename一致、非空の候補構造を確認し、既存JS adapter validatorでも各staged payloadを検証する。
+- 公開成果物は明示allowlistの17ファイル（HTML、base/shared CSS、6 module、8 payload）。静的import graphをたどって許可外・dynamic・bare importを拒否し、全moduleの構文検査、artifact集合、診断module/parameter、secret-like marker、ローカル絶対パスを検査する。検査後に限りstaging directoryを出力先へ置換し、staging検証失敗時は旧版を保持する。
+- `tests/test_public_site_build.py`は既存local-profile synthetic fixtureからテスト時にpublic 8駅payloadを生成し、成功、scope/秘密sentinel/駅/date/JSON/欠損異常、import汚染、output保護、root mock/local source不変を確認する。実ダイヤ・保存済みpreview・QA previewはbuilder入力にも出力にも使わない。
+- Phase 3-4に残る事項: 本builderの本番用合成fixture以外での利用禁止を運用上維持すること、公開前の独立artifact review、依存module変更時のallowlist review、Cloudflare Pages staging認証・headers/ETag・deploy/rollback・CI secret最小権限の検討。本Phaseでは実ダイヤ生成、Cloudflare接続、CI、自動deployを行わない。
+- テスト結果: Node.js 96件成功（通常・`TZ=UTC`）。実データ非依存Python subset 42件成功（builder異常系含む）。JavaScript/Python構文確認と`git diff --check`成功。
 
 ## iPhone Safari目的地切替計測（ローカルpreview限定）
 

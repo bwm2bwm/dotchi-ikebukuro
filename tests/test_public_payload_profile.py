@@ -14,6 +14,7 @@ from public_payload_profile import (  # noqa: E402
     PUBLIC_DATA_SCOPE,
     PublicPayloadProfileError,
     project_public_payload,
+    validate_public_payload,
 )
 
 
@@ -25,6 +26,19 @@ def synthetic_payload() -> dict:
 
 
 class PublicPayloadProfileTests(unittest.TestCase):
+    def test_public_validation_reuses_allowlist_and_rejects_unknown_fields(self):
+        public = project_public_payload(synthetic_payload())
+        self.assertIs(validate_public_payload(public), public)
+
+        public["apiKey"] = "synthetic-secret-sentinel"
+        with self.assertRaisesRegex(PublicPayloadProfileError, "unknown field"):
+            validate_public_payload(public)
+
+        public = project_public_payload(synthetic_payload())
+        public["dataScope"] = LOCAL_DATA_SCOPE
+        with self.assertRaisesRegex(PublicPayloadProfileError, "public-display-v1 input required"):
+            validate_public_payload(public)
+
     def test_projects_only_allowlisted_schema_and_preserves_adapter_fields(self):
         projected = project_public_payload(synthetic_payload())
 

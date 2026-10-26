@@ -1,5 +1,15 @@
 # 開発ログ
 
+## 2026-10-26 — T12 Phase 3-3 公開用静的サイトbuilder
+
+- `scripts/build_public_site.py`を追加。明示した`--fixtures`と`--output`だけを使い、出力はrepository外に限定。fixture directoryには固定synthetic markerと8駅分の所定JSONだけを要求し、ODPT/GTFS探索、private/QA preview generator呼び出し、API通信はない。
+- `validate_public_payload()`でPhase 1 allowlist/schema v1をpublic scopeに対して厳密適用し、未知フィールド、API key/secret sentinelを含む入力を拒否。既存JS adapter validatorでもstagingへコピーした8 payloadをpublic profileで検証し、station filename mapping、池袋起点、全駅のserviceDate一致、駅別候補構造を確認。
+- 出力allowlistは17ファイル（`public_index.html`を`index.html`として配置、`styles.css`、`preview.css`、6共有/public module、8駅JSON）。static import graphを再帰解析し、非相対・dynamic・許可外・未解決importを拒否。JavaScript構文、artifact完全一致、診断module/parameter、secret-like marker、絶対path混入もstaging上で検査する。全検証後にだけ置換し、失敗時は既存出力を保持。
+- `scripts/validate_public_payload.mjs`をbuild-time validatorとして追加。公開artifactには含めない。
+- `tests/test_public_site_build.py`でテスト時に既存synthetic local fixtureから8 destinationのpublic payloadを構成。正常生成、17-file allowlist、imports、scope混同、secret sentinel、欠損・破損JSON、日付・駅不整合、staged failure時の旧成果物保持、root mock/local source不変を確認。
+- テスト: Node.js 96件成功（通常・`TZ=UTC`）。実データ非依存Python subset 42件成功。JavaScript/Python構文確認と`git diff --check`成功。全成果物はテストの一時ディレクトリに生成し、ODPT/GTFS実データ、private/QA preview、公開root mockは読み書き対象にしていない。
+- Phase 3-4ではCloudflare stagingのアクセス制御、HTTP headers/ETag、CI権限とsecret最小化、別担当によるartifact reviewを扱う。実payload変換・production deploy・自動更新は未実施。
+
 ## 2026-10-26 — T12 Phase 3-2 公開用HTML・CSS分離
 
 - `_local_preview/public_index.html`を追加し、通常UI用DOMと仮広告枠だけを配置。public bootstrapは`preview_public.js`を読み、local banner、debugNow表示、payload詳細、performance panelと診断用CSS/JS参照は除外した。公開root mockの`index.html`は変更していない。

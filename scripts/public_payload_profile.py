@@ -357,3 +357,24 @@ def project_public_payload(payload: Any) -> dict[str, Any]:
                                       for index, item in enumerate(excluded)]
     result["dataScope"] = PUBLIC_DATA_SCOPE
     return result
+
+
+def validate_public_payload(payload: Any) -> dict[str, Any]:
+    """Validate a public payload and reject fields outside the public allowlist.
+
+    Reuses the Phase 1 schema/allowlist contract without projecting or mutating
+    the supplied public object. Returning the original object makes this safe
+    for build validation while keeping the distinction between local inputs
+    and public outputs explicit.
+    """
+    source = _object(payload, "payload")
+    if source.get("schemaVersion") != 1:
+        _fail("payload.schemaVersion", "schema version 1 required")
+    if source.get("dataScope") != PUBLIC_DATA_SCOPE:
+        _fail("payload.dataScope", f"{PUBLIC_DATA_SCOPE} input required")
+    local_view = dict(source)
+    local_view["dataScope"] = LOCAL_DATA_SCOPE
+    projected = project_public_payload(local_view)
+    if projected != source:
+        _fail("payload", "unknown field(s) outside public-display-v1 allowlist")
+    return payload
