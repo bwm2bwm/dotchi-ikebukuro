@@ -66,15 +66,41 @@ python3 scripts/build_public_site.py \
 python3 scripts/validate_public_artifact.py /tmp/dotchi-public-site
 ```
 
-`--service-date`を省略するとJSTの当日を基準日として、前日・当日・翌日の3 serviceDateを生成します。同じ基準日ならファイル内容は同一です。CIではfixture生成、builder、独立validator、承認後のdeployの順に接続する想定です。workflowとCloudflare設定はまだありません。
+`--service-date`を省略するとJSTの当日を基準日として、前日・当日・翌日の3 serviceDateを生成します。同じ基準日ならファイル内容は同一です。GitHub Actions workflowはfixture生成、builder、独立validator、Environment承認後のdeployをこの順に実装しています。Cloudflareへの実deployとAccess動作検証はまだ行っていません。
 
 ### GitHub Actions synthetic CI
 
 `.github/workflows/synthetic-public-ci.yml` は手動起動専用です。mainへworkflowを取り込んだ後、GitHubの **Actions → Synthetic public site CI → Run workflow** から `main` を選んで起動します。main以外を選んだ実行はguard jobで失敗し、buildへ進みません。
 
-workflowはrunner一時領域でJST当日基準のfixtureを生成し、public siteをbuildして17ファイルをartifactに保存します。別jobがartifactをダウンロードし、独立validatorを実行します。artifactは3日で期限切れになります。取得する場合はActionsのrun summaryにあるArtifactsから `synthetic-public-site-<run id>-<attempt>` を選びます。Artifactがない場合はdownload stepが失敗します。失敗時はrunのJobsから失敗job/stepを開き、build log、download結果、validatorの理由を確認してください。
+build jobはrunner一時領域でJST当日基準のsynthetic fixtureから17ファイルを作り、3日間有効のArtifactとして保存します。別runnerのvalidate jobはArtifact IDで同じ成果物を取得し、独立validatorを実行します。取得時のSHA-256 archive digest検証に加え、validation後の展開済みファイル集合digestをdeploy jobでも再計算して一致を確認します。
 
-検証成功時も外部公開は行いません。Phase 4-4でCloudflare deployを接続する場合は独立したdeploy jobを追加し、少なくとも `needs: validate` を必須にします。そのjobだけにCloudflare credentialを渡し、build/validation jobへCloudflareやODPTのsecretsを渡さない構成とします。
+### Cloudflare Pages stagingへの承認付きdeploy
+
+workflowは `main-branch-guard → build → validate → deploy` の順です。deployは `needs: validate` とし、`pages-staging` GitHub Environmentの承認後にだけ開始します。Cloudflare tokenはdeploy job内のCloudflare関連stepにだけ渡し、build/validateはCloudflare・ODPT secretsを参照しません。Wrangler `4.152.0`を固定し、既存プロジェクト `dotchi-ikebukuro-staging` の `main` branchへ同runの検証済みArtifactをDirect Uploadします。プロジェクト一覧で対象projectの存在を確認し、存在しない場合は失敗します。workflowからprojectを作成する処理はありません。
+
+手動起動は **Actions → Synthetic public site CI → Run workflow → Branch: main → Run workflow** です。validation成功後にdeploy jobが承認待ちになります。GitHubの **Environments → pages-staging → Review deployments** で内容を確認して承認するとdeployします。承認しない／拒否した場合はdeployされません。Artifactは3日で期限切れになるため、承認待ちが長引いて期限切れになったrunは承認せず、workflowを再実行してください。実際のdeploy jobはGitHubへworkflowを反映した後にだけ利用できます。このローカル変更の検証ではGitHub ActionsもCloudflareも実行していません。
+
+現在の `pages-staging` はRequired reviewerが `bwm2bwm`、管理者による承認回避は無効です。Prevent self-reviewは無効の設定なので、起動者とreviewerが同じ場合は本人承認を許します。別人による承認を必須にする運用なら、初回deploy前にGitHub EnvironmentでPrevent self-reviewを有効にしてください。
+
+Artifactを取得するときはActions run summaryのArtifactsから `synthetic-public-site-<run id>-<attempt>` を選びます。失敗時はrunの **Jobs** から最初に失敗したjob/stepを確認します。build失敗、Artifact ID/digest欠落、Artifact download不在・digest不一致、独立validator失敗、deploy前tree digest不一致、main HEADの更新、project名不一致、token期限切れはfail closedでdeployされません。Cloudflare操作ログにtoken値を出力しないでください。Tokenの有効期限は **2027-01-25** です。期限前にCloudflareで新しい最小権限tokenへ交換し、GitHub Environment secretを更新します。
+
+#### 初回deploy前のCloudflare Access確認
+
+Cloudflare Dashboardで `dotchi-ikebukuro-staging` のAccess設定を開き、通常URL `dotchi-ikebukuro-staging.pages.dev` とPreview URLの両方をAccess application/policyが対象にしていることを確認します。Preview protection設定だけでは通常の `pages.dev` URLを保護しません。許可対象が意図した本人だけで、未認証利用者が許可されないこと、deployment固有URLのホストも保護範囲に入ること、Cache Rules等にAccessを迂回する設定がないことを確認してから初回deployを承認します。API tokenは対象AccountのCloudflare Pages Editだけに絞られていることも確認します。ワイルドカード設定だけに頼らず、実deploy後にDashboardに表示される実際のPreview/deployment URLを個別に試します。
+
+deploy後、次の3種のURLを確認します。通常URL、Pagesが発行したPreview URL（`*.dotchi-ikebukuro-staging.pages.dev`）、そのrunのdeployment固有URLです。
+
+1. シークレットウィンドウ等の未認証セッションでURLを開き、認証画面へ誘導されるか401/403となることを確認します。`curl -sS -D headers.txt -o body.txt --max-redirs 0 URL` でもredirectを追わずHTTP statusと応答を確認します。未認証応答からアプリのHTMLやJSON本文、架空駅・列車のpayload本文が取得できないことを確認してください。Access login画面の本文はアプリ本文と区別します。
+2. 認証済みセッションでは同じURLを開き、画面とsyntheticデータが表示されることを確認します。
+3. 認証状態を切った別のシークレットセッションから再確認し、`Cache-Control: no-cache`と一意なquery stringを付けた要求も試します。未認証応答が200でアプリ本文を返さないこと、可能な場合は `CF-Cache-Status` と `Age` を記録し、キャッシュHITでも内容が漏れないことを確認します。response bodyはローカルで調べ、公開ログやチャットへ貼らないでください。
+
+確認対象やURLごとに結果・時刻・HTTP status・Access応答かどうかを記録します。未認証でアプリ本文が一つでも取得できたら、そのURLの配信を止め、Cloudflare Accessのhostname/policy/cache設定を修正してから再確認します。GitHub Pages root mockは現在どおり維持し、このworkflowからはdeployしません。今回の公開対象はsynthetic fixtureだけです。
+
+#### deploy結果と復旧
+
+成功時はActionsのdeploy job logとCloudflare Pagesの **Deployments** でdeployment status、commit SHA、branch `main`、project名を照合します。URLが出たら上記Access確認を行います。失敗時は最初の失敗stepを確認し、Artifact期限切れはrun再実行、main HEAD不一致は最新mainから再実行、Access問題は公開URLの利用を止めて設定修正後に再検証します。token期限切れ・権限不足は値を表示せず、期限とCloudflare Pages Edit権限を管理画面で確認します。
+
+誤った内容をdeployした場合はCloudflare PagesのDeployments画面で直前の正常なdeploymentを選び、rollback/再deployの操作を行い、通常・Preview・deployment固有URLのAccess確認を繰り返します。rollback後に現在の通常URLとdeployment SHAが期待どおりか確認し、失敗runとdeployment IDを記録します。静的サイトに実ダイヤは含まれませんが、常にsyntheticであることを示す表示とmarkerを確認します。
 
 ## ファイル構成
 

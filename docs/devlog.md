@@ -500,3 +500,11 @@
 - checkout v7.0.1、setup-python v7.0.0、setup-node v7.0.0、upload-artifact v7.0.2、download-artifact v8.0.2をfull commit SHAで固定。workflow/job permissionsは`contents: read`、guard jobは権限なし。
 - READMEにGitHub画面からの手動起動、Artifact取得、失敗stepの確認、Phase 4-4 deploy jobは`needs: validate`とする方針を記載。
 - ローカルでYAML syntax parse、trigger/ref/permissions/job DAG/action SHA/artifact pathの静的検査、synthetic関連テスト、`git diff --check`を実施。GitHub Actions run、Cloudflare設定・接続/deploy、ODPT/API、secret参照、commit/push/mergeなし。root mock・private preview・QA previewに差分なし。
+
+## 2026-10-27 — T12 Phase 4-5 承認付きCloudflare Pages staging deploy workflow
+
+- 既存 `.github/workflows/synthetic-public-ci.yml` にdeploy jobを追加。workflow_dispatchのみ、main guard後にsynthetic build、独立validation、`pages-staging` Environment承認、deployの順。deployは`needs: validate`を含み、main限定・GitHub-hosted・15分timeout・contents readに限定。
+- build jobがupload-artifact v7のimmutable `artifact-id`とSHA-256 `artifact-digest`を出力。validateとdeployは同run内のID指定で取得し、download-artifact v8のdigest mismatchは既定でerror。validator成功後に展開済み17ファイルのtree digestを記録し、deploy側の再取得後に同digestを比較する。build/validation outputsのID・archive digestもdeploy前に相互確認。
+- deployではNode 24.15.0、Wrangler 4.152.0を固定。既存project一覧に `dotchi-ikebukuro-staging` がある場合だけ進み、Wrangler Direct Uploadを同projectの`main` branchへcommit SHA付きで実行。main最新HEADとrun対象SHA不一致時は中止。Cloudflare token/account IDはEnvironment secret/varからCloudflare関連stepにのみ渡す。Pages project create処理、GitHub Pages deploy、builder再実行はない。
+- READMEにmanual起動・review承認、Artifact取得、失敗調査、Access通常/Preview/deployment固有URLの認証・未認証・cache検証、deploy結果確認、復旧/rollback手順、token期限2027-01-25を追記。初回deploy前にAccess hostname/policy/Cache設定を再確認し、未認証応答にアプリHTML/JSONが含まれないことを実deploy後に検査する。
+- 公式仕様をGitHub `upload-artifact`/`download-artifact`とCloudflare Wrangler Pages command docsで確認。Actions/Cloudflare接続・deploy、ODPT/API、secret readなし。変更と静的検証結果は同日作業完了後に記録。

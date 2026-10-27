@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-27）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI workflow）を実装済み。Phase 4-3はローカル静的検証まで完了。GitHub Actionsは未起動、Cloudflare接続・実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflow）を実装済み。Phase 4-3/4-5はローカル静的検証まで完了。GitHub Actionsは未起動、Cloudflare接続・実deploy・実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -15,6 +15,16 @@
 - build/Artifact upload失敗時はvalidationへ進まず、Artifact欠落またはvalidator失敗はvalidation jobを失敗させる。Phase 4-4でdeploy jobを追加する場合は`needs: validate`を必須とし、検証済み同run Artifactのみを入力する。
 - 手動操作はGitHub Actions画面でworkflowを選び、`main`を選択してRun workflow。run summaryのArtifactsから3日以内にsite artifactを取得できる。失敗時は失敗jobのstep logを確認する。詳しい手順はREADMEに記載。
 - ローカルでYAML構文とworkflow条件を静的検証する。GitHub Actionsは起動していない。外部公開・Cloudflare接続/デプロイ・ODPT/API・secret参照なし。root mock、private preview、QA previewは変更していない。
+
+## T12 Phase 4-5 承認付きCloudflare Pages staging deploy workflow（2026-10-27）
+
+- 既存 `.github/workflows/synthetic-public-ci.yml` を `main-branch-guard → build → validate → deploy` に拡張。workflow_dispatch限定で、guardはmain以外のrefを拒否し、build/validate/deployはmainだけで動く。deployは `needs: [main-branch-guard, build, validate]`、`environment: pages-staging`、GitHub-hosted runner、timeout 15分、`contents: read`だけを要求する。Environment approvalがdeploy jobの開始をゲートする。
+- build jobはimmutable Artifact uploadのIDとSHA-256 digestをjob output化。validate jobは同runのID指定で取得し、download-artifact v8の標準digest mismatch errorを使い、独立validator成功後に展開済みファイル集合のSHA-256 tree digestを出力する。deployはvalidation job経由の同一Artifact ID/archive digestをbuild outputとも照合し、同じIDを再取得、再度tree digest一致を確認してからのみWranglerへ渡す。Artifact不在、digest/tree不一致、validator失敗はdeployへ進まない。
+- deploy jobはPython/Node用コードを再buildせず、Node.js 24.15.0でWrangler 4.152.0をrunner tempへ固定install。Pages project listで既存 `dotchi-ikebukuro-staging` を確認し、存在しない場合は失敗。Direct Uploadの宛先を同project、`--branch=main`、`--commit-hash=$GITHUB_SHA`に固定し、project create処理は含めない。Cloudflare API tokenとaccount IDはEnvironment secret/varとしてdeployのCloudflare関連stepだけで参照する。tokenは2027-01-25期限。
+- deploy直前に公開repositoryの `origin/main` をfetchし、最新HEADと選択runの`GITHUB_SHA`が一致しなければ中止。既存workflow concurrency groupはrefごとで `cancel-in-progress:false`。加えてmain HEAD一致を要求するため、古いrunの後追い上書きを拒否する。preview/productionの並行runもjobが直列化される。
+- READMEに手動起動、`pages-staging` reviewer承認、3日Artifact取得、失敗調査、初回Access hostname/policy/cache確認、未認証/認証済み検査、deployment URL・復旧/rollback手順を記載。未認証のアプリHTML/JSON本文漏えいが一つでもあればURL利用停止とする。GitHub Pages root mock、private/QA previewはdeploy対象外。公開対象はsyntheticのみ。
+- ユーザー提供のEnvironment設定ではRequired reviewer=`bwm2bwm`、admin bypass無効、Prevent self-review無効。よって起動者本人がreviewerなら自己承認できる。別人承認を必須にする運用ではGitHub画面でPrevent self-reviewを有効にする。
+- ローカルでworkflow YAML構文、job DAG/branch guard/Environment/secrets scope/action SHA/Wrangler pin/project/branch/artifact identity/fail-closedを静的検証し、既存synthetic関連testと`git diff --check`を実施する。GitHub Actions、Cloudflare API/Deploy、ODPT/API、secrets閲覧はなし。初回deploy後のAccess未認証拒否・cache leak確認、Cloudflare token実権限は未検証。GitHubへworkflowを反映した後、`main`で手動起動し、Environment approval待ちでAccess設定を最終確認する。
 
 ## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
 
