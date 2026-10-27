@@ -214,14 +214,45 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/wrangler" --no-save --no-package-lock "wrangler@$WRANGLER_VERSION"
           "$RUNNER_TEMP/wrangler/node_modules/.bin/wrangler" --version
 
+      - name: Check Cloudflare credentials are configured without printing them
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "CLOUDFLARE_API_TOKEN is not available to this Environment job." >&2
+            exit 1
+          fi
+          if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo "CLOUDFLARE_ACCOUNT_ID is not available to this Environment job." >&2
+            exit 1
+          fi
+          echo "Cloudflare credential variables are present; values are hidden."
+
       - name: Confirm existing staging project
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
         run: |
-          "$RUNNER_TEMP/wrangler/node_modules/.bin/wrangler" pages project list --json > "$RUNNER_TEMP/pages-projects.json"
-          node -e 'const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!Array.isArray(data) || !data.some(item => item.name === "dotchi-ikebukuro-staging")) process.exit(1);' "$RUNNER_TEMP/pages-projects.json"
-          echo "Existing Cloudflare Pages staging project confirmed."
+          diagnostic_dir="$(mktemp -d "$RUNNER_TEMP/wrangler-project-list.XXXXXX")"
+          stdout_file="$diagnostic_dir/stdout.txt"
+          stderr_file="$diagnostic_dir/stderr.txt"
+          trap 'rm -f "$stdout_file" "$stderr_file"; rmdir "$diagnostic_dir"' EXIT
+
+          if CI=true "$RUNNER_TEMP/wrangler/node_modules/.bin/wrangler" pages project list --json >"$stdout_file" 2>"$stderr_file"; then
+            wrangler_status=0
+          else
+            wrangler_status=$?
+          fi
+
+          unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+          node scripts/diagnose_wrangler_project_list.mjs \
+            --exit-code "$wrangler_status" \
+            --stdout-file "$stdout_file" \
+            --stderr-file "$stderr_file" \
+            --expected-project dotchi-ikebukuro-staging
 
       - name: Verify current main HEAD and deploy
         env:

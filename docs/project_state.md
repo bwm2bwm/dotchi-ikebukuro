@@ -26,6 +26,12 @@
 - ユーザー提供のEnvironment設定ではRequired reviewer=`bwm2bwm`、admin bypass無効、Prevent self-review無効。よって起動者本人がreviewerなら自己承認できる。別人承認を必須にする運用ではGitHub画面でPrevent self-reviewを有効にする。
 - ローカルでworkflow YAML構文、job DAG/branch guard/Environment/secrets scope/action SHA/Wrangler pin/project/branch/artifact identity/fail-closedを静的検証し、既存synthetic関連testと`git diff --check`を実施する。GitHub Actions、Cloudflare API/Deploy、ODPT/API、secrets閲覧はなし。初回deploy後のAccess未認証拒否・cache leak確認、Cloudflare token実権限は未検証。GitHubへworkflowを反映した後、`main`で手動起動し、Environment approval待ちでAccess設定を最終確認する。
 
+### 初回project-list失敗の診断機能（2026-10-27）
+
+- deploy内の `Confirm existing staging project` はCloudflare credentialの非空確認を値を表示せず実行。Wrangler project-listのstdout/stderrをrunner tempへ捕捉し、診断前に両credential変数をunsetする。
+- `scripts/diagnose_wrangler_project_list.mjs` は許可済みの結果名・error category・終了コード・Cloudflare数値error codeだけを1行出力する。Wrangler API失敗、JSON parse失敗、JSON shape不正、対象project不在、project有りを区別。認識できない場合もunknownでdeployを失敗させる。捕捉ファイルはstep終了時に削除する。
+- テストはsyntheticなエラー本文のみを使い、mock secret/Account IDを出力しないこと、診断分類とfail-closedを確認する。Cloudflare API、GitHub Actions、secrets実値にはアクセスしない。
+
 ## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
 
 - `scripts/generate_synthetic_public_fixtures.py` は追跡済み `tests/fixtures/public_payload_profile_input.json` だけを入力し、JST基準の前日・当日・翌日を持つ8駅分の `public-display-v1` fixtureを生成する。`--service-date YYYY-MM-DD`で基準日を固定でき、省略時はAsia/Tokyoの当日を使う。

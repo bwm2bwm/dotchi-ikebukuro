@@ -508,3 +508,10 @@
 - deployではNode 24.15.0、Wrangler 4.152.0を固定。既存project一覧に `dotchi-ikebukuro-staging` がある場合だけ進み、Wrangler Direct Uploadを同projectの`main` branchへcommit SHA付きで実行。main最新HEADとrun対象SHA不一致時は中止。Cloudflare token/account IDはEnvironment secret/varからCloudflare関連stepにのみ渡す。Pages project create処理、GitHub Pages deploy、builder再実行はない。
 - READMEにmanual起動・review承認、Artifact取得、失敗調査、Access通常/Preview/deployment固有URLの認証・未認証・cache検証、deploy結果確認、復旧/rollback手順、token期限2027-01-25を追記。初回deploy前にAccess hostname/policy/Cache設定を再確認し、未認証応答にアプリHTML/JSONが含まれないことを実deploy後に検査する。
 - 公式仕様をGitHub `upload-artifact`/`download-artifact`とCloudflare Wrangler Pages command docsで確認。Actions/Cloudflare接続・deploy、ODPT/API、secret readなし。変更と静的検証結果は同日作業完了後に記録。
+
+## 2026-10-27 — T12 Phase 4-5 Wrangler project-list失敗診断
+
+- `Confirm existing staging project` でCloudflare API tokenとAccount IDが空でないことを、値をログに出さず確認するstepを追加。Wranglerのstdout/stderrは一時ファイルに捕捉し、終了statusを保持。診断Node process起動前にcredential環境変数をunsetし、step終了時に捕捉ファイルを削除。
+- `scripts/diagnose_wrangler_project_list.mjs` を追加。終了statusに加え、JSON parse/shape failure、API command failure、対象projectの有無を区別。API失敗分類はauthentication/permission/account/rate_limit/network/api_error/unknownの固定enum。出力は固定schemaの1行だけで、原文、ID、token、account値、任意メッセージを出さない。数値error codeはCloudflare errors配列または明示的なcode labelからのみ最大5個を採取。
+- `tests/diagnose_wrangler_project_list.test.mjs` で正常・project不在・JSON不正・分類別API失敗・unknown・mock credential混入を検査。Cloudflare/GitHub Actionsへ接続せずローカルnode:testで実行。
+- 検証結果: 診断テスト7件とpublic profile互換性test 6件、synthetic Python tests 32件が成功。Node syntax、workflow YAML構文、追加した2つのbash step構文、静的安全性検査、`git diff --check`も成功。Cloudflare API/GitHub Actions/secrets値へのアクセスなし。

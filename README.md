@@ -82,7 +82,11 @@ workflowは `main-branch-guard → build → validate → deploy` の順です�
 
 現在の `pages-staging` はRequired reviewerが `bwm2bwm`、管理者による承認回避は無効です。Prevent self-reviewは無効の設定なので、起動者とreviewerが同じ場合は本人承認を許します。別人による承認を必須にする運用なら、初回deploy前にGitHub EnvironmentでPrevent self-reviewを有効にしてください。
 
-Artifactを取得するときはActions run summaryのArtifactsから `synthetic-public-site-<run id>-<attempt>` を選びます。失敗時はrunの **Jobs** から最初に失敗したjob/stepを確認します。build失敗、Artifact ID/digest欠落、Artifact download不在・digest不一致、独立validator失敗、deploy前tree digest不一致、main HEADの更新、project名不一致、token期限切れはfail closedでdeployされません。Cloudflare操作ログにtoken値を出力しないでください。Tokenの有効期限は **2027-01-25** です。期限前にCloudflareで新しい最小権限tokenへ交換し、GitHub Environment secretを更新します。
+Artifactを取得するときはActions run summaryのArtifactsから `synthetic-public-site-<run id>-<attempt>` を選びます。失敗時はrunの **Jobs** から最初に失敗したjob/stepを確認します。build失敗、Artifact ID/digest欠落、Artifact download不在・digest不一致、独立validator失敗、deploy前tree digest不一致、main HEADの更新、project名不一致、token期限切れはfail closedでdeployされません。
+
+Cloudflare project確認stepはsecretとAccount IDの空値だけを表示値なしで検査します。Wranglerのstdout/stderrは一時ファイルへ捕捉し、診断スクリプトは本文を出さず、`result`、許可済み`category`、終了コード、Cloudflare errorに含まれる数値codeだけを1行で出します。結果は`project_found`、`project_not_found`、`json_parse_failed`、`json_shape_invalid`、`wrangler_command_failed`等です。認証、権限、Account、rate limit、network、その他API errorを分類できない場合は`unknown`で停止します。値や生ログはActionsへ出さず、トークン値を確認するための`echo`・`set -x`・debug logは使わないでください。
+
+次回失敗時はこの要約行の`result`、`category`、`exit_code`、`cloudflare_error_codes`を見てください。`project_not_found`ならCloudflare Dashboardで選択中Accountと既存Direct Upload project名を照合します。`wrangler_command_failed`なら表示された分類と数値codeをもとに、Environmentのsecret/variable登録名・空値、TokenのAccount scope/Pages権限、Cloudflare側のAPI状態をそれぞれ管理画面で確認します。要約が`unknown`の場合もdeployを停止し、診断分類を見直すまでは捕捉した生出力をログへ転記しないでください。捕捉ファイルはstep終了時に削除されます。Tokenの有効期限は **2027-01-25** です。期限前にCloudflareで必要最小権限のtokenへ交換し、GitHub Environment secretを更新します。
 
 #### 初回deploy前のCloudflare Access確認
 
