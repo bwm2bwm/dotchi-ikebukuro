@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-27）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflow）を実装済み。Phase 4-3/4-5はローカル静的検証まで完了。GitHub Actionsは未起動、Cloudflare接続・実deploy・実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）を完了。GitHub Actions #4でguard/build/validate/承認/deployが成功し、`dotchi-ikebukuro-staging`へDirect Uploadした。Cloudflare Accessの一部アクセス経路を確認済み。通信性能・cache挙動・iPhone Safariでの操作検証は未実施。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -24,14 +24,22 @@
 - deploy直前に公開repositoryの `origin/main` をfetchし、最新HEADと選択runの`GITHUB_SHA`が一致しなければ中止。既存workflow concurrency groupはrefごとで `cancel-in-progress:false`。加えてmain HEAD一致を要求するため、古いrunの後追い上書きを拒否する。preview/productionの並行runもjobが直列化される。
 - READMEに手動起動、`pages-staging` reviewer承認、3日Artifact取得、失敗調査、初回Access hostname/policy/cache確認、未認証/認証済み検査、deployment URL・復旧/rollback手順を記載。未認証のアプリHTML/JSON本文漏えいが一つでもあればURL利用停止とする。GitHub Pages root mock、private/QA previewはdeploy対象外。公開対象はsyntheticのみ。
 - ユーザー提供のEnvironment設定ではRequired reviewer=`bwm2bwm`、admin bypass無効、Prevent self-review無効。よって起動者本人がreviewerなら自己承認できる。別人承認を必須にする運用ではGitHub画面でPrevent self-reviewを有効にする。
-- ローカルでworkflow YAML構文、job DAG/branch guard/Environment/secrets scope/action SHA/Wrangler pin/project/branch/artifact identity/fail-closedを静的検証し、既存synthetic関連testと`git diff --check`を実施する。GitHub Actions、Cloudflare API/Deploy、ODPT/API、secrets閲覧はなし。初回deploy後のAccess未認証拒否・cache leak確認、Cloudflare token実権限は未検証。GitHubへworkflowを反映した後、`main`で手動起動し、Environment approval待ちでAccess設定を最終確認する。
+- 実装時はworkflow YAML構文、job DAG/branch guard/Environment/secrets scope/action SHA/Wrangler pin/project/branch/artifact identity/fail-closedを静的検証し、synthetic関連testと`git diff --check`を実施した。後続のGitHub Actions #4ではdeployまで成功。Accessは通常URL・deployment固有URL・Safari JSON直アクセスの未認証確認と認証後の通常URLを確認済み。Cookieを持たない厳密な未認証再試験、Preview URLとcache leak確認、Cloudflare tokenの実権限確認は未完了。
 
-### 初回project-list失敗の診断機能（2026-10-27）
+### 初回project-list失敗の診断機能とJSON形式修正（2026-10-27）
 
 - deploy内の `Confirm existing staging project` はCloudflare credentialの非空確認を値を表示せず実行。Wrangler project-listのstdout/stderrをrunner tempへ捕捉し、診断前に両credential変数をunsetする。
 - `scripts/diagnose_wrangler_project_list.mjs` はWrangler 4.152.0の一覧JSONが使う`Project Name`キーで対象projectを照合する。`name`を期待していたため正常な表示行を`json_shape_invalid`にした問題を修正した。許可済み結果名・error category・`wrangler_exit_code`・`diagnostic_exit_code`・Cloudflare数値error codeだけを1行出力する。Wrangler API失敗、JSON parse失敗、JSON shape不正、対象project不在、project有りを区別。認識できない場合もunknownでdeployを失敗させる。捕捉ファイルはstep終了時に削除する。
 - Wranglerの終了statusはworkflowから`--wrangler-exit-code`で渡し、診断スクリプトのprocess statusは`diagnostic_exit_code`として別に記録する。未知のJSON構造は成功扱いしない。
 - Wrangler 4.152.0形式のsynthetic表示行でproject有無、parse/shape異常、Wrangler非0、秘密値混入時の出力抑止を検査する。Cloudflare API、GitHub Actions、secrets実値にはアクセスしない。
+
+### Cloudflare Pages staging初回deploy・Access確認（2026-10-27）
+
+- GitHub Actions `Synthetic public site CI #4` はmain guard、synthetic fixture/build、独立artifact validator、`pages-staging` Environment本人承認、Artifact同一性検証、Wrangler project確認、Direct Uploadの全job/stepが成功。project確認は`project_found`、`wrangler_exit_code: 0`、`diagnostic_exit_code: 0`。Wrangler JSON形式不一致を`Project Name`キー対応で解消した後の成功run。
+- Cloudflare Pages projectは`dotchi-ikebukuro-staging`、production branchは`main`、deployment ID表示は`13e10889`。配信内容はsynthetic（架空）データのみ。GitHub Pages root mock、private preview、QA previewは変更していない。
+- ユーザー確認: 通常URL、deployment固有URL、未認証SafariからのJSON直アクセスはいずれもAccess認証画面を表示。本人認証後の通常URLではアプリ表示に成功。ChromeでJSONが直接表示されたケースは直前の認証Cookie残存の可能性があるが、原因は未確定。未認証状態を分離した再試験とcache経由の本文非漏えい確認が残る。
+- アプリ画面では氷川台が初期選択され、路線別/発車順切替、直通filter、広告仮枠を確認。「本日の終電は終了しました」と表示。全操作の動作確認、通信速度・gzip/Brotli・ETag・Cache-Control・HIT/MISS測定、iPhone Safari確認は未実施。
+- 次工程は通信性能・cache方針と更新直後の整合性検証、Cookieを持たない未認証セッションでの通常/Preview/deployment固有URLおよびJSONの再確認、iPhone Safariでの操作・速度測定。実ダイヤの公開へ移行する前に、期限/データ鮮度・安全停止の運用ゲートも別途確認する。
 
 ## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
 

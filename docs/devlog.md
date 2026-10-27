@@ -523,3 +523,12 @@
 - display-row形式の対象あり/なし、JSON parse失敗、未知shape、Wrangler非0、秘密値を含むmock stdout/stderrの出力抑止を追加検証。未知の構造は引き続きfail-closed。
 - workflowは診断引数だけを更新。main guard、Environment approval、Artifact検証、project存在確認、Wrangler pin、権限と既存preview/GitHub Pages設定は維持。
 - 検証結果: 診断node:test 9件、public profile互換性test 6件、synthetic Python tests 32件すべて成功。Node syntax check、workflow YAML parse、`git diff --check`も成功。GitHub Actions、Cloudflare API/deploy、ODPT、secrets値へのアクセスなし。
+
+## 2026-10-27 — T12 Phase 4-5 Cloudflare staging初回deploy成功
+
+- ユーザー確認によるGitHub Actions `Synthetic public site CI #4`の結果を記録。main branch guard、synthetic fixture/build、独立artifact validator、`pages-staging` Environment本人承認、Artifact同一性検証、Wrangler project確認、Cloudflare Direct Uploadがすべて成功。
+- project確認ログは`project_found`、`wrangler_exit_code: 0`、`diagnostic_exit_code: 0`。#3で発生したWrangler 4.152.0の`Project Name`表示キーと診断側`name`期待値の不一致を修正後、project存在確認が成功した。
+- Cloudflare Pages `dotchi-ikebukuro-staging`のproduction branchは`main`。deployment ID表示は`13e10889`。公開物はsynthetic（架空）データのみ。既存GitHub Pages root mockへの変更なし。
+- ユーザーが通常URL、deployment固有URL、未認証SafariでのJSON直アクセスを確認し、いずれもAccess認証画面が表示された。本人認証後の通常URLでアプリ表示成功。ChromeでJSONが直接表示された事象は、直前の認証Cookie残存が原因の可能性があるが未確定として扱う。認証Cookieのない状態を分離した再試験と、cache HITを含む未認証本文非漏えいの確認は未完了。
+- 画面上で氷川台初期選択、路線別/発車順切替、直通filter、広告仮枠、「本日の終電は終了しました」を確認。全操作、通信速度、圧縮、ETag/Cache-Control、cache HIT/MISS、iPhone Safariの操作・性能は未測定。
+- 次工程は配信性能・cache・更新時の整合性の測定、iPhone Safariでの通信速度と操作確認、未認証状態を確実に分離した全URL/JSON再検証。今回この記録更新のためにActions/Cloudflare/ODPTへ接続していない。

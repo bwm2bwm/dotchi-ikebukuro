@@ -78,7 +78,9 @@ build jobはrunner一時領域でJST当日基準のsynthetic fixtureから17フ�
 
 workflowは `main-branch-guard → build → validate → deploy` の順です。deployは `needs: validate` とし、`pages-staging` GitHub Environmentの承認後にだけ開始します。Cloudflare tokenはdeploy job内のCloudflare関連stepにだけ渡し、build/validateはCloudflare・ODPT secretsを参照しません。Wrangler `4.152.0`を固定し、既存プロジェクト `dotchi-ikebukuro-staging` の `main` branchへ同runの検証済みArtifactをDirect Uploadします。プロジェクト一覧で対象projectの存在を確認し、存在しない場合は失敗します。workflowからprojectを作成する処理はありません。
 
-手動起動は **Actions → Synthetic public site CI → Run workflow → Branch: main → Run workflow** です。validation成功後にdeploy jobが承認待ちになります。GitHubの **Environments → pages-staging → Review deployments** で内容を確認して承認するとdeployします。承認しない／拒否した場合はdeployされません。Artifactは3日で期限切れになるため、承認待ちが長引いて期限切れになったrunは承認せず、workflowを再実行してください。実際のdeploy jobはGitHubへworkflowを反映した後にだけ利用できます。このローカル変更の検証ではGitHub ActionsもCloudflareも実行していません。
+手動起動は **Actions → Synthetic public site CI → Run workflow → Branch: main → Run workflow** です。validation成功後にdeploy jobが承認待ちになります。GitHubの **Environments → pages-staging → Review deployments** で内容を確認して承認するとdeployします。承認しない／拒否した場合はdeployされません。Artifactは3日で期限切れになるため、承認待ちが長引いて期限切れになったrunは承認せず、workflowを再実行してください。構成実装時のローカル検証ではGitHub ActionsやCloudflareを実行していません。初回deployの結果は以下に記録しています。
+
+初回deployはGitHub Actions run **#4** で成功しました。全guard/build/validate/approval/artifact検証/deploy処理が成功し、Wrangler project確認は`project_found`（Wrangler/diagnostic終了コードはいずれも0）でした。Cloudflare Pages `dotchi-ikebukuro-staging`の`main` branchへ、syntheticデータのみを含むdeployment（画面表示ID `13e10889`）を配信しています。既存GitHub Pages root mockは変更していません。
 
 現在の `pages-staging` はRequired reviewerが `bwm2bwm`、管理者による承認回避は無効です。Prevent self-reviewは無効の設定なので、起動者とreviewerが同じ場合は本人承認を許します。別人による承認を必須にする運用なら、初回deploy前にGitHub EnvironmentでPrevent self-reviewを有効にしてください。
 
@@ -93,6 +95,8 @@ Cloudflare project確認stepはsecretとAccount IDの空値だけを表示値な
 Cloudflare Dashboardで `dotchi-ikebukuro-staging` のAccess設定を開き、通常URL `dotchi-ikebukuro-staging.pages.dev` とPreview URLの両方をAccess application/policyが対象にしていることを確認します。Preview protection設定だけでは通常の `pages.dev` URLを保護しません。許可対象が意図した本人だけで、未認証利用者が許可されないこと、deployment固有URLのホストも保護範囲に入ること、Cache Rules等にAccessを迂回する設定がないことを確認してから初回deployを承認します。API tokenは対象AccountのCloudflare Pages Editだけに絞られていることも確認します。ワイルドカード設定だけに頼らず、実deploy後にDashboardに表示される実際のPreview/deployment URLを個別に試します。
 
 deploy後、次の3種のURLを確認します。通常URL、Pagesが発行したPreview URL（`*.dotchi-ikebukuro-staging.pages.dev`）、そのrunのdeployment固有URLです。
+
+初回deploy時のユーザー確認では、通常URL・deployment固有URL・未認証SafariからのJSON直アクセスでAccess認証画面が表示され、本人認証後の通常URLでアプリが表示されました。ChromeでJSON本文が直接表示されたケースもありましたが、直前の認証Cookieが残っていた可能性を含め原因は未確定です。cookieのない未認証状態を分離した再試験、Preview URL、cache経由の本文非漏えい確認は残っています。初期画面の氷川台選択、路線別/発車順切替、直通filter、広告仮枠、終電終了表示は確認済みですが、全操作と配信性能は未測定です。
 
 1. シークレットウィンドウ等の未認証セッションでURLを開き、認証画面へ誘導されるか401/403となることを確認します。`curl -sS -D headers.txt -o body.txt --max-redirs 0 URL` でもredirectを追わずHTTP statusと応答を確認します。未認証応答からアプリのHTMLやJSON本文、架空駅・列車のpayload本文が取得できないことを確認してください。Access login画面の本文はアプリ本文と区別します。
 2. 認証済みセッションでは同じURLを開き、画面とsyntheticデータが表示されることを確認します。
