@@ -96,7 +96,7 @@ Cloudflare Dashboardで `dotchi-ikebukuro-staging` のAccess設定を開き、�
 
 deploy後、次の3種のURLを確認します。通常URL、Pagesが発行したPreview URL（`*.dotchi-ikebukuro-staging.pages.dev`）、そのrunのdeployment固有URLです。
 
-初回deploy時のユーザー確認では、通常URL・deployment固有URL・未認証SafariからのJSON直アクセスでAccess認証画面が表示され、本人認証後の通常URLでアプリが表示されました。ChromeでJSON本文が直接表示されたケースもありましたが、直前の認証Cookieが残っていた可能性を含め原因は未確定です。cookieのない未認証状態を分離した再試験、Preview URL、cache経由の本文非漏えい確認は残っています。初期画面の氷川台選択、路線別/発車順切替、直通filter、広告仮枠、終電終了表示は確認済みですが、全操作と配信性能は未測定です。
+初回deploy時のユーザー確認では、通常URL・deployment固有URL・未認証SafariからのJSON直アクセスでAccess認証画面が表示され、本人認証後の通常URLでアプリが表示されました。ChromeでJSON本文が直接表示されたケースもありましたが、直前の認証Cookieが残っていた可能性を含め原因は未確定です。cookieのない未認証状態を分離した再試験、Preview URL、cache経由の本文非漏えい確認は残っています。基本UI、氷川台の初期選択、目的地切替はiPhone Safariで確認済みです。Brotli、ETag/304、Mac Chromeの初回JSON取得約56ms、iPhoneでの目的地切替体感1秒以下も確認済みですが、列車カードの実機表示と全操作は固定時刻QA環境を使った確認が必要です。
 
 1. シークレットウィンドウ等の未認証セッションでURLを開き、認証画面へ誘導されるか401/403となることを確認します。`curl -sS -D headers.txt -o body.txt --max-redirs 0 URL` でもredirectを追わずHTTP statusと応答を確認します。未認証応答からアプリのHTMLやJSON本文、架空駅・列車のpayload本文が取得できないことを確認してください。Access login画面の本文はアプリ本文と区別します。
 2. 認証済みセッションでは同じURLを開き、画面とsyntheticデータが表示されることを確認します。
@@ -109,6 +109,21 @@ deploy後、次の3種のURLを確認します。通常URL、Pagesが発行し�
 成功時はActionsのdeploy job logとCloudflare Pagesの **Deployments** でdeployment status、commit SHA、branch `main`、project名を照合します。URLが出たら上記Access確認を行います。失敗時は最初の失敗stepを確認し、Artifact期限切れはrun再実行、main HEAD不一致は最新mainから再実行、Access問題は公開URLの利用を止めて設定修正後に再検証します。token期限切れ・権限不足は値を表示せず、期限とCloudflare Pages Edit権限を管理画面で確認します。
 
 誤った内容をdeployした場合はCloudflare PagesのDeployments画面で直前の正常なdeploymentを選び、rollback/再deployの操作を行い、通常・Preview・deployment固有URLのAccess確認を繰り返します。rollback後に現在の通常URLとdeployment SHAが期待どおりか確認し、失敗runとdeployment IDを記録します。静的サイトに実ダイヤは含まれませんが、常にsyntheticであることを示す表示とmarkerを確認します。
+
+#### 固定時刻synthetic列車カードQA（ローカル専用）
+
+Cloudflare stagingの表示時刻に候補がない場合は、共有runtimeへ固定時計を注入するローカル専用harnessでカードを確認できます。MacでWi‑FiのLAN IPv4を取得します。
+
+```sh
+ipconfig getifaddr en0
+python3 -B scripts/serve_synthetic_public_qa.py --bind 192.168.1.23 --port 8765
+```
+
+2行目の例のIPは、1行目で表示されたMacのLAN IPv4に置き換えます。起動時にJST当日fixtureと夜間表示scenarioのpublic artifactを各17ファイルでbuildし、独立validatorを通します。QA操作パネルと固定時計entrypointはartifactの外に作り、検証済みartifactを変更しません。シナリオは `cards` を初期表示とし、始発ゲート前後、前serviceDateの25:50、22時台の候補・直通終電・終電・全路線終了から選べます。
+
+同じ信頼できるWi‑FiのiPhone Safariで起動ログに表示された `http://<MacのLAN IPv4>:8765/?scenario=cards` を開きます。目的地、路線別／発車順、直通のみを操作してカード、到着、最早着、終電badgeを確認します。JSTの固定scenarioなので、手動確認とDOMテストで同じ状態を再現できます。
+
+QA serverは明示されたプライベートLAN IPv4だけにbindし、wildcard addressでは起動しません。HTTPのsynthetic専用harnessで、Cloudflare Accessは通りません。作業後は起動したTerminalで **Ctrl+C** を押すとserverが停止し、一時artifactとharnessが削除されます。起動コマンドはActions workflowから呼ばず、診断コードはCloudflare deploy artifactに含まれません。CIのDOMテストは `node --test tests/preview_runtime_dom_qa.test.mjs` で実行します。
 
 ## ファイル構成
 

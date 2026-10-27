@@ -532,3 +532,11 @@
 - ユーザーが通常URL、deployment固有URL、未認証SafariでのJSON直アクセスを確認し、いずれもAccess認証画面が表示された。本人認証後の通常URLでアプリ表示成功。ChromeでJSONが直接表示された事象は、直前の認証Cookie残存が原因の可能性があるが未確定として扱う。認証Cookieのない状態を分離した再試験と、cache HITを含む未認証本文非漏えいの確認は未完了。
 - 画面上で氷川台初期選択、路線別/発車順切替、直通filter、広告仮枠、「本日の終電は終了しました」を確認。全操作、通信速度、圧縮、ETag/Cache-Control、cache HIT/MISS、iPhone Safariの操作・性能は未測定。
 - 次工程は配信性能・cache・更新時の整合性の測定、iPhone Safariでの通信速度と操作確認、未認証状態を確実に分離した全URL/JSON再検証。今回この記録更新のためにActions/Cloudflare/ODPTへ接続していない。
+
+## 2026-10-27 — T12 Phase 4-6A 固定時刻synthetic列車カードQA
+
+- `scripts/serve_synthetic_public_qa.py` と`tests/preview_runtime_dom_qa.test.mjs`を追加。baselineと22時台の複数候補scenarioをsynthetic fixture factoryから準備し、既存builderと独立validatorで各17ファイル・8駅を検証してからQA rootへ配置する。
+- QA用shellとentrypointはartifact directoryの外側に置き、public shellの通常markup/CSSと`createPreviewRuntime`を再利用。entrypointだけ固定`nowProvider`を注入し、シナリオ選択時はscenario artifactを切り替えてreloadする。`preview_public.js`、public builder/validator/profile、deploy workflow、root mock、private/QA previewは変更していない。
+- QA serverはユーザーが指定するMacのRFC1918 private IPv4へbindし、wildcard等を拒否。HTTPSや認証はなく、syntheticのみを同一の信頼できるLANで確認する用途。Ctrl+Cでserver停止とTemporaryDirectory削除。
+- 固定JST時刻scenario: 2026-10-27 05:09:59/05:10:00始発ゲート、同日01:40前serviceDate 25:50、2026-10-26 21:14:59/21:15:00夜間路線ゲート、22:05表示順/最早着/フィルター、22:59:59直通終電、23:04:59終電、23:05:01終電終了。
+- 検証結果: 固定時刻DOM QA 5件、既存runtime/profile/terminal Node tests 71件、synthetic関連Python tests 32件がすべて成功。Python/Node syntax、既存deploy workflow YAML parse、wildcard bind拒否、`git diff --check`を確認。GitHub Actions、Cloudflare API/deploy、ODPT、secretsへのアクセスなし。

@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-27）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）を完了。GitHub Actions #4でguard/build/validate/承認/deployが成功し、`dotchi-ikebukuro-staging`へDirect Uploadした。Cloudflare Accessの一部アクセス経路を確認済み。通信性能・cache挙動・iPhone Safariでの操作検証は未実施。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。GitHub Actions #4のdeploy成功に加え、Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下を確認済み。固定時刻QAのDOM確認はローカルテストで再現可能。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -38,8 +38,16 @@
 - GitHub Actions `Synthetic public site CI #4` はmain guard、synthetic fixture/build、独立artifact validator、`pages-staging` Environment本人承認、Artifact同一性検証、Wrangler project確認、Direct Uploadの全job/stepが成功。project確認は`project_found`、`wrangler_exit_code: 0`、`diagnostic_exit_code: 0`。Wrangler JSON形式不一致を`Project Name`キー対応で解消した後の成功run。
 - Cloudflare Pages projectは`dotchi-ikebukuro-staging`、production branchは`main`、deployment ID表示は`13e10889`。配信内容はsynthetic（架空）データのみ。GitHub Pages root mock、private preview、QA previewは変更していない。
 - ユーザー確認: 通常URL、deployment固有URL、未認証SafariからのJSON直アクセスはいずれもAccess認証画面を表示。本人認証後の通常URLではアプリ表示に成功。ChromeでJSONが直接表示されたケースは直前の認証Cookie残存の可能性があるが、原因は未確定。未認証状態を分離した再試験とcache経由の本文非漏えい確認が残る。
-- アプリ画面では氷川台が初期選択され、路線別/発車順切替、直通filter、広告仮枠を確認。「本日の終電は終了しました」と表示。全操作の動作確認、通信速度・gzip/Brotli・ETag・Cache-Control・HIT/MISS測定、iPhone Safari確認は未実施。
-- 次工程は通信性能・cache方針と更新直後の整合性検証、Cookieを持たない未認証セッションでの通常/Preview/deployment固有URLおよびJSONの再確認、iPhone Safariでの操作・速度測定。実ダイヤの公開へ移行する前に、期限/データ鮮度・安全停止の運用ゲートも別途確認する。
+- 初回deploy時の実時刻画面では氷川台が初期選択され、路線別/発車順切替、直通filter、広告仮枠と「本日の終電は終了しました」を確認。その後、ユーザー確認によりBrotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下と基本UI表示を確認。カード自体は実時刻では表示されないため、Phase 4-6Aで固定時刻QAを追加。
+- Phase 4-6でBrotli、ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下を確認済み。残るstaging検証はdeployment更新前後の新旧asset整合性、Cookieを持たない未認証セッションでのPreview/JSON確認、固定時刻QAを使うiPhone列車カード操作。実ダイヤの公開へ移行する前に、期限/データ鮮度・安全停止の運用ゲートも別途確認する。
+
+### T12 Phase 4-6A 固定時刻synthetic列車カードQA（2026-10-27）
+
+- `scripts/serve_synthetic_public_qa.py` は追跡済みsynthetic fixture factoryを使い、baselineと夜間表示scenarioを別々にpublic builderへ入力する。両方を独立validatorに通し、それぞれ17ファイル・8駅のartifactとして一時領域へコピーした後、artifact外にQA shellと`nowProvider`注入口を作る。
+- 公開 `preview_public.js`、builder、validator、payload allowlist、CI deploy workflowは変更していない。QA entrypointは同じ`createPreviewRuntime`を`PUBLIC_DATA_SCOPE`・`cacheMode: default`で起動し、固定日時を注入する。QA panelとscriptは2つの検証済みartifactのいずれにも含まれない。データはsynthetic test templateだけ。
+- serverは明示されたRFC1918 private IPv4にのみbindし、wildcard/loopback/public IPを拒否。通常起動はTemporaryDirectoryを使用し、Ctrl+Cでserver停止と同時にartifact/harnessを削除。GitHub Actionsからこのscriptへの参照なし。
+- `tests/preview_runtime_dom_qa.test.mjs` で実DOMに相当するfake DOMを介した表示・操作を検証。JST 2026-10-27 05:09:59/05:10:00の始発ゲート、01:40の前serviceDate 25:50、2026-10-26 21:14:59/21:15:00の路線別始発ゲート、22:05の9候補・発車順6件上限・路線別各3件・最早着、22:59:59直通終電、23:04:59終電、23:05:01全路線終了を確認。
+- 8駅すべての切替で取得payloadのdestinationStationId一致、直通のみON/OFF時のtransfer card再計算、valid status文言、固定時刻の再現性を確認。既存のiPhone基本UI/目的地切替確認に加え、列車カード・各操作の実機確認は本harnessを使って行う。起動方法はREADMEの「固定時刻synthetic列車カードQA」を参照。
 
 ## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
 
