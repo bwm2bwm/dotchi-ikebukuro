@@ -3,7 +3,7 @@
 ## T11/T12/T13/T15 状況（2026-10-28）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。Phase 4-6Bでstagingの新旧Deployment切替を実機確認し、旧タブから新JSONを取得する経路を確認。fixtureの`generatedAt`がservice-date基準日の前日を表す仕様と、release世代を跨ぐ混在を検出しない現行設計を記録した。調査・設計メモは [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md)。Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下も確認済み。固定時刻QAのDOM確認はローカルテストで再現可能。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。Phase 4-6Bでstagingの新旧Deployment切替を実機確認し、旧タブから新JSONを取得する経路を確認。fixtureの`generatedAt`がservice-date基準日の前日を表す仕様と、release世代を跨ぐ混在を検出しない現行設計を記録した。Phase 4-7でmanifest + release envelope + 世代別JSON + Production aliasからの期限内世代引継ぎ方式を詳細設計。記録は [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md) と [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md)。Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下も確認済み。固定時刻QAのDOM確認はローカルテストで再現可能。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -49,6 +49,14 @@
 - 現行validatorは17ファイル構成、profile/schema/各JSON、各駅のserviceDate一覧一致等を検査するが、駅JSON間の`generatedAt`/feed metadata一致、HTML/JS/JSONのdeployment release一致、URLと内容の世代結合は検査しない。`ETag`/304は単一URLの再検証であり複数asset間の世代transactionを与えない。`validFrom`/`validThrough`は日付適用範囲と有効性を判定するものでrelease識別子ではない。
 - 世代方式の比較と推奨する次Phase範囲は [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md)。推奨は静的manifestでrelease IDと世代別JSON URLを一度pinし、JSON内release IDも照合する方式。HTML/JS/JSONのrelease ID直接埋め込みは最小変更の先行検知策として比較対象に残す。
 - 本Phaseはコード・public artifact・workflow・Cloudflare・GitHub Actionsを変更せず、外部接続、ODPT API、テスト実行なし。更新対象はproject state/devlogと設計メモのみ。
+
+### T12 Phase 4-7 世代整合性の詳細設計（2026-10-28）
+
+- 第一候補はroot `manifest.json`がcurrent releaseId・runtime contract・8駅別URL/hash/bytes・service/feed/application metadataを持ち、JSONを`/releases/<releaseId>/`へ置く静的方式。runtime起動時にmanifestをrevalidateしてsession pinし、JSON envelope内releaseIdとSHA-256/bytesを検証後だけadapterへ渡す。inner public payload v1 schemaは維持する。
+- releaseIdは日付/run IDではなく、runtime/public assetのdigest、8駅canonical payload digest、manifest/envelope/payload schemaとbuilder contractから作る決定的SHA-256。同一入力・コード契約なら同ID・同JSON bytes。実際の`publishedAt`、`generatedAt`、serviceDate、feed versionは異なる役割として記録。
+- 旧世代は過去Artifactに依存せず、Environment approval後のdeploy jobが現Production aliasのmanifestと保持期限内generation JSONをAccess service tokenで取得・hash検証し、新Direct Upload artifactへ引き継ぐ。欠損・401/403・hash不一致・size超過はdeploy中止。初回v1移行は旧flat JSON 8個を同じbytesで最大14日互換提供。
+- 保持deadlineの提案はeffective validity end（`applicationPeriod.endsAt`とfeed.validThrough翌日00:00 JSTの早い方）を基準に、releaseがcurrent aliasから退く時刻`retiredAt`を使い`min(retiredAt+14d, max(retiredAt+7d, effectiveValidityEnd+48h))`。Cloudflare Pages Freeの20,000 files/site・25 MiB単一asset上限、旧asset CDN cache非永続性、rollback挙動を公式資料で確認し、ファイル数・bytes budgetをfail closedする。
+- builder/validator/runtime/CI、QA harness、状態遷移、200/304/ETag、旧tab/削除時、iPhone Safariまでのテストを設計メモに記録。4-8A〜4-8Fへ段階分割。今回のPhaseは設計文書のみで、コード・artifact・workflow・Pagesは変更せず、Actions/ODPT/API・テスト実行なし。
 
 ### T12 Phase 4-6A 固定時刻synthetic列車カードQA（2026-10-27）
 

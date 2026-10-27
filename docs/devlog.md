@@ -548,3 +548,12 @@
 - public loaderの固定相対JSON URL、2駅prepared-payload LRU、`cache: default`、runtime有効期間判定、独立validatorのcross-file検査範囲を確認。LRUに残るA payloadとdeployment後fetchのB payloadが同一runtimeで共存しうるが、今回その共存・表示差は未測定。validatorは各駅payload/serviceDate整合を検証する一方、HTML/JS/JSON間または駅JSON間のrelease一致を検証しない。ETag/304はURL単位で、世代transactionを保証しない。
 - A（共通release ID検知）、B（immutable release別JSON URL）、C（manifest pinning）を比較。中期推奨をmanifest + 世代別URL + payload ID/hash照合とし、UX fail-closed/reload/manual retry、旧世代保持、具体的なPhase 4-7/4-8作業を設計メモへ記録。
 - 更新: `docs/project_state.md`、本`docs/devlog.md`、`docs/t12_phase4_6b_release_consistency.md`。コード、builder、validator、fixture、workflow、public artifactは変更なし。Cloudflare/GitHub Actions/ODPTへ接続せず、テスト実行・commit/push/mergeなし。
+
+## 2026-10-28 — T12 Phase 4-7 世代整合性の詳細設計
+
+- Phase 4-6B設計メモ、project state/devlog、public builder/independent validator、public payload allowlist/profile、synthetic fixture factory、runtime/adapter、workflowと関連testsを読み、現行の17-file flat artifact、2駅LRU、固定JSON URL、3日Artifact retention、公開schema v1境界を前提に設計。
+- 静的root manifest + content-derived releaseId + release envelope + `/releases/<releaseId>/`の8 station JSONを詳細化。SHA-256 descriptorはJCS・schema/runtime/builder contract・static asset hash・8 payload hashから作り、日時やrun IDだけで世代を識別しない。同一input/contractでは同じreleaseId・JSON bytes。inner public-display-v1 payload schemaは維持し、outer envelopeがreleaseIdを持つ。
+- Production aliasのmanifestが指す期限内ファイルを次のDirect Uploadへ引き継ぐ手順を定義。旧Deployment固有URL/CDN cache/GitHub Actionsの3日Artifactは永続sourceにしない。Access service tokenでcurrent aliasを取得、manifest/hash/bytes/内容を検査し、新Artifactへcopy。欠損・認証失敗・budget超過はdeploy停止。初回v1 migrationはflat 8 payload bytesを14日間だけ互換保持。
+- retainUntilをeffective validity end（applicationPeriod.endsAtとfeed.validThrough翌日00:00 JSTの早い方）+ 48h、最低7日・最大14日の組合せで、releaseがcurrent aliasを退く`retiredAt`を起点に定義。rollbackでreleaseがcurrentへ戻った場合は再retirement時に時計を再開。旧tab/session expiry、manifest ETag/304、release pin、fail-closed、reload、LRU key、始発/終電など既存判定の影響を記載。rollbackはPages deployment全体の戻しとして扱い、current alias内にないnew generationへpinしたtabはfail/reloadとなる。
+- Phase 4-8のfile単位作業、recursive file allowlist/count式（通常`10+8R`、legacy移行中`18+8R`）、CI retention assembly、各自動/実機test、staging→ODPT eligibilityの段階、Access token/retention/file budget等の決定事項を `docs/t12_phase4_7_release_design.md` に作成。Cloudflare公式Pages limits、Serving Pages cache/ETag、Pages rollback、Access service token資料を参照。
+- `docs/project_state.md` と本履歴を更新。変更は文書のみ。builder/validator/fixture/runtime/workflow/public artifact/Cloudflareを変更せず、GitHub Actions・ODPT API・テストを実行せず、commit/push/mergeなし。
