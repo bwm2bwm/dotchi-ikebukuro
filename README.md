@@ -68,6 +68,14 @@ python3 scripts/validate_public_artifact.py /tmp/dotchi-public-site
 
 `--service-date`を省略するとJSTの当日を基準日として、前日・当日・翌日の3 serviceDateを生成します。同じ基準日ならファイル内容は同一です。CIではfixture生成、builder、独立validator、承認後のdeployの順に接続する想定です。workflowとCloudflare設定はまだありません。
 
+### GitHub Actions synthetic CI
+
+`.github/workflows/synthetic-public-ci.yml` は手動起動専用です。mainへworkflowを取り込んだ後、GitHubの **Actions → Synthetic public site CI → Run workflow** から `main` を選んで起動します。main以外を選んだ実行はguard jobで失敗し、buildへ進みません。
+
+workflowはrunner一時領域でJST当日基準のfixtureを生成し、public siteをbuildして17ファイルをartifactに保存します。別jobがartifactをダウンロードし、独立validatorを実行します。artifactは3日で期限切れになります。取得する場合はActionsのrun summaryにあるArtifactsから `synthetic-public-site-<run id>-<attempt>` を選びます。Artifactがない場合はdownload stepが失敗します。失敗時はrunのJobsから失敗job/stepを開き、build log、download結果、validatorの理由を確認してください。
+
+検証成功時も外部公開は行いません。Phase 4-4でCloudflare deployを接続する場合は独立したdeploy jobを追加し、少なくとも `needs: validate` を必須にします。そのjobだけにCloudflare credentialを渡し、build/validation jobへCloudflareやODPTのsecretsを渡さない構成とします。
+
 ## ファイル構成
 
 - index.html: 画面の骨組み

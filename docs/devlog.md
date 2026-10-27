@@ -491,3 +491,12 @@
 - テストのfixture変換を共通factoryへ移し、JST日付境界、明示/既定日付、決定性、8駅・date整合、秘密/診断field除外、不正入力、既存出力保護を追加。
 - ローカル一時領域でCLI生成 → 既存builder → 独立validatorを実行。17ファイル、8駅、2026-10-26〜28の3 serviceDateで成功。専用factory test 9件、既存builder test 6件、payload profile test 9件、artifact validator test 8件成功。
 - GitHub Actions workflow、Cloudflare設定・接続・deploy、ODPT API、secret参照・実ダイヤの外部送信はなし。公開root mock、private preview、QA previewは変更なし。commit/push/mergeなし。
+
+## 2026-10-27 — T12 Phase 4-3 GitHub Actions synthetic CI
+
+- `.github/workflows/synthetic-public-ci.yml` を追加。唯一のtriggerは`workflow_dispatch`。main-branch guardが非main refを失敗させ、build/validate jobもmain以外は実行しない。concurrency groupで同workflow/refを直列化し、同時実行をcancelしない。
+- build jobはGitHub-hosted `ubuntu-latest`、Python 3.13、Node.js 24.15.0。runner tempに明示serviceDateなしでfixture生成、public builder、17ファイル数確認を行い、run/attempt固有名でArtifactを3日保持する。
+- 独立validation jobはbuild成功後にのみ実行し、同runのArtifactをdownloadして`validate_public_artifact.py`を実行。builder再実行なし。Artifact不在・download失敗・validator失敗はfail closed。Cloudflare deploy job、ODPT/API secrets、外部取得は追加していない。
+- checkout v7.0.1、setup-python v7.0.0、setup-node v7.0.0、upload-artifact v7.0.2、download-artifact v8.0.2をfull commit SHAで固定。workflow/job permissionsは`contents: read`、guard jobは権限なし。
+- READMEにGitHub画面からの手動起動、Artifact取得、失敗stepの確認、Phase 4-4 deploy jobは`needs: validate`とする方針を記載。
+- ローカルでYAML syntax parse、trigger/ref/permissions/job DAG/action SHA/artifact pathの静的検査、synthetic関連テスト、`git diff --check`を実施。GitHub Actions run、Cloudflare設定・接続/deploy、ODPT/API、secret参照、commit/push/mergeなし。root mock・private preview・QA previewに差分なし。

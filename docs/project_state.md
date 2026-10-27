@@ -3,9 +3,18 @@
 ## T11/T12/T13/T15 状況（2026-10-27）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（CI向けsynthetic fixture生成）を実装済み。Phase 4-2はローカル検証まで完了。GitHub Actions workflow、Cloudflare接続、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI workflow）を実装済み。Phase 4-3はローカル静的検証まで完了。GitHub Actionsは未起動、Cloudflare接続・実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
+
+## T12 Phase 4-3 synthetic CI workflow（2026-10-27）
+
+- `.github/workflows/synthetic-public-ci.yml` を追加。`workflow_dispatch`のみで起動し、main以外はguard jobで失敗する。build/validationはGitHub-hosted Ubuntu、Python 3.13、Node.js 24.15.0を使用する。
+- workflow permissionsは`contents: read`を基本とし、guardは権限なし。checkout、setup-python、setup-node、upload-artifact、download-artifactはfull commit SHAで固定。Cloudflare/ODPT secretsは参照しない。
+- build jobはrunner tempにfixtureとsiteを生成し、既存builderを実行して17ファイルと8駅/serviceDate概要を記録。成果物Artifactは3日保持。別validation jobが同run/artifactを取得し、builderを呼び直さず独立validatorを実行する。
+- build/Artifact upload失敗時はvalidationへ進まず、Artifact欠落またはvalidator失敗はvalidation jobを失敗させる。Phase 4-4でdeploy jobを追加する場合は`needs: validate`を必須とし、検証済み同run Artifactのみを入力する。
+- 手動操作はGitHub Actions画面でworkflowを選び、`main`を選択してRun workflow。run summaryのArtifactsから3日以内にsite artifactを取得できる。失敗時は失敗jobのstep logを確認する。詳しい手順はREADMEに記載。
+- ローカルでYAML構文とworkflow条件を静的検証する。GitHub Actionsは起動していない。外部公開・Cloudflare接続/デプロイ・ODPT/API・secret参照なし。root mock、private preview、QA previewは変更していない。
 
 ## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
 
