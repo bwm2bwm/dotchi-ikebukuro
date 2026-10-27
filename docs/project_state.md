@@ -1,9 +1,9 @@
 # プロジェクト状態
 
-## T11/T12/T13/T15 状況（2026-10-27）
+## T11/T12/T13/T15 状況（2026-10-28）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。GitHub Actions #4のdeploy成功に加え、Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下を確認済み。固定時刻QAのDOM確認はローカルテストで再現可能。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。Phase 4-6Bでstagingの新旧Deployment切替を実機確認し、旧タブから新JSONを取得する経路を確認。fixtureの`generatedAt`がservice-date基準日の前日を表す仕様と、release世代を跨ぐ混在を検出しない現行設計を記録した。調査・設計メモは [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md)。Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下も確認済み。固定時刻QAのDOM確認はローカルテストで再現可能。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -39,7 +39,16 @@
 - Cloudflare Pages projectは`dotchi-ikebukuro-staging`、production branchは`main`、deployment ID表示は`13e10889`。配信内容はsynthetic（架空）データのみ。GitHub Pages root mock、private preview、QA previewは変更していない。
 - ユーザー確認: 通常URL、deployment固有URL、未認証SafariからのJSON直アクセスはいずれもAccess認証画面を表示。本人認証後の通常URLではアプリ表示に成功。ChromeでJSONが直接表示されたケースは直前の認証Cookie残存の可能性があるが、原因は未確定。未認証状態を分離した再試験とcache経由の本文非漏えい確認が残る。
 - 初回deploy時の実時刻画面では氷川台が初期選択され、路線別/発車順切替、直通filter、広告仮枠と「本日の終電は終了しました」を確認。その後、ユーザー確認によりBrotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下と基本UI表示を確認。カード自体は実時刻では表示されないため、Phase 4-6Aで固定時刻QAを追加。
-- Phase 4-6でBrotli、ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下を確認済み。残るstaging検証はdeployment更新前後の新旧asset整合性、Cookieを持たない未認証セッションでのPreview/JSON確認、固定時刻QAを使うiPhone列車カード操作。実ダイヤの公開へ移行する前に、期限/データ鮮度・安全停止の運用ゲートも別途確認する。
+- Phase 4-6でBrotli、ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下を確認済み。新旧Deployment切替で旧タブから新JSONへのfetch経路は確認したが、JS hashと各responseのETag/Cache-Control、LRU内世代混在は未採取。残るstaging検証はCookieを持たない未認証セッションでのPreview/JSON確認、固定時刻QAを使うiPhone列車カード操作、release整合性実装後のNetwork再検証。実ダイヤの公開へ移行する前に、期限/データ鮮度・安全停止の運用ゲートも別途確認する。
+
+### T12 Phase 4-6B 新旧Deployment切替・世代整合性調査（2026-10-28）
+
+- ユーザー提供の実機記録: Cloudflare Pages staging世代A `13e10889` は`generatedAt`/`feed.validFrom`が2026-10-26、世代B `f3be074d` は2026-10-27。10月28日朝のGitHub Actions #5から生成されたBについて、前日から開いたChromeタブで再読み込みせず小竹向原へ切替後、HTTP 200のB世代JSON取得を確認。世代固有URL A/Bと通常Production URLの応答世代も報告どおり。旧JavaScriptの実hashは未取得のため、旧JS保持は操作状況からの判断。
+- 日付差はfixture仕様による。workflowは`--service-date`を渡さず、factoryは`datetime.now(ZoneInfo("Asia/Tokyo")).date()`を基準日にし、`generatedAt`と`feed.validFrom`を基準日の前日00:00 JSTに設定する。したがってJST 10/28実行ならserviceDateは10/27〜29、`generatedAt`/`validFrom`は10/27。runnerのUTC設定による1日ずれではない。`generatedAt`は実際のbuild時刻ではなく、fixture期間先頭日の固定timestampとして使われる。
+- 現行public loaderのJSON URLは固定相対path。ページ内prepared payload LRUは2駅で、cache miss時だけ選択駅JSONを取得する。切替前にLRUへ残るA世代payloadと、切替後のfetchで得るB世代payloadが同一runtimeに共存しうる。実測は旧タブから新deployment JSONへのfetch経路を示すが、実際にA/B payloadが同一tabのLRU内に共存したことや表示差は確認していない。
+- 現行validatorは17ファイル構成、profile/schema/各JSON、各駅のserviceDate一覧一致等を検査するが、駅JSON間の`generatedAt`/feed metadata一致、HTML/JS/JSONのdeployment release一致、URLと内容の世代結合は検査しない。`ETag`/304は単一URLの再検証であり複数asset間の世代transactionを与えない。`validFrom`/`validThrough`は日付適用範囲と有効性を判定するものでrelease識別子ではない。
+- 世代方式の比較と推奨する次Phase範囲は [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md)。推奨は静的manifestでrelease IDと世代別JSON URLを一度pinし、JSON内release IDも照合する方式。HTML/JS/JSONのrelease ID直接埋め込みは最小変更の先行検知策として比較対象に残す。
+- 本Phaseはコード・public artifact・workflow・Cloudflare・GitHub Actionsを変更せず、外部接続、ODPT API、テスト実行なし。更新対象はproject state/devlogと設計メモのみ。
 
 ### T12 Phase 4-6A 固定時刻synthetic列車カードQA（2026-10-27）
 

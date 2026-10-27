@@ -540,3 +540,11 @@
 - QA serverはユーザーが指定するMacのRFC1918 private IPv4へbindし、wildcard等を拒否。HTTPSや認証はなく、syntheticのみを同一の信頼できるLANで確認する用途。Ctrl+Cでserver停止とTemporaryDirectory削除。
 - 固定JST時刻scenario: 2026-10-27 05:09:59/05:10:00始発ゲート、同日01:40前serviceDate 25:50、2026-10-26 21:14:59/21:15:00夜間路線ゲート、22:05表示順/最早着/フィルター、22:59:59直通終電、23:04:59終電、23:05:01終電終了。
 - 検証結果: 固定時刻DOM QA 5件、既存runtime/profile/terminal Node tests 71件、synthetic関連Python tests 32件がすべて成功。Python/Node syntax、既存deploy workflow YAML parse、wildcard bind拒否、`git diff --check`を確認。GitHub Actions、Cloudflare API/deploy、ODPT、secretsへのアクセスなし。
+
+## 2026-10-28 — T12 Phase 4-6B Deployment切替・release世代整合性調査
+
+- ユーザー提供のstaging検証を記録。世代A `13e10889`は`generatedAt`/`feed.validFrom`が10/26、世代B `f3be074d`は10/27。10/28朝のActions #5 deploy後、前日から維持したChrome tabでreloadせず小竹向原へ切替え、JSON HTTP 200とB世代本文を確認。旧JSのhashは未取得のため、旧JavaScript保持は操作状況からの判断と明記。
+- `generate_synthetic_public_fixtures.py`、factory、workflowを読取調査。workflowは`--service-date`を省略、基準日は`datetime.now(ZoneInfo("Asia/Tokyo")).date()`。serviceDateは基準日の前日〜翌日、`generatedAt`と`feed.validFrom`は先頭serviceDateの00:00 JST。よって10/28実行時の10/27 `generatedAt`は仕様どおりで、runner UTC timezone起因ではない。synthetic `generatedAt`はbuild時刻ではなく対象期間先頭日を表す固定timestampである点を記録。
+- public loaderの固定相対JSON URL、2駅prepared-payload LRU、`cache: default`、runtime有効期間判定、独立validatorのcross-file検査範囲を確認。LRUに残るA payloadとdeployment後fetchのB payloadが同一runtimeで共存しうるが、今回その共存・表示差は未測定。validatorは各駅payload/serviceDate整合を検証する一方、HTML/JS/JSON間または駅JSON間のrelease一致を検証しない。ETag/304はURL単位で、世代transactionを保証しない。
+- A（共通release ID検知）、B（immutable release別JSON URL）、C（manifest pinning）を比較。中期推奨をmanifest + 世代別URL + payload ID/hash照合とし、UX fail-closed/reload/manual retry、旧世代保持、具体的なPhase 4-7/4-8作業を設計メモへ記録。
+- 更新: `docs/project_state.md`、本`docs/devlog.md`、`docs/t12_phase4_6b_release_consistency.md`。コード、builder、validator、fixture、workflow、public artifactは変更なし。Cloudflare/GitHub Actions/ODPTへ接続せず、テスト実行・commit/push/mergeなし。
