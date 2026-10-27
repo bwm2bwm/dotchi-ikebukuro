@@ -482,3 +482,12 @@
 - Phase 1 allowlistの互換性テストで`destinationStatus.routes[*].directCandidateCount`が直通のみ時のroute coverageに必要と判明。Phase 1射影で同fieldを保持する変更を加えた。adapterの判定方式は変更せず、local/public比較で発車順・最早着・路線・直通/乗換・待ち時間・終電/直通終電・終了後・25時台serviceDate・翌朝60分gate・Heiwadai件数/状態の一致を確認。
 - synthetic-onlyの追加比較Node test 6件とloader/profile test 3件。Node全体87件、`TZ=UTC`でも87件成功。実データを使わないPython subset 35件成功。保存済み実ダイヤの生成・regression test classはsynthetic-only制約により未実行。JS/Python syntax確認、`git diff --check`成功。
 - ODPT API・API key/secret・実ダイヤ変換・外部送信・Cloudflare設定/デプロイなし。公開root mock、private/QA preview生成物、Git履歴は維持。
+
+## 2026-10-27 — T12 Phase 4-2 CI向けsynthetic fixture生成
+
+- `scripts/synthetic_public_fixture_factory.py` と `scripts/generate_synthetic_public_fixtures.py` を追加。入力は追跡済みの `tests/fixtures/public_payload_profile_input.json` に固定し、ODPT/API、`local_data/`、preview出力を読む経路を設けない。
+- JSTの基準日から前日・当日・翌日の3 serviceDateを生成。基準日時刻を明示した場合のmetadataとJSON書式は決定的。各日の架空journeyには06:10直通＋乗換候補と25:50発車を含む。駅別集計値を再計算し、profile射影がAPI key風値・raw URI・診断値・絶対パスを除外する。
+- 出力先は`--output`必須、既存pathは拒否。全8駅のpayloadと`.synthetic-public-display-v1` markerを一時directoryに完成させてからrenameする。失敗時は一時stageとlockを削除し、既存pathは変更しない。
+- テストのfixture変換を共通factoryへ移し、JST日付境界、明示/既定日付、決定性、8駅・date整合、秘密/診断field除外、不正入力、既存出力保護を追加。
+- ローカル一時領域でCLI生成 → 既存builder → 独立validatorを実行。17ファイル、8駅、2026-10-26〜28の3 serviceDateで成功。専用factory test 9件、既存builder test 6件、payload profile test 9件、artifact validator test 8件成功。
+- GitHub Actions workflow、Cloudflare設定・接続・deploy、ODPT API、secret参照・実ダイヤの外部送信はなし。公開root mock、private preview、QA previewは変更なし。commit/push/mergeなし。

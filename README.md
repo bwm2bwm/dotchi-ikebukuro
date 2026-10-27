@@ -52,6 +52,22 @@ previewではルート枠から8駅の目的地選択を開けます。更新時
 
 Mac Safariで `http://127.0.0.1:8765/index.html` を開きます。終了時はHTTP serverを `Ctrl-C` で停止します。開発用計測はSafari Web Inspector Consoleの `window.__dotchiPreviewPerf.history`（adapter、selection、DOM描画）と `window.__dotchiPreviewPerf.loadHistory`（fetch、本文読込、JSON解析、adapter、cache hit）で直近50件を確認できます。`fetchCount` と `cachedDestinationIds` も参照できます。計測値は画面には表示しません。
 
+### CI向けsynthetic public fixture
+
+公開用builderの動作確認には、追跡済みのテスト用synthetic入力だけからfixtureを生成します。ODPT API、`local_data/`、local/QA preview生成物は読みません。`--output`には新しいパスを指定してください。既存ディレクトリは上書きせず、日付はJST基準です。
+
+```sh
+python3 scripts/generate_synthetic_public_fixtures.py \
+  --service-date 2026-10-27 \
+  --output /tmp/dotchi-public-fixtures
+python3 scripts/build_public_site.py \
+  --fixtures /tmp/dotchi-public-fixtures \
+  --output /tmp/dotchi-public-site
+python3 scripts/validate_public_artifact.py /tmp/dotchi-public-site
+```
+
+`--service-date`を省略するとJSTの当日を基準日として、前日・当日・翌日の3 serviceDateを生成します。同じ基準日ならファイル内容は同一です。CIではfixture生成、builder、独立validator、承認後のdeployの順に接続する想定です。workflowとCloudflare設定はまだありません。
+
 ## ファイル構成
 
 - index.html: 画面の骨組み

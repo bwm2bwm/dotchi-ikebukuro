@@ -1,11 +1,19 @@
 # プロジェクト状態
 
-## T11/T12/T13/T15 状況（2026-10-26）
+## T11/T12/T13/T15 状況（2026-10-27）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）を実装済み。Cloudflare接続、CI、自動更新、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（CI向けsynthetic fixture生成）を実装済み。Phase 4-2はローカル検証まで完了。GitHub Actions workflow、Cloudflare接続、実ダイヤの変換・公開は未実施。推奨案はCloudflare Pages静的配信 + GitHub Actions更新処理。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
+
+## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
+
+- `scripts/generate_synthetic_public_fixtures.py` は追跡済み `tests/fixtures/public_payload_profile_input.json` だけを入力し、JST基準の前日・当日・翌日を持つ8駅分の `public-display-v1` fixtureを生成する。`--service-date YYYY-MM-DD`で基準日を固定でき、省略時はAsia/Tokyoの当日を使う。
+- 出力は必須の`--output`で指定し、既存pathを拒否する。全8駅を一時directoryに作成後、synthetic markerを含む完成directoryをrenameして公開する。失敗時はstageとlockを削除する。
+- テストfixtureの直通・乗換と06:10/25:50発車データを各serviceDateへ含め、fixture生成をテストとCIで共用するfactoryへ集約した。payload metadataとserviceDateは基準日から決定的に作られる。同日再生成で各ファイルのbytesが一致する。
+- 使用例: `python3 scripts/generate_synthetic_public_fixtures.py --service-date 2026-10-27 --output /tmp/dotchi-public-fixtures` の後、既存builder、独立validatorを実行する。CI想定順はfixture生成 → build → independent validate → 承認 → deploy。workflowはまだない。
+- Phase 4-2はsynthetic専用のローカルテストと一時directoryでのbuild・validationを確認。GitHub Actions、Cloudflare、実ダイヤ、secret、外部送信には接続していない。root mock、private preview、QA previewは変更していない。
 
 ## T12 Phase 1 公開用payload profile（2026-10-26）
 

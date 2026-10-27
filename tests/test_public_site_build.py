@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 import shutil
@@ -13,47 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_public_site  # noqa: E402
-from public_payload_profile import project_public_payload  # noqa: E402
-
-
-LOCAL_FIXTURE = ROOT / "tests" / "fixtures" / "public_payload_profile_input.json"
+from synthetic_public_fixture_factory import make_public_fixture as _make_public_fixture  # noqa: E402
 
 
 def make_public_fixture(destination_id: str) -> dict:
-    source = json.loads(LOCAL_FIXTURE.read_text(encoding="utf-8"))
-    for day in source["serviceDays"]:
-        day["destinationStationId"] = destination_id
-        state = day["destinationStatus"]
-        counts = {route_id: {"direct": 0, "transfer": 0, "pairs": 0, "transfer_only": 0}
-                  for route_id in ("6", "9")}
-        for departure in day["departures"]:
-            route = counts[departure["routeId"]]
-            route["direct"] += departure["directAlternative"] is not None
-            route["transfer"] += departure["bestTransferAlternative"] is not None
-            route["pairs"] += departure["transferCandidateCount"]
-            route["transfer_only"] += (departure["directAlternative"] is None
-                                       and departure["bestTransferAlternative"] is not None)
-            for key in ("primary", "directAlternative", "bestTransferAlternative"):
-                journey = departure[key]
-                if journey is not None:
-                    journey["arrivalStationId"] = destination_id
-        state.update({
-            "directCandidateCount": sum(item["direct"] for item in counts.values()),
-            "transferCandidateCount": sum(item["transfer"] for item in counts.values()),
-            "transferPairCount": sum(item["pairs"] for item in counts.values()),
-            "transferOnlyCount": sum(item["transfer_only"] for item in counts.values()),
-            "transferPassThroughCount": 0,
-            "transferDataInsufficientCount": 0,
-        })
-        for route_id, route in state["routes"].items():
-            metrics = counts[route_id]
-            route.update({
-                "directCandidateCount": metrics["direct"],
-                "transferCandidateCount": metrics["transfer"],
-                "transferPairCount": metrics["pairs"],
-                "transferOnlyCount": metrics["transfer_only"],
-            })
-    return project_public_payload(source)
+    return _make_public_fixture(destination_id, ["2026-10-26", "2026-10-27"])
 
 
 class PublicSiteBuildTests(unittest.TestCase):
