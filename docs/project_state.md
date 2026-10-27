@@ -58,6 +58,13 @@
 - 保持deadlineの提案はeffective validity end（`applicationPeriod.endsAt`とfeed.validThrough翌日00:00 JSTの早い方）を基準に、releaseがcurrent aliasから退く時刻`retiredAt`を使い`min(retiredAt+14d, max(retiredAt+7d, effectiveValidityEnd+48h))`。Cloudflare Pages Freeの20,000 files/site・25 MiB単一asset上限、旧asset CDN cache非永続性、rollback挙動を公式資料で確認し、ファイル数・bytes budgetをfail closedする。
 - builder/validator/runtime/CI、QA harness、状態遷移、200/304/ETag、旧tab/削除時、iPhone Safariまでのテストを設計メモに記録。4-8A〜4-8Fへ段階分割。今回のPhaseは設計文書のみで、コード・artifact・workflow・Pagesは変更せず、Actions/ODPT/API・テスト実行なし。
 
+### T12 Phase 4-7 本番運用方針反映（2026-10-28）
+
+- 合意済み方針を [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) に反映。既存`Synthetic public site CI`は手動synthetic staging専用に維持し、将来の本番ODPT日次確認/data-only公開と、テスト・手動承認付きapp公開を責務分離する。
+- 自動公開候補はcanonical payload/source versionの変更、または根拠のある有効期間延長時だけ。data・releaseId/manifest/hash・期限・旧世代引継ぎ・size・承認済みruntime一致の全gate通過を必要とし、no-opは再deployしない。取得/生成/検証/保持/deploy失敗では新公開物を作らず、期限切れデータをruntimeが案内しない。
+- 日次scheduleの遅延/欠落、有限retry、heartbeat、GitHub標準失敗通知の限界、72h/24h期限警告の候補、旧世代のProduction aliasからの引継ぎ、Production共通lockとdeploy直前recheckを設計。これらの数値・時刻・通知先・queue機能・利用枠は未確定の推奨値として明記した。
+- Phase 4-8をcontract、builder/validator、runtime、synthetic staging、ODPT shadow mode、publishing coordinator、明示承認付き本番有効化に再分割。今回変更は指定3文書のみ。コード/テスト/fixture/workflow変更、Actions実行、Pages deploy、ODPTアクセス、commit/push/mergeなし。
+
 ### T12 Phase 4-6A 固定時刻synthetic列車カードQA（2026-10-27）
 
 - `scripts/serve_synthetic_public_qa.py` は追跡済みsynthetic fixture factoryを使い、baselineと夜間表示scenarioを別々にpublic builderへ入力する。両方を独立validatorに通し、それぞれ17ファイル・8駅のartifactとして一時領域へコピーした後、artifact外にQA shellと`nowProvider`注入口を作る。

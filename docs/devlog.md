@@ -557,3 +557,12 @@
 - retainUntilをeffective validity end（applicationPeriod.endsAtとfeed.validThrough翌日00:00 JSTの早い方）+ 48h、最低7日・最大14日の組合せで、releaseがcurrent aliasを退く`retiredAt`を起点に定義。rollbackでreleaseがcurrentへ戻った場合は再retirement時に時計を再開。旧tab/session expiry、manifest ETag/304、release pin、fail-closed、reload、LRU key、始発/終電など既存判定の影響を記載。rollbackはPages deployment全体の戻しとして扱い、current alias内にないnew generationへpinしたtabはfail/reloadとなる。
 - Phase 4-8のfile単位作業、recursive file allowlist/count式（通常`10+8R`、legacy移行中`18+8R`）、CI retention assembly、各自動/実機test、staging→ODPT eligibilityの段階、Access token/retention/file budget等の決定事項を `docs/t12_phase4_7_release_design.md` に作成。Cloudflare公式Pages limits、Serving Pages cache/ETag、Pages rollback、Access service token資料を参照。
 - `docs/project_state.md` と本履歴を更新。変更は文書のみ。builder/validator/fixture/runtime/workflow/public artifact/Cloudflareを変更せず、GitHub Actions・ODPT API・テストを実行せず、commit/push/mergeなし。
+
+## 2026-10-28 — T12 Phase 4-7 本番運用方針の設計反映
+
+- 合意済みの本番方針を [`docs/t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) に追記。synthetic staging CIは従来どおり手動起動・synthetic専用とし、将来のODPT日次確認/data-only auto-publish、手動承認付きapp release、緊急dispatchの責務を分けた。
+- 自動公開gateを、source取得とschema確認、public payload digest/feed version変更またはsource根拠のあるvalidity extension、releaseId/manifest/hash、旧世代回収、size budget、approved app contract一致に整理。毎日のrunは確認であり、no-opならmanifest/`publishedAt`を変えず再deployしない。未承認のコード・契約変更をdata-only経路へ混ぜない。
+- transient API/network failureは有限retry（初期案3回、`Retry-After`尊重）後に停止し、失敗分類とrun summary/Actions通知を推奨。schedule欠落やActions停止は通常のrun failure通知で検知できないため、36時間heartbeat候補と期限警告を追記。72h/24h/expired警告値、遅延retry、通知先、GitHub concurrency queue対応は本番前に決定する未確定値。
+- 日次更新時も期限内旧generationを毎回Production aliasから再取得・hash検査してDirect Upload treeへcarry forward。旧Deployment固有URLや3日GitHub Artifactを保持元にしない。取得・検証・deploy失敗時は新uploadを止め、既存正常Deploymentを維持。デプロイ直前のcurrent release再確認と共通Production concurrency groupを提案し、GitHub既定のpending run置換をlossless queueと誤認しない注意を追加。
+- ODPT基本利用指針、GitHub schedule/notifications/concurrency/usage資料を設計文書から参照。Phase 4-8はsynthetic stagingの後にODPT shadow mode、publishing coordinator、plan/terms/monitoring確認、本番有効化へ分割した。
+- 更新対象は`docs/t12_phase4_7_release_design.md`、`docs/project_state.md`、本履歴のみ。コード・test・fixture・workflow・public artifact変更、Actions実行、Cloudflare deploy、ODPT APIアクセス、commit/push/mergeなし。

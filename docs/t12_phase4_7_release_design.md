@@ -269,17 +269,102 @@ HTTP browser cacheの200/304交渉、iOS SafariのWeb Crypto/Cache API、実際�
 7. **hash/runtime support:** production HTTPSではWeb Crypto `crypto.subtle`を必須。local QAがplain HTTP/private LANでdigestできない場合はtest-only injected verifierでunit testし、実データ検査はHTTPS stagingで行う。productionにskip flagは設けない。
 8. **file budget:** Pages 20,000-file Free cap/25 MiB individual capを確認済み。日次以下の更新なら推定R≤15/138 files、より高頻度なら実数を毎回算出する。最大file・総artifact byte thresholdはPhase 4-8前にbaseline measureして固定し、budget超過はdeploy stop。
 
-## 11. Phase 4-8の実装分割
+## 11. Phase 4-8の初期staging分割（§13で拡張）
+
+以下はrelease整合性のsynthetic staging導入順を示した初期案。日次本番運用方針を反映した正式なPhase 4-8分割・作業順は§13を参照する。
 
 - **4-8A — schema/hash contract:** release envelope (inner payload schema v1維持)、manifest schema、runtime contract、release descriptor/canonicalization、fixture updates、test vectorsを決める。
 - **4-8B — deterministic builder/validator:** versioned tree、manifest、hashes、recursive allowlist、retention listを生成・検査。old site mock fixtureに対しcarry-forward toolを先行実装。
 - **4-8C — runtime pin and UX:** startup manifest gate、compatibility check、SHA-256 verify、release-aware LRU、fail-closed/retry/reload CTA。local preview pathを隔離。
 - **4-8D — CI retention assembly:** approved deploy jobでAccess service tokenによるcurrent Production alias fetch、expiry prune、hash verification、new release assembly、final independent validation/tree digest。欠損/unauthorized/oversizeはabort。
 - **4-8E — synthetic staging migration:** first v1 compatibility copy、連続deployment retention、rollback/old-path expiry、ETag/304検証。ChromeとiPhone SafariのNetwork/画面確認。
-- **4-8F — ODPT eligibility review:** 実データ入力、更新周期・期限・利用条件、token/retention、監視/停止手順の確認後に別途着手。
+- **Production eligibility review:** 実データ入力、更新周期・期限・利用条件、token/retention、監視/停止手順の確認後に別途着手。
 
-## 12. 根拠・作業境界
+## 12. 本番データ更新とアプリ公開の運用設計
+
+### 12.1 workflowの責務
+
+| 経路 | 目的・起動 | 入力と公開範囲 | 承認 |
+|---|---|---|---|
+| `Synthetic public site CI` | 現行どおり`workflow_dispatch`のみ。synthetic fixtureでstagingのbuilder・validator・承認付きdeployを検証 | ODPTを読まず、本番データを生成・公開しない | staging Environmentの既存承認を維持 |
+| 将来の本番日次data workflow | 原則1日1回、ODPT確認・変換・比較・検証。手動dispatchを復旧用に残す | source取得、data artifact作成、既承認runtimeとの組み立て。UI/JS/CSS/契約をmainから無審査で取り込まない | 条件を満たすdata-only更新は自動公開を目標 |
+| app release workflow | UI/JS/CSS、schema、builder/runtime契約、workflow/権限等の変更をテストし本番公開 | 承認済みコードと、currentまたは新規に検証された互換data releaseを一体化 | PR reviewとproduction Environmentの手動承認 |
+| emergency workflow_dispatch | データ障害復旧または緊急app修正 | 選択releaseと対象を明示。通常の検証・整合性gate・直列化は省略しない | 実行者による明示起動。app/権限変更はproduction approvalを維持 |
+
+本番data workflowが参照するbuilder/runtimeは、承認済みapp releaseのcommitまたは明示的に固定したtoolchainから供給する。data-only更新でsource branch先端の未承認HTML/JS/CSS/contractを混ぜない。Cloudflare credentialは最終deploy jobだけ、ODPT credentialは取得jobだけに限定する構成を推奨する。data artifactはjob境界でimmutable digestを渡し、deploy前後で同一性を検証する。
+
+### 12.2 自動公開を許す条件と更新検出
+
+毎日の確認自体はデプロイではない。`checkedAt`/`lastSuccessfulCheckAt`（運用状態）とsource側更新時刻/versionを記録し、次をすべて満たす時だけ公開候補を作る。
+
+1. API response、認証、source schema、対象8駅、対象serviceDate、ライセンス/利用条件上の範囲が正常。
+2. canonical public payload digestまたはsource-authoritative `feed.version` が現行と異なる、**または**有効期間延長が必要で、ODPT source metadataと承認済みextension ruleの双方が延長後範囲を裏付ける。
+3. public profile、station/date/feed整合性、releaseId、manifest、最終JSON hash/bytes、保持世代の取得・検証、file/size budgetがすべて成功。
+4. app asset/schema/runtime contractが現行の承認済みreleaseと一致し、data-only自動経路にコード差分がない。
+5. Production aliasの最新releaseをdeploy直前に再取得し、組み立てたcurrent parentがまだ同一と確認できる。
+
+payload/authoritative metadata/有効期間に変更がなく、公開データが引き続き有効ならno-opとし、manifestや`publishedAt`を更新しない。`releaseId`はbundle内容から決定的に計算し、日付やrun IDだけを理由に世代を増やさない。単に将来日付を足す、sourceが裏付けない期間を延長する、古い値を新鮮なデータとして再公開することは禁止する。更新期限が近くても有効な延長根拠が得られなければ公開を止め、運用通知とruntime期限表示へ移る。
+
+ODPTの基本利用指針は静的データまたは静的データ由来コンテンツを定期更新し、個別条件がない場合も更新通知後1週間以内に更新するよう求める。日次確認はそれより短い検知間隔を目指す設計だが、対象データの個別条件・API仕様・更新通知経路は本番前に確認する。実行JST時刻は更新タイミングを確認して決定し、毎時ちょうどを避ける。GitHub scheduleはUTC基準を既定とし、高負荷で遅延・欠落し得るため、時刻ぴったりの実行保証とは扱わない。scheduleがdefault branch上で動くこと、公開repositoryの60日活動なしで自動無効化され得ること、通知先がschedule定義を最後に編集した人に依存する点も監視手順に含める。
+
+### 12.3 失敗、再試行、期限警告、通知
+
+| 事象 | 推奨動作 | 公開状態 |
+|---|---|---|
+| timeout/network/429/5xx等の一時障害 | 同一run内で最大3回程度、指数backoff+jitter。`Retry-After`があれば尊重。上限後に終了し、可能なら30〜60分後の単一再試行を運用する | deploy jobへ進めない。現Productionを保持 |
+| auth/secret/不正schema/駅欠損/期間矛盾/hash失敗/旧世代欠損/size超過 | 原因修正まで自動再試行しない。固定schemaのsummaryに分類・release・run URLを記録し通知 | deploy jobへ進めない。既存正常deploymentを保持 |
+| production Direct Upload失敗 | deployment結果を確認し、自動で別内容を重ねて再deployしない。現行aliasとdeploymentを確認してから再実行 | Pagesが維持する直近正常Productionを使用。成功を確認できない場合は停止扱い |
+| scheduled run未起動/Actions停止 | 後述のheartbeat期限超過を警告。手動dispatchの復旧手順を維持 | 既存公開物を保持するが、有効期限を過ぎたダイヤはruntimeで表示しない |
+
+推奨警告閾値は、effective validity endまで72時間でwarning、24時間でcritical、期限到達でexpired/high。日次処理の遅延や一度の失敗を吸収する候補値であり、ODPT更新頻度と許容停止時間を確認して本番前に確定する。ここでeffective validity endは設計書§5の`applicationPeriod.endsAt`と`feed.validThrough`翌日00:00 JSTの早い方。運用側は最終成功確認時刻と期限までの残り時間を評価し、通常・warning・critical・expiredの通知を出す。runtimeも公開metadataから残り時間を算出し、推奨初期案として72時間以内に更新確認が成功していない場合は控えめな「データ更新を確認中」表示、期限切れ後は候補を出さず「最新の時刻表を確認できません」とする。期限切れpayloadを正常候補として案内しない。
+
+低固定費の初期通知はGitHub Actionsのfailed workflow email/web notificationとrun summaryを使う。ただしユーザー通知設定に依存し、通知はworkflow run完了を起点とするため、schedule自体が起動しない事象は通知されない。成功runではheartbeatを更新し、次回runが前回成功から36時間超過を検知した場合にwarning/failureを発生させる案を推奨する。これもActions全体停止中は動かない。独立監視SaaS/外部通知は無償・運用条件を確認してから追加判断し、当初は導入しない案を推奨する。Actions通知の受信者、通知先設定、heartbeatの保存先と書込み権限は本番前の未決事項。
+
+GitHub scheduleは遅延・欠落する場合があるため、1回の実行失敗に対して同一run内の有限retry後は一回だけ遅延retryを推奨し、無限retryをしない。schedule trigger自体の欠落は36時間heartbeatと期限アラートで発見する。手動dispatchは復旧策であり、自動公開の安全gateや期限検査を回避できない。
+
+### 12.4 自動・手動publishの競合回避
+
+Productionを変更する全workflowで共有の同一concurrency groupを使い、`cancel-in-progress: false`とする。GitHub Actions concurrencyの既定では同一groupのpendingは1件で、新しいrunがpending runを置換して取消すため、データ更新と手動app更新を別々の競合workflowにするだけではlossless queueにならない。対応するGitHub plan/runtimeで`queue: max`を利用できるか確認し、利用可能なら少数のpendingを順序待ちさせる。利用できない場合は、唯一のproduction publish coordinatorへ要求を集約し、待ちrunの置換を許容する代わりに、各runが最新Productionを読み直して不足したdata/app変更を再計算する。いずれもdeploy直前にcurrent manifest/release/deploymentを再取得・比較し、親世代が変わっていたらassemble結果を破棄して最新世代から再組立する。
+
+推奨は同一Production Environmentと共通lockを使う単一publish coordinator。data check/build jobと手動承認付きapp requestは独立させつつ、実deployをcoordinatorへ集約する。run id順だけに正しさを依存せず、deploy直前のcompare-and-abortが必須。敗北した/取消されたdata runは成功扱いにせず、次の日次checkまたは手動dispatchで再評価する。workflowのconcurrency queue機能はアカウント/利用可能機能を確認後に決定する。
+
+### 12.5 旧世代保持と日次更新
+
+§5の保持式をそのまま適用し、日々のno-opはgenerationを作らずretention時計を進めない。変更・有効期間延長で実際に新releaseがcurrentになる都度、旧releaseをcurrent Production aliasから取得し、新Direct Upload treeへ再配置する。旧Deployment固有URLが残ることをProduction aliasでの旧path取得の代替としない。対象はmanifest列挙済みで`retainUntil > buildTime`のgenerationだけ。期限切れgenerationと14日移行期間終了後のlegacy flat aliasesは次のartifactから削除可能。
+
+旧世代の取得元はdeploy直前のProduction alias。GitHub run artifactは同一run内の受け渡しに限り、3日保存artifactを将来のretention sourceにしない。Deploy jobはmanifest・各file hash/bytes・release metadata・期限・全file setを検証してからcarry forwardする。1つでも欠ける/読めない/壊れている、Access認証不可、最終treeがbudget超過なら新uploadを行わない。Pages Direct Uploadが旧treeを自動で引き継ぐとは仮定しない。
+
+### 12.6 自動承認・手動承認境界
+
+**data-only自動公開を許す範囲:** source取得と既承認変換契約に沿ったpayload更新、manifest/release envelope生成、hash/期間/駅/保持検証、Production data-only publish。成功条件は§12.2を全て満たすこと。人手確認なしを目標とするが、権限・署名・環境保護ルールの最終形は本番前に確認する。
+
+**production手動承認を維持する変更:** UI/HTML/JS/CSS、public schema/envelope/manifest契約、builder/validator semantics、runtime判定・キャッシュ・期限ルール、GitHub Action実装/major version/pin/permissions、Cloudflare Access/Pages設定、secret/Environment policy、retention/budget/通知方針。PR test/reviewの後、app releaseとしてproduction Environment承認を要求する。自動data runが同じタイミングでこれらの差分を検出した場合はdata-only pathを中止し、承認済みapp releaseと互換dataで手動公開する。
+
+コードとデータが同時に変わる場合は、app承認済みbundleを基準に新しいdataを再生成/再検証し、一つのreleaseId/manifestで同じDeploymentに公開する。データだけを先行公開して新clientとの互換を賭けない。緊急手動dispatchもrelease/hash/retention/expiry gateを必須とする。
+
+### 12.7 固定費・利用条件の本番前checklist
+
+- GitHub repository visibility/plan、Actions minutes/storage実績、Artifact保持量、schedule利用可否、queue/concurrency対応、Environment reviewer数と通知受信先。
+- Cloudflare Pagesの現在のfile count/単体・upload上限、Direct Upload所要時間・総bytes、Production aliasからの旧世代回収、Access service-token権限/rotationとrollback。
+- ODPT対象datasetの利用条件、API request/attribution/freshness要件、更新通知経路、rate limit/maintenance、対象service期間と有効期限の意味。
+- 利用状況を計測して上限を確定し、超過時はpublish stopにする。特定planのquotaを現時点で固定値として設計に埋め込まない。追加の有料SaaSを必須依存にしない。
+
+日次workflowはraw ODPT dataを外部artifact/logへ保存しない。必要な入力保存期間・再実行性を別途判断する。Actions scheduleの遅延、miss、60日inactive disable、およびfailure notification仕様は[GitHub schedule events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)、[workflow troubleshooting](https://docs.github.com/en/actions/how-tos/troubleshoot-workflows)、[Actions notifications](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs)、[concurrency control](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)を確認した。GitHub料金とquotaはrepository plan/visibilityで異なるため、[included usage](https://docs.github.com/en/billing/reference/product-usage-included)を本番アカウントで確認する。ODPTの静的データ更新に関する根拠は[基本利用指針](https://developer.odpt.org/terms/data_basic_use_guideline.html)。資料確認日: 2026-10-28。
+
+## 13. Phase 4-8実装分割への反映
+
+- **4-8A — contract:** manifest/envelope/releaseId/hashとretention schemaを確定。production運用のデータ期限・警告・承認boundaryをcontract test化。
+- **4-8B — builder/validator:** generation tree、manifest、hash、保持世代検証。daily no-opと内容変更/authoritative validity extensionのfixtureを用意。
+- **4-8C — runtime:** session pin、generation-aware 2駅LRU、fail closed、期限前/期限後UI、更新操作。
+- **4-8D — synthetic staging:** 現workflowは手動synthetic専用として維持。複数回Direct Upload、旧世代carry-forward、ETag/304、切替、Safari実機を検証。
+- **4-8E — production data workflow in shadow mode:** ODPT API/利用条件審査後、schedule/手動起動でfetch・diff・validationを実施するがdeployせず、no-op/更新判定・retry・heartbeat・通知・size budgetを確認。実ODPT接続の許可は別途必要。
+- **4-8F — production publishing coordinator:** 共通lock、current deployment再読込、data/app要求の競合、data-only権限分離、Environment gate、旧世代保持をsynthetic/mockで検証。app code変更は承認必須。
+- **4-8G — controlled production activation:** GitHub/Cloudflare/ODPT plan/terms・schedule時刻・通知・期限SLA・staging evidenceをreviewし、明示承認後にdata-only自動公開を有効化。段階的に監視期間を置き、即時停止とPages deployment rollbackを手順化。
+
+Phase 4-8の着手前に決めるのは、ODPT source/freshness詳細、実行時刻、72h/24h警告値、36h heartbeat、retry回数/間隔、Actions concurrency queue可否、通知責任者/受信先、GitHub/Pages利用枠、data workflowのtoken scopeである。これらは推奨初期値を示しただけで、未承認の本番設定を確定したものではない。
+
+## 14. 根拠・作業境界
 
 設計根拠として`docs/t12_phase4_6b_release_consistency.md`、`docs/project_state.md`、`docs/devlog.md`、`scripts/build_public_site.py`、`scripts/validate_public_artifact.py`、`scripts/public_payload_profile.py`、`scripts/synthetic_public_fixture_factory.py`、`scripts/local_preview_payload_loader.mjs`、`_local_preview/preview_core.mjs`、`scripts/timetable_adapter.mjs`、`.github/workflows/synthetic-public-ci.yml`と関連testsを読んだ。
 
-このPhase 4-7ではドキュメント以外を変更しない。アプリ、builder、validator、fixture、workflow、artifact、Pages、Actions、ODPT APIには変更・接続・実行なし。テストは実行していない。
+このPhase 4-7では指定された設計文書のみ更新する。アプリ、builder、validator、fixture、workflow、artifact、Pages、Actions、ODPT APIには変更・接続・実行なし。テストは実行していない。
