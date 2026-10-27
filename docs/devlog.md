@@ -515,3 +515,11 @@
 - `scripts/diagnose_wrangler_project_list.mjs` を追加。終了statusに加え、JSON parse/shape failure、API command failure、対象projectの有無を区別。API失敗分類はauthentication/permission/account/rate_limit/network/api_error/unknownの固定enum。出力は固定schemaの1行だけで、原文、ID、token、account値、任意メッセージを出さない。数値error codeはCloudflare errors配列または明示的なcode labelからのみ最大5個を採取。
 - `tests/diagnose_wrangler_project_list.test.mjs` で正常・project不在・JSON不正・分類別API失敗・unknown・mock credential混入を検査。Cloudflare/GitHub Actionsへ接続せずローカルnode:testで実行。
 - 検証結果: 診断テスト7件とpublic profile互換性test 6件、synthetic Python tests 32件が成功。Node syntax、workflow YAML構文、追加した2つのbash step構文、静的安全性検査、`git diff --check`も成功。Cloudflare API/GitHub Actions/secrets値へのアクセスなし。
+
+## 2026-10-27 — T12 Phase 4-5 Wrangler project-list JSON形式修正
+
+- GitHub Actions #3の`json_shape_invalid`原因を修正。Wrangler 4.152.0のproject list JSONは`Project Name`表示列を使うため、診断スクリプトの照合キーを`name`から`Project Name`へ変更。
+- Wrangler本体の終了コードと診断スクリプト終了コードを別々に保持・表示し、`--wrangler-exit-code`、`wrangler_exit_code`、`diagnostic_exit_code`へ名称を統一。Wrangler成功後のparse/shape/project不在エラーはWrangler code 0、diagnostic code 1としてログで判別する。
+- display-row形式の対象あり/なし、JSON parse失敗、未知shape、Wrangler非0、秘密値を含むmock stdout/stderrの出力抑止を追加検証。未知の構造は引き続きfail-closed。
+- workflowは診断引数だけを更新。main guard、Environment approval、Artifact検証、project存在確認、Wrangler pin、権限と既存preview/GitHub Pages設定は維持。
+- 検証結果: 診断node:test 9件、public profile互換性test 6件、synthetic Python tests 32件すべて成功。Node syntax check、workflow YAML parse、`git diff --check`も成功。GitHub Actions、Cloudflare API/deploy、ODPT、secrets値へのアクセスなし。

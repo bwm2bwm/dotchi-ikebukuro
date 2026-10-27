@@ -70,17 +70,23 @@ function classifyFailure(text) {
   return rules.find(([, pattern]) => pattern.test(normalized))?.[0] ?? 'unknown';
 }
 
-export function diagnoseProjectList({ exitCode, stdout, stderr, expectedProject }) {
-  if (!Number.isInteger(exitCode) || exitCode < 0 || exitCode > 255) {
-    return { result: 'diagnostic_input_invalid', category: 'unknown', exitCode: 1 };
+export function diagnoseProjectList({ wranglerExitCode, stdout, stderr, expectedProject }) {
+  if (!Number.isInteger(wranglerExitCode) || wranglerExitCode < 0 || wranglerExitCode > 255) {
+    return {
+      result: 'diagnostic_input_invalid',
+      category: 'unknown',
+      wranglerExitCode: null,
+      diagnosticExitCode: 1,
+    };
   }
 
-  if (exitCode !== 0) {
+  if (wranglerExitCode !== 0) {
     const texts = [stdout, stderr];
     return {
       result: 'wrangler_command_failed',
       category: classifyFailure(texts.join('\n')),
-      exitCode,
+      wranglerExitCode,
+      diagnosticExitCode: 1,
       cloudflareErrorCodes: extractCloudflareCodes(texts),
     };
   }
@@ -89,18 +95,24 @@ export function diagnoseProjectList({ exitCode, stdout, stderr, expectedProject 
   try {
     projects = JSON.parse(stdout.replace(/^\uFEFF/, '').trim());
   } catch {
-    return { result: 'json_parse_failed', category: 'unknown', exitCode: 1 };
+    return {
+      result: 'json_parse_failed', category: 'unknown', wranglerExitCode: 0, diagnosticExitCode: 1,
+    };
   }
 
-  if (!Array.isArray(projects) || projects.some(project => !project || typeof project !== 'object' || typeof project.name !== 'string')) {
-    return { result: 'json_shape_invalid', category: 'unknown', exitCode: 1 };
+  if (!Array.isArray(projects) || projects.some(project => (
+    !project || typeof project !== 'object' || Array.isArray(project) || typeof project['Project Name'] !== 'string'
+  ))) {
+    return {
+      result: 'json_shape_invalid', category: 'unknown', wranglerExitCode: 0, diagnosticExitCode: 1,
+    };
   }
 
-  if (!projects.some(project => project.name === expectedProject)) {
-    return { result: 'project_not_found', category: 'none', exitCode: 1 };
+  if (!projects.some(project => project['Project Name'] === expectedProject)) {
+    return { result: 'project_not_found', category: 'none', wranglerExitCode: 0, diagnosticExitCode: 1 };
   }
 
-  return { result: 'project_found', category: 'none', exitCode: 0 };
+  return { result: 'project_found', category: 'none', wranglerExitCode: 0, diagnosticExitCode: 0 };
 }
 
 async function readCapture(filename) {
@@ -123,22 +135,28 @@ function parseArguments(argv) {
     if (!key?.startsWith('--') || value === undefined || options.has(key)) return null;
     options.set(key, value);
   }
-  const allowed = ['--exit-code', '--stdout-file', '--stderr-file', '--expected-project'];
+  const allowed = ['--wrangler-exit-code', '--stdout-file', '--stderr-file', '--expected-project'];
   if (options.size !== allowed.length || allowed.some(key => !options.has(key))) return null;
   return options;
 }
 
 export async function runDiagnostic(argv) {
   const options = parseArguments(argv);
-  if (!options || !/^\d{1,3}$/.test(options.get('--exit-code'))) {
-    process.stdout.write('{"result":"diagnostic_input_invalid","category":"unknown","exit_code":1}\n');
+  if (!options || !/^\d{1,3}$/.test(options.get('--wrangler-exit-code'))) {
+    process.stdout.write(`${JSON.stringify({
+      result: 'diagnostic_input_invalid',
+      category: 'unknown',
+      wrangler_exit_code: null,
+      diagnostic_exit_code: 1,
+    })}\n`);
     return 1;
   }
 
+  const wranglerExitCode = Number(options.get('--wrangler-exit-code'));
   let result;
   try {
     result = diagnoseProjectList({
-      exitCode: Number(options.get('--exit-code')),
+      wranglerExitCode,
       stdout: await readCapture(options.get('--stdout-file')),
       stderr: await readCapture(options.get('--stderr-file')),
       expectedProject: options.get('--expected-project'),
@@ -147,8 +165,8 @@ export async function runDiagnostic(argv) {
     process.stdout.write(`${JSON.stringify({
       result: 'diagnostic_input_unreadable',
       category: 'unknown',
-      exit_code: 1,
-      wrangler_exit_code: Number(options.get('--exit-code')),
+      wrangler_exit_code: wranglerExitCode,
+      diagnostic_exit_code: 1,
     })}\n`);
     return 1;
   }
@@ -157,11 +175,12 @@ export async function runDiagnostic(argv) {
     step: 'wrangler_pages_project_list',
     result: result.result,
     category: ERROR_CATEGORIES.includes(result.category) || result.category === 'none' ? result.category : 'unknown',
-    exit_code: result.exitCode,
+    wrangler_exit_code: result.wranglerExitCode,
+    diagnostic_exit_code: result.diagnosticExitCode,
     ...(result.cloudflareErrorCodes ? { cloudflare_error_codes: result.cloudflareErrorCodes } : {}),
   };
   process.stdout.write(`${JSON.stringify(safeSummary)}\n`);
-  return result.exitCode === 0 ? 0 : 1;
+  return result.diagnosticExitCode;
 }
 
 const scriptPath = process.argv[1] ? path.resolve(process.argv[1]) : '';

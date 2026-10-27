@@ -249,7 +249,7 @@ jobs:
 
           unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
           node scripts/diagnose_wrangler_project_list.mjs \
-            --exit-code "$wrangler_status" \
+            --wrangler-exit-code "$wrangler_status" \
             --stdout-file "$stdout_file" \
             --stderr-file "$stderr_file" \
             --expected-project dotchi-ikebukuro-staging

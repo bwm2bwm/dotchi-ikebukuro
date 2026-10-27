@@ -29,8 +29,9 @@
 ### 初回project-list失敗の診断機能（2026-10-27）
 
 - deploy内の `Confirm existing staging project` はCloudflare credentialの非空確認を値を表示せず実行。Wrangler project-listのstdout/stderrをrunner tempへ捕捉し、診断前に両credential変数をunsetする。
-- `scripts/diagnose_wrangler_project_list.mjs` は許可済みの結果名・error category・終了コード・Cloudflare数値error codeだけを1行出力する。Wrangler API失敗、JSON parse失敗、JSON shape不正、対象project不在、project有りを区別。認識できない場合もunknownでdeployを失敗させる。捕捉ファイルはstep終了時に削除する。
-- テストはsyntheticなエラー本文のみを使い、mock secret/Account IDを出力しないこと、診断分類とfail-closedを確認する。Cloudflare API、GitHub Actions、secrets実値にはアクセスしない。
+- `scripts/diagnose_wrangler_project_list.mjs` はWrangler 4.152.0の一覧JSONが使う`Project Name`キーで対象projectを照合する。`name`を期待していたため正常な表示行を`json_shape_invalid`にした問題を修正した。許可済み結果名・error category・`wrangler_exit_code`・`diagnostic_exit_code`・Cloudflare数値error codeだけを1行出力する。Wrangler API失敗、JSON parse失敗、JSON shape不正、対象project不在、project有りを区別。認識できない場合もunknownでdeployを失敗させる。捕捉ファイルはstep終了時に削除する。
+- Wranglerの終了statusはworkflowから`--wrangler-exit-code`で渡し、診断スクリプトのprocess statusは`diagnostic_exit_code`として別に記録する。未知のJSON構造は成功扱いしない。
+- Wrangler 4.152.0形式のsynthetic表示行でproject有無、parse/shape異常、Wrangler非0、秘密値混入時の出力抑止を検査する。Cloudflare API、GitHub Actions、secrets実値にはアクセスしない。
 
 ## T12 Phase 4-2 synthetic fixture生成（2026-10-27）
 
