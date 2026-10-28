@@ -7,6 +7,13 @@
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
+### T12 Phase 4-8E 初回release-managed staging移行・実機QA完了（2026-10-28）
+
+- GitHub Actions Synthetic public site CI #10は成功し、Cloudflare Pages Production Deployment `b357cd8c`でlegacy 17-fileからrelease-managed形式へ初回移行した。完成artifactは26ファイル。移行前Deploymentは`f3be074d`。`/manifest.json`と世代別`/timetable-Wakoshi.json`はHTTP 200 / `application/json`で応答した。
+- Mac Chromeでアプリ表示、目的地切替、世代別JSON取得を確認。iPhone Safariで画面表示、時計更新、目的地切替、基本操作を確認。19時台に「本日の終電は終了しました」となる挙動は、synthetic fixtureの運行時間帯とruntimeの判定に整合する。
+- ローカルrelease-managed QA harnessは`morning-gate`（06:10発）、`destination-switch`（目的地に応じたカード・到着時刻差）、`previous-tail`（翌01:50発）を確認。サーバーPID 72156へCtrl+Cを送り停止し、TCP 8765/8766のlistenerがないことを確認した。
+- 残課題: 列車カードが表示中の実時間カウントダウン進行は未確認。データはsyntheticであり、ODPT実データの自動公開は未承認。過去のHTTP 403根本原因は未特定だが、現在の取得・検証・deploy経路は実環境で成功済み。これらは次のQA/運用承認項目として維持する。
+
 ### T12 Phase 4-8D-2A Production alias取得のローカル実装（2026-10-28）
 
 - `scripts/fetch_production_artifact.py`を追加。固定root originからHTTPSで取得し、明示的loopback-only optionを付けたときだけlocalhost HTTPを許可する。外部redirect・unsafe path・symlink・既存出力先・不正MIME/status・timeout/有限retry・単体/全体bytes/file数上限を検査し、失敗stageは削除する。Cloudflare APIやDeploy機能は持たない。
@@ -29,7 +36,7 @@
 - `publish_staging` dispatch inputはdefault false。falseならbuild/validateだけでdeploy jobをskipし、Environment secrets/APIへ触れない。trueでも`pages-staging` Required Reviewer承認後でないとrelease job stepが始まらない。legacy 17-file初回移行は別の`allow_initial_legacy_migration` inputもtrueにした場合だけ許可する。HTTP 404、またはroot HTMLとの完全一致を検証したSPA fallbackだけをmanifest不在として扱い、403等は停止する。
 - 同一Pages project向け固定concurrency groupでActions内publishを直列化。Download stepのArtifact digestとvalidated tree digestを再確認し、Access tokenはfetchと直前recheck、Cloudflare API tokenはproject確認とDirect Uploadだけへstep scopeで渡す。取得/fingerprint/validation/assembly失敗ではDirect Uploadへ進まない。
 - 認証情報なしでworkflow YAML/job/dispatch/credential scope/sequenceを4件のNode static test、Ruby YAML parse、全`run` blockの`bash -n`で検証。Python全体133件、Node全体134件、D-1 local legacy migration build→assembly→validate（26 files）も成功。Actionsは起動せず、Cloudflare stagingは引き続きlegacy 17 files。
-- READMEにdispatch操作、二入力gate、Environment承認、初回移行とDashboard競合の注意を反映。残る条件は実Environment protection/secret availabilityのActions上確認、staging deployment前のユーザー承認、Dashboard writer停止、Cloudflare upload fail/rollback実地確認。Commit/Push/Merge/Deployなし。
+- READMEにdispatch操作、二入力gate、Environment承認、初回移行とDashboard競合の注意を反映。このworkflow実装完了時点ではstagingはlegacy 17-fileだった。その後の初回移行結果は「T12 Phase 4-8E 初回release-managed staging移行・実機QA完了」を参照。残る条件は実Environment protection/secret availabilityのActions上確認、Dashboard writer停止、Cloudflare upload fail/rollback実地確認。Commit/Push/Mergeなし。
 
 ### T12 Phase 4-8C QA改善（2026-10-28）
 

@@ -1,5 +1,13 @@
 # 開発ログ
 
+## 2026-10-28 — T12 Phase 4-8E 初回release-managed staging移行・QA完了、ローカルQA server停止
+
+- GitHub Actions Synthetic public site CI #10が成功し、Cloudflare Pages Production Deployment `b357cd8c`でlegacy 17-fileからrelease-managedへ初回移行した。migration後artifactは26ファイル。`manifest.json`と世代別`timetable-Wakoshi.json`はHTTP 200 / `application/json`。Mac Chromeで表示・目的地切替・JSON取得、iPhone Safariで画面・時計更新・目的地切替・基本操作を確認した。
+- Mac Chrome実機QAでは、ローカルharnessの`morning-gate`で06:10発カード、`destination-switch`で目的地別カードと到着時刻の変化、`previous-tail`で翌01:50発を確認した。19時台の終電後表示はsynthetic fixtureに収録した時刻とruntime判定に整合する。
+- `scripts/serve_synthetic_public_qa.py --bind 192.168.11.7 --port 8765 --localhost-port 8766 --release-managed`の対象PID 72156を確認後、Ctrl+Cで停止。サーバーログ上で3 scenarioのentrypoint、manifest、世代別駅JSONの取得成功を確認し、`lsof`で8765/8766にlistenerがないことを確認した。他プロセスは停止していない。
+- 残課題: カード表示中に実時間でカウントダウンが進むことは未確認。ODPT実データの自動公開は未承認。過去のHTTP 403根本原因は未特定だが、今回のproduction取得・検証・deploy経路は成功した。Phase 4-8Eの初回staging移行と基本実機QAを完了として記録し、残項目は次のQA/運用承認へ引き継ぐ。
+- Cloudflare設定変更、追加deploy、GitHub Actions実行、コード/fixture変更、commit/push/mergeなし。
+
 ## 2026-10-28 — T12 Phase 4-8E legacy root取得のHTTP 308対応
 
 - legacy `index.html` の取得元を`/index.html`からorigin root `/`へ統一した。`AliasHttpClient.legacy_index()`は同じ固定origin・Service Token headers・TLS検証・redirect拒否・status/MIME/byte上限を使い、取得bytesを論理ファイル`index.html`として返す。
