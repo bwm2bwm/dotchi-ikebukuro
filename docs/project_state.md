@@ -10,16 +10,23 @@
 ### T12 Phase 4-8D-2A Production alias取得のローカル実装（2026-10-28）
 
 - `scripts/fetch_production_artifact.py`を追加。固定root originからHTTPSで取得し、明示的loopback-only optionを付けたときだけlocalhost HTTPを許可する。外部redirect・unsafe path・symlink・既存出力先・不正MIME/status・timeout/有限retry・単体/全体bytes/file数上限を検査し、失敗stageは削除する。Cloudflare APIやDeploy機能は持たない。
-- Release-managedはroot manifest raw SHA-256を前後比較し、current/期限内retained/legacy aliasesとvalidatorに必要な9 static assetsだけをdownload。current descriptor/releaseId、JSON hash/bytes/envelope、全artifactを独立validatorで検証する。legacyはmanifest HTTP 404かつ`--allow-initial-legacy-migration`明示時のみ17-file取得を許可し、strict validatorと開始/終了fixed-path fingerprintを通す。不正manifest/401/403/login HTMLをlegacy扱いしない。
+- Release-managedはroot manifest raw SHA-256を前後比較し、current/期限内retained/legacy aliasesとvalidatorに必要な9 static assetsだけをdownload。current descriptor/releaseId、JSON hash/bytes/envelope、全artifactを独立validatorで検証する。legacy初回移行は`--allow-initial-legacy-migration`明示時に限り、manifest HTTP 404、またはmanifest HTTP 200/HTMLがroot `index.html`と完全一致するPages SPA fallbackを不在として扱う。いずれもstrict 17-file validatorと開始/終了fixed-path fingerprintを通す。401/403、redirect、root取得失敗、HTML不一致、不正manifestはlegacy扱いしない。過去のActions #7/#8のHTTP 403原因は未解決。
 - D-1 `scripts/assemble_public_release.py --previous <snapshot>`へ渡せるvalidated directoryを出力。fingerprint CLIはrelease raw-manifest SHA、legacy fixed 17-file JCS fingerprintを計算し、`--expected-sha256`でdeploy前の一致確認ができる。これはdeploy時点までの排他lock/CASではなく、別writer raceはGitHub concurrency + Dashboard手動writer停止等をD-2Bで設計する。
 - Access headerは`CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`環境変数のみから作り、CLI引数・例外・結果に値を含めない。localhost HTTP test以外のネットワーク接続、Access/GitHub secret設定、Actions実行、Pages、ODPT API接続なし。既存17-file output/runtime/18-file contract/fixture/workflow/stagingは変更なし。
 - `tests/test_fetch_production_artifact.py` localhost HTTP test 12件成功。current-only 18-file、retained付き26-file、legacy alias付き26-file release artifact、および17-file legacy snapshotを取得しvalidator通過。legacy/release snapshotをD-1 assemblyへ直接渡し、出力artifactも再検証。Python全体 `python3 -B -m unittest discover -s tests -v` は133件成功、Node全体 `node --test tests/*.test.mjs` は130件成功。最終focused rerunでlegacy/release中race、別origin redirect未到達、secretをerrorに含めないこと、file-count limitも確認。D-2B未着手事項はCloudflare Service AuthとOTP共存/host scope、staging/prod別token、Environment secret、single-writer運用、Pages/Actions/ODPT制限確認、workflow concurrency/preflight/rollback統合。
 - 詳細: [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) Phase 4-8D-2A。実装・テストだけを追加し、workflow、Cloudflare設定、staging artifactは変更していない。
 
+### T12 Phase 4-8E legacy初回移行のSPA fallback対応（2026-10-28）
+
+- 初回移行flagがある場合だけ、manifestのHTTP 200/`text/html`をPages SPA fallback候補として扱う。response bytesが、同じaliasからHTTP 200/HTMLで取得したroot `index.html`と完全一致した場合だけmanifest不在と判定し、そのroot bytesを17-file初回snapshotへ再利用する。
+- HTML判定後も17ファイルのstrict validator、開始/終了fingerprint、manifest状態の前後確認を維持。403/401、redirect、timeout、root取得失敗、HTML不一致、不正JSON/manifest、legacy schema不正は停止する。通常のrelease-managed JSON manifestとHTTP 404移行経路は維持。
+- Python fetch suite 16件とNode release contract/runtime/workflow subset 18件成功。旧17-file/新18-file契約、workflow jobの承認ゲート・Direct Upload順序は不変。dispatch画面のlegacy移行説明と対応するstatic assertionだけ更新した。Actions #7/#8のHTTP 403原因は未解決であり、実stagingでの再試行も未実施。
+- 更新: fetch CLI、専用Python test、workflow input説明、Node workflow assertion、project state/devlog、Phase 4-7設計メモ、README。Cloudflare接続/設定/デプロイ、Actions実行、commit/push/mergeなし。
+
 ### T12 Phase 4-8D-2B staging workflow統合（2026-10-28）
 
 - `.github/workflows/synthetic-public-ci.yml`をrelease-managedへ統合。手動`workflow_dispatch`、main guard、synthetic 18-file build、immutable Artifact ID/digest搬送、release-managed独立validate、Environment承認後のalias snapshot取得、D-1 assembly、完成tree独立validate、deploy直前fingerprint再確認、Direct Uploadの順。
-- `publish_staging` dispatch inputはdefault false。falseならbuild/validateだけでdeploy jobをskipし、Environment secrets/APIへ触れない。trueでも`pages-staging` Required Reviewer承認後でないとrelease job stepが始まらない。legacy 17-fileの初回移行は別の`allow_initial_legacy_migration` inputもtrueにした場合だけ許可し、HTTP 404以外からはfallbackしない。
+- `publish_staging` dispatch inputはdefault false。falseならbuild/validateだけでdeploy jobをskipし、Environment secrets/APIへ触れない。trueでも`pages-staging` Required Reviewer承認後でないとrelease job stepが始まらない。legacy 17-file初回移行は別の`allow_initial_legacy_migration` inputもtrueにした場合だけ許可する。HTTP 404、またはroot HTMLとの完全一致を検証したSPA fallbackだけをmanifest不在として扱い、403等は停止する。
 - 同一Pages project向け固定concurrency groupでActions内publishを直列化。Download stepのArtifact digestとvalidated tree digestを再確認し、Access tokenはfetchと直前recheck、Cloudflare API tokenはproject確認とDirect Uploadだけへstep scopeで渡す。取得/fingerprint/validation/assembly失敗ではDirect Uploadへ進まない。
 - 認証情報なしでworkflow YAML/job/dispatch/credential scope/sequenceを4件のNode static test、Ruby YAML parse、全`run` blockの`bash -n`で検証。Python全体133件、Node全体134件、D-1 local legacy migration build→assembly→validate（26 files）も成功。Actionsは起動せず、Cloudflare stagingは引き続きlegacy 17 files。
 - READMEにdispatch操作、二入力gate、Environment承認、初回移行とDashboard競合の注意を反映。残る条件は実Environment protection/secret availabilityのActions上確認、staging deployment前のユーザー承認、Dashboard writer停止、Cloudflare upload fail/rollback実地確認。Commit/Push/Merge/Deployなし。

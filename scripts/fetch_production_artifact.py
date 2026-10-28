@@ -135,7 +135,8 @@ class AliasHttpClient:
         self.sleep = sleep
         self.opener = build_opener(_NoRedirect())
 
-    def _get(self, path: str, *, kind: str, allow_404: bool = False) -> tuple[int, bytes | None]:
+    def _get(self, path: str, *, kind: str, allow_404: bool = False,
+             allow_manifest_html: bool = False) -> tuple[int, bytes | None, str | None]:
         relative = _safe_relative_path(path)
         limit = self.max_manifest_bytes if kind == "manifest" else self.max_file_bytes
         allowed_types = {
@@ -155,7 +156,8 @@ class AliasHttpClient:
                     if status != 200:
                         raise ArtifactFetchError(f"HTTP status {status} for {relative}")
                     media_type = response.headers.get_content_type().lower()
-                    if media_type not in allowed_types:
+                    html_manifest = kind == "manifest" and allow_manifest_html and media_type == "text/html"
+                    if media_type not in allowed_types and not html_manifest:
                         raise ArtifactFetchError(f"unexpected Content-Type for {relative}")
                     raw_length = response.headers.get("Content-Length")
                     declared = None
@@ -175,11 +177,11 @@ class AliasHttpClient:
                             raise ArtifactFetchError(f"download byte limit exceeded for {relative}")
                     if declared is not None and len(body) != declared:
                         raise _RetryableTransferError(f"incomplete response body for {relative}")
-                    return status, bytes(body)
+                    return status, bytes(body), media_type
             except HTTPError as error:
                 error.close()
                 if allow_404 and error.code == 404:
-                    return 404, None
+                    return 404, None, None
                 retryable = error.code in TRANSIENT_STATUS
                 if not retryable or attempt + 1 >= attempts:
                     raise ArtifactFetchError(f"HTTP status {error.code} for {relative}") from None
@@ -200,12 +202,17 @@ class AliasHttpClient:
                 self.sleep(min(0.25 * (2 ** attempt), 2.0))
         raise ArtifactFetchError(f"request failed for {relative}")
 
+    def manifest_probe(self, *, allow_404: bool = False,
+                       allow_spa_html: bool = False) -> tuple[int, bytes | None, str | None]:
+        return self._get("manifest.json", kind="manifest", allow_404=allow_404,
+                         allow_manifest_html=allow_spa_html)
+
     def manifest(self, *, allow_404: bool = False) -> bytes | None:
-        _, body = self._get("manifest.json", kind="manifest", allow_404=allow_404)
+        _, body, _ = self.manifest_probe(allow_404=allow_404)
         return body
 
     def file(self, path: str, *, kind: str) -> bytes:
-        _, body = self._get(path, kind=kind)
+        _, body, _ = self._get(path, kind=kind)
         assert body is not None
         return body
 
@@ -339,12 +346,19 @@ def _check_new_destination(output: Path) -> tuple[Path, Path]:
 
 
 def _fetch_legacy_snapshot(client: AliasHttpClient, root: Path, *, max_total_bytes: int,
-                           max_files: int) -> tuple[dict[str, bytes], str]:
+                           max_files: int,
+                           prefetched: dict[str, bytes] | None = None) -> tuple[dict[str, bytes], str]:
     if len(LEGACY_ASSETS) > max_files:
         raise ArtifactFetchError("legacy snapshot file count exceeds limit")
-    records: dict[str, bytes] = {}
-    total = 0
+    records: dict[str, bytes] = dict(prefetched or {})
+    total = sum(len(raw) for raw in records.values())
+    if set(records) - set(LEGACY_ASSETS) or total > max_total_bytes:
+        raise ArtifactFetchError("legacy snapshot prefetched files exceed the allowed set or byte limit")
+    for relative, raw in records.items():
+        _write_file(root, relative, raw)
     for relative in LEGACY_ASSETS:
+        if relative in records:
+            continue
         raw = client.file(relative, kind=_mime_kind(relative))
         total += len(raw)
         if total > max_total_bytes:
@@ -353,6 +367,39 @@ def _fetch_legacy_snapshot(client: AliasHttpClient, root: Path, *, max_total_byt
         _write_file(root, relative, raw)
     _validate_snapshot(root, "legacy")
     return records, _file_fingerprint(records)
+
+
+def _probe_legacy_absence(client: AliasHttpClient, *, allow_initial_legacy: bool
+                          ) -> tuple[str, dict[str, bytes], bytes | None]:
+    """Classify a missing manifest without treating arbitrary HTML as legacy."""
+    status, body, media_type = client.manifest_probe(
+        allow_404=True, allow_spa_html=allow_initial_legacy)
+    if status == 404:
+        return "http-404", {}, None
+    if status == 200 and media_type == "text/html" and body is not None:
+        # Pages serves /index.html for an unknown path when SPA fallback is active.
+        # Only accept that exact response, and only after the caller's explicit migration opt-in.
+        root_html = client.file("index.html", kind="html")
+        if body != root_html:
+            raise ArtifactFetchError("manifest HTML response does not match the root index.html")
+        return "spa-html", {"index.html": root_html}, body
+    return "manifest-present", {}, body
+
+
+def _confirm_legacy_absence(client: AliasHttpClient, *, expected_kind: str,
+                            expected_html: bytes | None = None) -> None:
+    status, body, media_type = client.manifest_probe(
+        allow_404=True, allow_spa_html=(expected_kind == "spa-html"))
+    if expected_kind == "http-404":
+        if status != 404:
+            raise ArtifactFetchError("Production alias changed from legacy during fetch")
+        return
+    if expected_kind != "spa-html" or status != 200 or media_type != "text/html" \
+       or body is None or body != expected_html:
+        raise ArtifactFetchError("Production alias changed from SPA fallback during fetch")
+    current_root = client.file("index.html", kind="html")
+    if current_root != expected_html:
+        raise ArtifactFetchError("root index.html changed during legacy fetch")
 
 
 def _fetch_release_snapshot(client: AliasHttpClient, root: Path, raw_manifest: bytes, manifest: dict[str, Any],
@@ -401,15 +448,15 @@ def fetch_production_artifact(*, base_url: str, output: Path,
     stage = temporary / "artifact"
     try:
         stage.mkdir()
-        initial_manifest = client.manifest(allow_404=True)
-        if initial_manifest is None:
+        initial_kind, prefetched, initial_manifest = _probe_legacy_absence(
+            client, allow_initial_legacy=allow_initial_legacy)
+        if initial_kind != "manifest-present":
             if not allow_initial_legacy:
                 raise ArtifactFetchError("manifest is absent; legacy mode requires explicit initial-migration opt-in")
             records, initial_fingerprint = _fetch_legacy_snapshot(client, stage,
-                max_total_bytes=max_total_bytes, max_files=max_files)
-            final_manifest = client.manifest(allow_404=True)
-            if final_manifest is not None:
-                raise ArtifactFetchError("Production alias changed from legacy to release-managed during fetch")
+                max_total_bytes=max_total_bytes, max_files=max_files, prefetched=prefetched)
+            _confirm_legacy_absence(client, expected_kind=initial_kind,
+                                    expected_html=initial_manifest if initial_kind == "spa-html" else None)
             second_records: dict[str, bytes] = {}
             total = 0
             for relative in LEGACY_ASSETS:
@@ -421,8 +468,8 @@ def fetch_production_artifact(*, base_url: str, output: Path,
             final_fingerprint = _file_fingerprint(second_records)
             if final_fingerprint != initial_fingerprint:
                 raise ArtifactFetchError("legacy Production alias changed during fetch")
-            if client.manifest(allow_404=True) is not None:
-                raise ArtifactFetchError("Production alias changed from legacy to release-managed during fetch")
+            _confirm_legacy_absence(client, expected_kind=initial_kind,
+                                    expected_html=initial_manifest if initial_kind == "spa-html" else None)
             validation = _validate_snapshot(stage, "legacy")
             stats = _measure(stage, max_files=max_files, max_total_bytes=max_total_bytes,
                              max_file_bytes=max_file_bytes)
@@ -432,6 +479,7 @@ def fetch_production_artifact(*, base_url: str, output: Path,
             return {**stats, "mode": "legacy", "fingerprint": initial_fingerprint,
                     "files_validated": validation["files"], "release_id": None}
 
+        assert initial_manifest is not None
         manifest = _validate_release_manifest(initial_manifest)
         initial_fingerprint = sha256_hex(initial_manifest)
         records, normalized = _fetch_release_snapshot(client, stage, initial_manifest, manifest,
@@ -475,17 +523,23 @@ def production_fingerprint(*, base_url: str, mode: str, allow_initial_legacy: bo
     client = AliasHttpClient(base_url, headers=access_headers(client_id, client_secret), timeout=timeout,
         retries=retries, max_file_bytes=max_file_bytes, max_manifest_bytes=max_manifest_bytes,
         allow_insecure_loopback=allow_insecure_loopback, sleep=sleep)
-    raw = client.manifest(allow_404=(mode == "legacy" and allow_initial_legacy))
     if mode == "release-managed":
+        raw = client.manifest()
         if raw is None:
             raise ArtifactFetchError("expected release-managed manifest is absent")
         manifest = _validate_release_manifest(raw)
         fingerprint = sha256_hex(raw)
         return {"mode": mode, "fingerprint": fingerprint, "release_id": manifest["releaseId"]}
     if not allow_initial_legacy:
+        # Keep the non-migration fingerprint path strict: only JSON manifest responses are accepted.
+        raw = client.manifest(allow_404=True)
+        if raw is not None:
+            raise ArtifactFetchError("expected legacy alias but manifest exists; no fallback is permitted")
         raise ArtifactFetchError("legacy fingerprint requires explicit initial-migration opt-in")
-    if raw is not None:
+    absence_kind, _, raw = _probe_legacy_absence(client, allow_initial_legacy=True)
+    if absence_kind == "manifest-present":
         raise ArtifactFetchError("expected legacy alias but manifest exists; no fallback is permitted")
+    initial_html = raw if absence_kind == "spa-html" else None
     with tempfile.TemporaryDirectory(prefix=".dotchi-legacy-fingerprint-", dir=Path.cwd()) as temp_name:
         if len(LEGACY_ASSETS) > max_files:
             raise ArtifactFetchError("legacy fingerprint file count exceeds limit")
@@ -512,8 +566,7 @@ def production_fingerprint(*, base_url: str, mode: str, allow_initial_legacy: bo
             second[relative] = body
         if _file_fingerprint(second) != fingerprint:
             raise ArtifactFetchError("legacy Production alias changed during fingerprint capture")
-        if client.manifest(allow_404=True) is not None:
-            raise ArtifactFetchError("Production alias changed from legacy to release-managed during fingerprint capture")
+        _confirm_legacy_absence(client, expected_kind=absence_kind, expected_html=initial_html)
         return {"mode": mode, "fingerprint": fingerprint, "release_id": None}
 
 

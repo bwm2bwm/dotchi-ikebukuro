@@ -1,5 +1,12 @@
 # 開発ログ
 
+## 2026-10-28 — T12 Phase 4-8E 初回legacy移行のSPA fallback対応
+
+- Macで確認されたlegacy Production aliasの`GET /manifest.json` HTTP 200/`text/html`に対応。初回migration opt-in時だけmanifest HTMLを受け取り、同一aliasから通常のHTTP 200/`text/html`で取得した`/index.html`とresponse bodyをbyte単位で比較する。完全一致したときだけPages SPA fallbackによるmanifest不在と判定し、比較に使ったroot bytesをlegacy 17-file snapshotに再利用する。
+- HTTP 404による既存初回migrationは維持。HTTP 401/403、redirect、timeout、root 403/404/redirect、HTML不一致、malformed/invalid JSON manifest、strict legacy validator失敗はfail closed。HTML/SPAモードでは取得前後にも同じmanifest fallbackと同一root bytesを確認する。legacy fixed-17 path fingerprintの二重取得・一致条件を維持し、`fingerprint --mode legacy`にも同じ限定判定を適用するため、workflowのdeploy直前確認との動作が揃う。
+- 追加testはHTML完全一致時の初回移行、opt-inなし、HTML mismatch、root status failures、manifest 403/body非出力、不正legacy payload、manifest HTMLからJSONへの途中切替、SPA modeでのlegacy fingerprintを確認する。Python `test_fetch_production_artifact.py` 16件、Node `release_contract`/`release_runtime`/`release_managed_workflow` 18件成功。Pythonの最初の実行はsandboxのloopback bind拒否で失敗したため、承認されたローカルmock実行で再確認した。
+- `docs/project_state.md`、本ログ、Phase 4-7設計メモ、READMEのlegacy fallback説明を同期。workflowのdispatch descriptionとそのstatic test assertionだけを追記修正し、job condition、approval gate、secret scope、verification/deploy sequenceは変更していない。HTTP 403の根本原因は未特定のまま。実Cloudflare通信、GitHub Actions実行、deploy、release契約変更なし。Commit/Push/Mergeなし。
+
 ## 2026-10-28 — T12 Phase 4-8D-2B GitHub Actions release-managed統合
 
 - `.github/workflows/synthetic-public-ci.yml`は`workflow_dispatch`を維持し、`main-branch-guard → build → validate → release-and-deploy`へ変更。buildはsynthetic fixtureから`--release-managed` 18-file artifactを作り、run-scoped immutable Artifact ID/archive digestで別jobへ渡す。validate jobは`--release-managed` independent validatorとtree SHA-256を出し、Environment jobで同一ID/digest/treeを再確認してから処理する。

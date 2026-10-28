@@ -21,6 +21,7 @@ test('workflow remains manual-only and staging publish is opt-in with a separate
   assert.match(workflow, /^on:\n  workflow_dispatch:/m);
   assert.match(workflow, /publish_staging:[\s\S]*?type: boolean[\s\S]*?default: false/);
   assert.match(workflow, /allow_initial_legacy_migration:[\s\S]*?type: boolean[\s\S]*?default: false/);
+  assert.match(workflow, /manifest is HTTP 404 or its HTML exactly matches root index\.html/);
   assert.doesNotMatch(workflow, /^  schedule:/m);
   assert.match(workflow, /group: dotchi-ikebukuro-staging-publish\n  cancel-in-progress: false/);
 });

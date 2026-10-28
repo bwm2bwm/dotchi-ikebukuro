@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       allow_initial_legacy_migration:
-        description: "Allow the one-time legacy 17-file snapshot only when Production manifest returns HTTP 404."
+        description: "Allow one-time legacy 17-file migration when manifest is HTTP 404 or its HTML exactly matches root index.html (Pages SPA fallback)."
         required: true
         type: boolean
         default: false

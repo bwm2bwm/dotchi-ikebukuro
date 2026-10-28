@@ -204,6 +204,83 @@ class FetchProductionArtifactTests(unittest.TestCase):
             self.fetch(malformed, "bad-manifest", allow_initial_legacy=True)
         self.assertFalse((self.base / "bad-manifest").exists())
 
+    def test_initial_legacy_migration_accepts_only_exact_pages_spa_fallback(self):
+        spa = self.alias(self.legacy_files)
+        spa.overrides["manifest.json"] = (
+            200, "text/html; charset=utf-8", self.legacy_files["index.html"], {})
+        with self.assertRaisesRegex(ArtifactFetchError, "Content-Type"):
+            self.fetch(spa, "spa-no-opt-in")
+        self.assertFalse((self.base / "spa-no-opt-in").exists())
+
+        result = self.fetch(spa, "spa-migration", allow_initial_legacy=True)
+        self.assertEqual(result["mode"], "legacy")
+        self.assertEqual(result["files"], 17)
+        self.assertEqual(files_under(self.base / "spa-migration"), self.legacy_files)
+        self.assertGreaterEqual(spa.counts.get("index.html", 0), 3)
+        self.assertEqual(validate_artifact(self.base / "spa-migration")["files"], 17)
+
+        mismatch = self.alias(self.legacy_files)
+        mismatch.overrides["manifest.json"] = (
+            200, "text/html", b"<html>not-the-root-page</html>", {})
+        with self.assertRaisesRegex(ArtifactFetchError, "does not match") as caught:
+            self.fetch(mismatch, "spa-mismatch", allow_initial_legacy=True)
+        self.assertNotIn("not-the-root-page", str(caught.exception))
+        self.assertFalse((self.base / "spa-mismatch").exists())
+
+    def test_spa_migration_fails_closed_for_root_and_manifest_errors(self):
+        for status in (403, 404, 302):
+            alias = self.alias(self.legacy_files)
+            alias.overrides["index.html"] = (status, "text/html", b"root-error", {})
+            alias.overrides["manifest.json"] = (
+                200, "text/html", self.legacy_files["index.html"], {})
+            with self.subTest(root_status=status), self.assertRaises(ArtifactFetchError):
+                self.fetch(alias, f"root-error-{status}", allow_initial_legacy=True)
+            self.assertFalse((self.base / f"root-error-{status}").exists())
+
+        denied = self.alias(self.legacy_files)
+        denied.overrides["manifest.json"] = (403, "application/json", b"private-response", {})
+        with self.assertRaisesRegex(ArtifactFetchError, "HTTP status 403") as caught:
+            self.fetch(denied, "manifest-403", allow_initial_legacy=True)
+        self.assertNotIn("private-response", str(caught.exception))
+        self.assertFalse((self.base / "manifest-403").exists())
+
+    def test_spa_fingerprint_and_manifest_transition_are_checked(self):
+        stable = self.alias(self.legacy_files)
+        stable.overrides["manifest.json"] = (
+            200, "text/html", self.legacy_files["index.html"], {})
+        result = production_fingerprint(base_url=stable.url, mode="legacy",
+            allow_initial_legacy=True, allow_insecure_loopback=True, sleep=lambda _: None)
+        self.assertEqual(result["mode"], "legacy")
+        self.assertRegex(result["fingerprint"], r"^[0-9a-f]{64}$")
+
+        changing = self.alias(self.legacy_files)
+        changing.overrides["manifest.json"] = (
+            200, "text/html", self.legacy_files["index.html"], {})
+        changed_path = "timetable-Wakoshi.json"
+        original = self.legacy_files[changed_path]
+        changing.overrides[changed_path] = lambda _owner, _path, count: (
+            200, "application/json", original if count == 1 else original + b" ", {})
+        with self.assertRaisesRegex(ArtifactFetchError, "legacy Production alias changed"):
+            self.fetch(changing, "spa-fingerprint-race", allow_initial_legacy=True)
+        self.assertFalse((self.base / "spa-fingerprint-race").exists())
+
+        switching = self.alias(self.legacy_files)
+        switching.overrides["manifest.json"] = lambda owner, _path, count: (
+            (200, "text/html", owner.files["index.html"], {}) if count == 1 else
+            (200, "application/json", self.release_files["manifest.json"], {}))
+        with self.assertRaisesRegex(ArtifactFetchError, "changed from SPA fallback"):
+            self.fetch(switching, "html-json-race", allow_initial_legacy=True)
+        self.assertFalse((self.base / "html-json-race").exists())
+
+    def test_spa_migration_still_requires_legacy_strict_validation(self):
+        files = dict(self.legacy_files)
+        files["timetable.json"] = b"{\"invalid\":true}"
+        alias = self.alias(files)
+        alias.overrides["manifest.json"] = (200, "text/html", files["index.html"], {})
+        with self.assertRaisesRegex(ArtifactFetchError, "failed independent validation"):
+            self.fetch(alias, "invalid-legacy", allow_initial_legacy=True)
+        self.assertFalse((self.base / "invalid-legacy").exists())
+
     def test_service_auth_headers_and_auth_failures_do_not_echo_credentials(self):
         alias = self.alias(auth=True)
         with self.assertRaisesRegex(ArtifactFetchError, "HTTP status 401"):
