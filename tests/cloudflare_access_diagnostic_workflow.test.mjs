@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflow = await readFile(path.join(root, '.github/workflows/cloudflare-access-diagnostic.yml'), 'utf8');
-const script = await readFile(path.join(root, 'scripts/diagnose_cloudflare_access.py'), 'utf8');
+const script = await readFile(path.join(root, 'scripts/compare_access_http_clients.py'), 'utf8');
 const publishWorkflow = await readFile(path.join(root, '.github/workflows/synthetic-public-ci.yml'), 'utf8');
 
 test('diagnostic workflow is manual, main-only, read-only, and Environment gated', () => {
@@ -21,14 +21,18 @@ test('diagnostic workflow is manual, main-only, read-only, and Environment gated
   assert.doesNotMatch(workflow, /actions\/upload-artifact/);
 });
 
-test('diagnostic workflow uses the isolated tool and leaves the publishing workflow untouched', () => {
-  assert.match(workflow, /scripts\/diagnose_cloudflare_access\.py/);
-  assert.match(script, /ORIGIN = "https:\/\/dotchi-ikebukuro-staging\.pages\.dev"/);
-  assert.match(script, /STATION_URL = f"\{ORIGIN\}\/timetable-Wakoshi\.json"/);
-  assert.match(script, /MANIFEST_URL = f"\{ORIGIN\}\/manifest\.json"/);
+test('diagnostic runs the fixed curl/Python comparator and leaves the publishing workflow untouched', () => {
+  assert.match(workflow, /scripts\/compare_access_http_clients\.py --run-live/);
+  assert.match(script, /URL = "https:\/\/dotchi-ikebukuro-staging\.pages\.dev\/timetable-Wakoshi\.json"/);
+  assert.match(script, /"--http1\.1"/);
+  assert.match(script, /"--disable"/);
+  assert.match(script, /Accept: application\/json/);
+  assert.match(script, /Accept-Encoding: identity/);
+  assert.match(script, /_NoRedirect/);
   assert.match(script, /CF-Access-Client-Id/);
   assert.match(script, /CF-Access-Client-Secret/);
-  assert.match(script, /HTTPRedirectHandler/);
-  assert.match(script, /migration_readiness=not_evaluated/);
-  assert.doesNotMatch(publishWorkflow, /diagnose_cloudflare_access/);
+  assert.match(script, /--config/);
+  assert.match(script, /input=_curl_config/);
+  assert.doesNotMatch(publishWorkflow, /compare_access_http_clients/);
+  assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN|wrangler|pages deploy|upload-artifact/);
 });
