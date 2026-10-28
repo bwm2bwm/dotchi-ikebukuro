@@ -353,7 +353,7 @@ Productionを変更する全workflowで共有の同一concurrency groupを使い
 
 ## 13. Phase 4-8実装分割への反映
 
-- **4-8A — contract:** manifest/envelope/releaseId/hashとretention schemaを確定。production運用のデータ期限・警告・承認boundaryをcontract test化。
+- **4-8A — contract (implemented):** `scripts/release_contract.py` / `.mjs` でJCS、release descriptor/ID、manifest、envelope、raw bytes/hash契約を実装し、Python/Node専用testを追加済み。旧世代retain/legacy migrationの組立・CI運用は4-8B以降。
 - **4-8B — builder/validator:** generation tree、manifest、hash、保持世代検証。daily no-opと内容変更/authoritative validity extensionのfixtureを用意。
 - **4-8C — runtime:** session pin、generation-aware 2駅LRU、fail closed、期限前/期限後UI、更新操作。
 - **4-8D — synthetic staging:** 現workflowは手動synthetic専用として維持。複数回Direct Upload、旧世代carry-forward、ETag/304、切替、Safari実機を検証。
@@ -363,8 +363,35 @@ Productionを変更する全workflowで共有の同一concurrency groupを使い
 
 Phase 4-8の着手前に決めるのは、ODPT source/freshness詳細、実行時刻、72h/24h警告値、36h heartbeat、retry回数/間隔、Actions concurrency queue可否、通知責任者/受信先、GitHub/Pages利用枠、data workflowのtoken scopeである。これらは推奨初期値を示しただけで、未承認の本番設定を確定したものではない。
 
-## 14. 根拠・作業境界
+## 14. Phase 4-8A 契約module実装メモ（2026-10-28）
+
+今回の実装対象は純粋な契約APIであり、existing builder/independent validator/runtime/fixture/workflowには接続しない。既存17-file public artifact、inner `public-display-v1` payload、staging workflowを維持したまま、次段builderが使うAPIを先行実装した。
+
+### APIと生成順
+
+| API | 用途 |
+|---|---|
+| Python `canonicalize_jcs(value) -> bytes`; JS `canonicalizeJcs(value) -> Buffer` | RFC 8785 canonical UTF-8 JSON bytes |
+| `build_release_descriptor(runtime_contract, builder_contract_version, payloads, assets)` / JS object-form equivalent | schema/compatibility IDs、asset path+raw-byte SHA-256、8駅inner payload canonical SHA-256をまとめる。assetsはHTML/CSS/JSを含める |
+| `calculate_release_id(descriptor)` / `calculateReleaseId(descriptor)` | canonical descriptorから`r1-<64 lowercase hex>`生成 |
+| `create_envelope(...)`, `encode_envelope(...)` / `createEnvelope`, `encodeEnvelope` | existing payload validatorを通したinner payloadをenvelopeへ包み、canonical bytesを出す |
+| `create_manifest(...)` / `createManifest(...)` | 最終envelope bytesからstation URL/hash/byte数を作成し、strict validation後に返す |
+| `validate_manifest(value)` / `validateManifest(value)` | manifest fields、compatibility、station集合、URL、hash、length、date/feed/period、retained release、legacy compatibilityを検査 |
+| `verify_envelope_bytes(raw, ...)` / `verifyEnvelopeBytes` | 生bytesの長さ→SHA-256→UTF-8/重複keyを含むJSON構造→envelope/payload検証。安定error `code`を付ける |
+| `verify_station_bytes(raw, manifest, station_id)` / `verifyStationBytes` | manifest記載hash/bytesとの照合に加え、release/station/common metadata/serviceDate範囲を確認 |
+
+生成順: (1) 8 payloadを現行public validatorで検証、(2) HTML/CSS/JS raw bytesを集める、(3) inner payload JCS hashとasset SHA-256でdescriptorを組む、(4) `releaseId`を計算、(5) envelopeを作成しcanonical UTF-8 bytes/hash/lengthを得る、(6) 最終envelope bytesからmanifestを作る、(7) independent artifact validatorがtree全体を検査する。envelope注入後のJSON hashをdescriptorへ入れないためreleaseId自己参照を作らない。`publishedAt`/Actions run IDもdescriptorに含めない。
+
+JCS implementationは両言語で依存packageを追加せず実装。JavaScriptはECMAScript number renderingとUTF-16 key sort、Pythonはfloat shortest representationをJCSのdecimal/exponent thresholdsへ整形し、keyをUTF-16BE code unit順にsortする。非finite数、lone surrogate、JSON外型、Python integerのsafe IEEE-754範囲外は拒否する。配列順はJSON意味の一部として保持し、descriptorのassets/stationsは生成APIでID/path順に整列する。契約errorには`code`を持たせる。
+
+manifest/envelope unknown fieldはfail closed。manifest URLは`/releases/<releaseId>/<所定駅filename>`だけを許し、外部origin、query/fragment、percent encoding、backslash、dot segment、重複URLを拒否する。station envelopeは`schemaVersion`, `releaseId`, `stationId`, `payloadSchemaVersion`, `dataScope`, `payload`を固定しinner schema v1は変更しない。legacy flat aliasesは明示的な`legacyCompatibilityV1` schemaとして期限・source digest・8 root URL/hash/bytesを検証する。
+
+JavaScript moduleは現在Node.js `node:crypto`を使う契約/test helperで、browser runtimeから直接importする実装ではない。Phase 4-8Cで使う場合は同じbytes/order semanticsを保ちつつWeb Crypto async SHA-256へ接続する。Python/JS JCS・descriptor/releaseId parityはtestで照合済み。payload validatorの意味差（Python profile validatorはallowlist projection比較、JS adapter validatorはruntime向け検証）を独立artifact validatorで再照合する作業は4-8Bで残る。
+
+未実装の境界: current builder output/17-file allowlist、current artifact validator flow、runtime/2駅LRU、synthetic fixture、workflow、Cloudflare deploymentには変更なし。manifest retained listの取得・carry-forward/prune、old generation bytesのProduction alias fetch、builderでの実ID生成、browser Web Crypto integration、runtime state/reloadは4-8B以降の作業。
+
+## 15. 根拠・作業境界
 
 設計根拠として`docs/t12_phase4_6b_release_consistency.md`、`docs/project_state.md`、`docs/devlog.md`、`scripts/build_public_site.py`、`scripts/validate_public_artifact.py`、`scripts/public_payload_profile.py`、`scripts/synthetic_public_fixture_factory.py`、`scripts/local_preview_payload_loader.mjs`、`_local_preview/preview_core.mjs`、`scripts/timetable_adapter.mjs`、`.github/workflows/synthetic-public-ci.yml`と関連testsを読んだ。
 
-このPhase 4-7では指定された設計文書のみ更新する。アプリ、builder、validator、fixture、workflow、artifact、Pages、Actions、ODPT APIには変更・接続・実行なし。テストは実行していない。
+Phase 4-7はドキュメントのみだった。続くPhase 4-8Aでは契約moduleと専用test、設計・状態・開発履歴のみを追加。既存builder/validator/runtime/fixture/workflow/artifact/Pagesは変更せず、Actions・ODPT APIには接続せず、Cloudflare deploy・commit/push/mergeなし。

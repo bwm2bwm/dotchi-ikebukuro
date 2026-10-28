@@ -566,3 +566,12 @@
 - 日次更新時も期限内旧generationを毎回Production aliasから再取得・hash検査してDirect Upload treeへcarry forward。旧Deployment固有URLや3日GitHub Artifactを保持元にしない。取得・検証・deploy失敗時は新uploadを止め、既存正常Deploymentを維持。デプロイ直前のcurrent release再確認と共通Production concurrency groupを提案し、GitHub既定のpending run置換をlossless queueと誤認しない注意を追加。
 - ODPT基本利用指針、GitHub schedule/notifications/concurrency/usage資料を設計文書から参照。Phase 4-8はsynthetic stagingの後にODPT shadow mode、publishing coordinator、plan/terms/monitoring確認、本番有効化へ分割した。
 - 更新対象は`docs/t12_phase4_7_release_design.md`、`docs/project_state.md`、本履歴のみ。コード・test・fixture・workflow・public artifact変更、Actions実行、Cloudflare deploy、ODPT APIアクセス、commit/push/mergeなし。
+
+## 2026-10-28 — T12 Phase 4-8A releaseId・manifest・hash契約
+
+- 事前にPhase 4-7/4-6B設計、project state、既存public builder/independent validator、public payload profile/JS adapter、Python unittest・Node test構成を確認。設計の`r1-<64 lowercase hex SHA-256>`、JCS descriptor、manifest+versioned path、outer envelope / inner `public-display-v1` v1の境界に沿い、契約moduleだけを独立追加。
+- `scripts/release_contract.py` / `scripts/release_contract.mjs`: RFC 8785 JCS UTF-8 serializer、8駅payload canonical hash + HTML/CSS/JS raw asset hashes + manifest/envelope/payload/builder/runtime contractによるdescriptor/releaseId、strict manifest generator/validator、envelope generator/validator、raw bytes SHA-256/byte length検査を提供。manifest station URLはreleaseId配下の固定相対pathへ限定し、external URL/traversal/duplicate/missing/unknown field/unsupported compatibilityを拒否する。
+- Envelope作成順はinner payload検証→descriptor→releaseId→envelope→final JSON bytes/hash/length→manifest。releaseId preimageへenvelope-injected JSON hashは入れず、循環参照を避ける。Python/JSのJCSはkey順、Unicode、数値表記を専用vectorで照合し、同一fixture descriptorからreleaseId一致も確認。
+- 専用test: `python3 -m unittest tests/test_release_contract.py -v` 8件成功、`node --test tests/release_contract.test.mjs` 6件成功。RFC 8785数値・Unicode・UTF-16 key order、入力順の再現性、payload/assets/contract変更、8駅manifest、互換性/path/hash/byte count、release/station/payload/JSON duplicate・truncation等を検査。既存を含むPython全体99件、Node全体116件も成功。
+- 4-8B受け渡しAPIと未接続境界を設計書/project stateへ記録。既存builder出力17 files、validator flow、runtime、fixture、workflow、public artifactは不変。browser向けJS moduleは現状Node `node:crypto` helperであり、runtime接続時はWeb Cryptoへ移す。Python profile validatorとJS adapter validatorのallowlist意味差も4-8B independent validatorで照合が必要。
+- 変更は2契約module、2専用test、3指定文書のみ。GitHub Actions実行、Cloudflare deploy、ODPTアクセス、commit/push/mergeなし。

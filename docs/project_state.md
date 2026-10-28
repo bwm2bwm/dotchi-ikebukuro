@@ -58,6 +58,13 @@
 - 保持deadlineの提案はeffective validity end（`applicationPeriod.endsAt`とfeed.validThrough翌日00:00 JSTの早い方）を基準に、releaseがcurrent aliasから退く時刻`retiredAt`を使い`min(retiredAt+14d, max(retiredAt+7d, effectiveValidityEnd+48h))`。Cloudflare Pages Freeの20,000 files/site・25 MiB単一asset上限、旧asset CDN cache非永続性、rollback挙動を公式資料で確認し、ファイル数・bytes budgetをfail closedする。
 - builder/validator/runtime/CI、QA harness、状態遷移、200/304/ETag、旧tab/削除時、iPhone Safariまでのテストを設計メモに記録。4-8A〜4-8Fへ段階分割。今回のPhaseは設計文書のみで、コード・artifact・workflow・Pagesは変更せず、Actions/ODPT/API・テスト実行なし。
 
+### T12 Phase 4-8A release契約module（2026-10-28）
+
+- [`scripts/release_contract.py`](../scripts/release_contract.py) と [`scripts/release_contract.mjs`](../scripts/release_contract.mjs) を追加。RFC 8785 JCS canonical bytes、content-derived `r1-<sha256>` descriptor/releaseId、strict manifest、outer envelope、raw-byte SHA-256/byte count検証APIを実装した。descriptorは8駅inner payload JCS digest、HTML/CSS/JS各assetのraw-byte digest、schema/builder/runtime contractを結ぶ。日時やrun IDは識別根拠にしない。
+- Manifestは所定8駅mapと`/releases/<releaseId>/<filename>`だけを許可し、互換schema、feed/serviceDate/applicationPeriod、retained releases、期限付きlegacy root aliasesを検査。envelopeでは既存inner `public-display-v1` validatorを呼び、release/station/common metadataの一致を検証する。エラーには識別可能な`code`を付与。
+- 専用テスト [`tests/test_release_contract.py`](../tests/test_release_contract.py) 8件と [`tests/release_contract.test.mjs`](../tests/release_contract.test.mjs) 6件が成功。全体のPython unittest 99件、Node test 116件も成功。JCS数値/Unicode/UTF-16 key順、Python/JavaScript canonical bytesおよびreleaseId一致、再現性・入力変更、8駅manifest、path/hash/bytes、envelope/inner payload異常を確認。
+- 今回は契約API追加まで。existing builderの17-file出力、artifact validator、app runtime、synthetic fixture、GitHub workflowは変更しておらず、public artifact互換。browser Web Crypto接続、builder integration、独立artifact validation parity、旧世代carry-forwardは4-8B以降。Actions、Cloudflare、ODPT API接続なし、commit/push/mergeなし。
+
 ### T12 Phase 4-7 本番運用方針反映（2026-10-28）
 
 - 合意済み方針を [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) に反映。既存`Synthetic public site CI`は手動synthetic staging専用に維持し、将来の本番ODPT日次確認/data-only公開と、テスト・手動承認付きapp公開を責務分離する。
