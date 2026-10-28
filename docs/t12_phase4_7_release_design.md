@@ -44,7 +44,7 @@ descriptor内payload hashはrelease envelope注入前、manifest内JSON hashはe
 | `serviceDateRange` | payloadに含む運行日範囲 | 駅間一致を検証。releaseの識別子ではない |
 | `feed.validFrom/validThrough` | ソースfeedのデータ適用範囲 | manifestへ共通summaryとして記載。releaseIdの代用にしない |
 | `feed.version` | 入力feedの版/識別。ODPT/GTFS等ソース仕様の値 | 内容metadata。異なるfeedでも同じbundle hashならreleaseIdはcontent/contract上で決まる |
-| `publishedAt` | 最初にproduction aliasへpublishした時刻、retention時計 | deploy assembly metadata。ID preimageに含めない。同release retryで更新しない |
+| `publishedAt` | 最初にproduction aliasへpublishした時刻、retention時計 | deploy assembly metadata。ID preimageに含めない。同release retryで更新しない。ローカルbuildでは`null`、publish assemblyで実時刻を設定 |
 
 ## 3. manifestとJSON schema
 
@@ -54,6 +54,35 @@ descriptor内payload hashはrelease envelope注入前、manifest内JSON hashはe
 {
   "schemaVersion": 1,
   "releaseId": "r1-7d8f3d24cdded1227a859f7718f9e76fdb2c4e9b72f38a91d64f4fa0c07a9123",
+  "releaseDescriptor": {
+    "manifestSchemaVersion": 1,
+    "jsonEnvelopeSchemaVersion": 1,
+    "payloadSchemaVersion": 1,
+    "runtimeContract": "dotchi-public-runtime-v2",
+    "publicDataScope": "public-display-v1",
+    "builderContractVersion": "dotchi-public-builder-v1",
+    "assets": [
+      { "path": "index.html", "sha256": "<64 lowercase hex>" },
+      { "path": "local_preview_payload_loader.mjs", "sha256": "<64 lowercase hex>" },
+      { "path": "preview.css", "sha256": "<64 lowercase hex>" },
+      { "path": "preview_core.mjs", "sha256": "<64 lowercase hex>" },
+      { "path": "preview_public.js", "sha256": "<64 lowercase hex>" },
+      { "path": "selection.mjs", "sha256": "<64 lowercase hex>" },
+      { "path": "styles.css", "sha256": "<64 lowercase hex>" },
+      { "path": "terminal_ui.mjs", "sha256": "<64 lowercase hex>" },
+      { "path": "timetable_adapter.mjs", "sha256": "<64 lowercase hex>" }
+    ],
+    "stations": [
+      { "stationId": "ChikatetsuAkatsuka", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "ChikatetsuNarimasu", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "Heiwadai", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "Hikawadai", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "Kanamecho", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "KotakeMukaihara", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "Senkawa", "payloadSha256": "<64 lowercase hex>" },
+      { "stationId": "Wakoshi", "payloadSha256": "<64 lowercase hex>" }
+    ]
+  },
   "runtimeContract": "dotchi-public-runtime-v2",
   "jsonEnvelopeSchemaVersion": 1,
   "payloadSchemaVersion": 1,
@@ -93,6 +122,7 @@ Generation path JSON uses a small release envelope around the existing public pa
 {
   "schemaVersion": 1,
   "releaseId": "r1-7d8f3d24cdded1227a859f7718f9e76fdb2c4e9b72f38a91d64f4fa0c07a9123",
+  "stationId": "Hikawadai",
   "payloadSchemaVersion": 1,
   "dataScope": "public-display-v1",
   "payload": {
@@ -390,8 +420,38 @@ JavaScript moduleは現在Node.js `node:crypto`を使う契約/test helperで、
 
 未実装の境界: current builder output/17-file allowlist、current artifact validator flow、runtime/2駅LRU、synthetic fixture、workflow、Cloudflare deploymentには変更なし。manifest retained listの取得・carry-forward/prune、old generation bytesのProduction alias fetch、builderでの実ID生成、browser Web Crypto integration、runtime state/reloadは4-8B以降の作業。
 
-## 15. 根拠・作業境界
+## 15. Phase 4-8B builder・独立validator統合（2026-10-28）
+
+### 15.1 opt-in builderとファイル形式
+
+既定の`build_public_site.py`呼出はこれまでどおりflat v1 payloadの17-file artifactを作る。新形式は明示的な`--release-managed`のみで有効にする。
+
+```sh
+python3 scripts/generate_synthetic_public_fixtures.py --service-date 2026-10-27 --output /private/tmp/t12-fixtures
+python3 scripts/build_public_site.py --fixtures /private/tmp/t12-fixtures --output /private/tmp/t12-release-site --release-managed
+python3 scripts/validate_public_artifact.py --release-managed /private/tmp/t12-release-site
+```
+
+新artifactは9 static shell/runtime asset + root `manifest.json` + `releases/<releaseId>/`下の8 envelope JSON = **18 files**。root flat station JSONは置かず、retained release/legacy aliasもローカルbuilderでは作らない。`manifest.publishedAt`は未公開を表す`null`で固定し、production publish assemblyが初回publish timestampを入れる想定。日時はreleaseId preimageに含まれず、same inputsからのlocal treeはbyte-identical。
+
+Static asset bytesを確定後、既存public profile validatorを通した8 payloadと全static asset path/hashからdescriptorを作る。`releaseId`を計算してJCS envelope bytesを出し、hash/byte countをManifestへ入れる。manifestには`releaseDescriptor`も保存する。これによりindependent validatorはactual static asset hashes・inner payload canonical hashes・schema/contract fieldsからcurrent `releaseId`を再計算できる。descriptorはreleaseIdを入れず、envelope final JSON bytes hashも含めないので循環参照はない。manifest自身のdigestは含めない。
+
+### 15.2 independent validationと既存payload境界
+
+`validate_public_artifact.py`の従来CLI `python3 scripts/validate_public_artifact.py ARTIFACT_DIR`は従来のflat 17-file exact allowlistと検査を維持する。新形式だけ`--release-managed`を追加する。新modeはbuilderをimport/callせず、artifactのrecursive path set、symlink/nonregular entry、static assets、root manifest、current/retained generation dirs、optional legacy aliasesを読取専用で検証する。未知file/path、欠損、URL traversal/external origin、hash・bytes・JSON・station/release不一致は拒否。
+
+Current manifest descriptorからreleaseIdを再計算し、全static asset SHA-256と8 inner payload canonical SHA-256を再照合する。JSONは重複key・UTF-8・構造を確認し、raw bytes length/hash→envelope contract→Python strict public allowlist/schema→既存JavaScript adapter validationをそれぞれ実施する。全駅でserviceDate list、feed、generatedAt、applicationPeriod、station ownershipを照合する。これによりPhase 4-8Aで見えたvalidator差を、Pythonのallowlist検証を弱めず、JS adapter検証も併用する境界にした。inner `public-display-v1` schema v1は変更しない。
+
+manifest schemaへ`releaseDescriptor`を追加したのは、artifact上で可能な限りreleaseIdを独立再計算するための4-8B設計判断。既存stagingはmanifestを配信しておらず、builder defaultと旧artifactはこのmodeに入らない。releaseDescriptorなしの4-8A単体manifestは契約module testで引き続き許すが、新mode validatorはdescriptor必須。descriptorのschema fieldは既存v1/contractへ固定する。
+
+### 15.3 再現性、retention範囲、runtime引継ぎ
+
+固定synthetic dates・fixture・static bytes・builder contractではmanifestに`publishedAt: null`を含め、releaseId、manifest bytes、8 envelope bytes、全18-file treeが再生成で一致する。payload 1駅、asset bytes、builder contractの変更でreleaseIdが変わる。current releaseのIDはartifactにdescriptorがあるため再計算可能。retained release entryには当初descriptorを載せないため、validatorはretained file hash/envelope/schema/serviceDate integrityを検査するが、その過去releaseId preimageは再計算できない。retention workflowでold descriptorを維持するか、current同様のdescriptorをretained entryへ加えるかはproduction carry-forward実装前に確定する。
+
+この新artifactは**現行runtimeで配信可能なdeploy artifactではない**。root loaderは引き続きflat station JSONを要求するため、新形式の読み込みはPhase 4-8C後に限る。4-8Cはroot `/manifest.json`を取得し、contract・releaseIdをruntime lifetimeにpinし、選択駅のmanifest URLからraw response bytesを取得、Web Crypto SHA-256/byte count照合後にenvelopeをparseしinner `payload`だけを既存adapterへ渡す。2駅LRU keyは`releaseId + stationId`、pinningはfull reloadまで維持。旧tabはA pathだけを使い、A filesが次deploymentへcarry-forward中なら継続し、retention後の404ではfail closedしreloadを案内。初回移行で旧v1 tabを支える場合はmanifestの`legacyCompatibilityV1` root hashesに一致するflat JSON aliasesを期限限定で引き継ぐ。今回はcarry-forward/source acquisition、runtime pinning、Web Crypto、legacy alias生成はいずれも未実装。
+
+## 16. 根拠・作業境界
 
 設計根拠として`docs/t12_phase4_6b_release_consistency.md`、`docs/project_state.md`、`docs/devlog.md`、`scripts/build_public_site.py`、`scripts/validate_public_artifact.py`、`scripts/public_payload_profile.py`、`scripts/synthetic_public_fixture_factory.py`、`scripts/local_preview_payload_loader.mjs`、`_local_preview/preview_core.mjs`、`scripts/timetable_adapter.mjs`、`.github/workflows/synthetic-public-ci.yml`と関連testsを読んだ。
 
-Phase 4-7はドキュメントのみだった。続くPhase 4-8Aでは契約moduleと専用test、設計・状態・開発履歴のみを追加。既存builder/validator/runtime/fixture/workflow/artifact/Pagesは変更せず、Actions・ODPT APIには接続せず、Cloudflare deploy・commit/push/mergeなし。
+Phase 4-7はドキュメントのみ、4-8Aは契約module、4-8Bはbuilder/independent validatorの明示opt-in modeを追加した。builder defaultの17-file出力、legacy validator mode、app runtime、synthetic fixture contract、GitHub Actions workflow、existing staging/public artifactは維持。Cloudflare deploy・Actions実行・ODPT API接続・old Production alias fetch・commit/push/mergeなし。

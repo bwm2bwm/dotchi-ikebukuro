@@ -65,6 +65,13 @@
 - 専用テスト [`tests/test_release_contract.py`](../tests/test_release_contract.py) 8件と [`tests/release_contract.test.mjs`](../tests/release_contract.test.mjs) 6件が成功。全体のPython unittest 99件、Node test 116件も成功。JCS数値/Unicode/UTF-16 key順、Python/JavaScript canonical bytesおよびreleaseId一致、再現性・入力変更、8駅manifest、path/hash/bytes、envelope/inner payload異常を確認。
 - 今回は契約API追加まで。existing builderの17-file出力、artifact validator、app runtime、synthetic fixture、GitHub workflowは変更しておらず、public artifact互換。browser Web Crypto接続、builder integration、独立artifact validation parity、旧世代carry-forwardは4-8B以降。Actions、Cloudflare、ODPT API接続なし、commit/push/mergeなし。
 
+### T12 Phase 4-8B release-managed builder・validator（2026-10-28）
+
+- `scripts/build_public_site.py`に`--release-managed` opt-inを追加。既定は従来どおり17 files。opt-inは9 static assets、`manifest.json`、`releases/<releaseId>/`下の8 JSON envelopeで18 filesを生成。manifestにはreleaseId再計算用descriptorを格納し、未公開local buildの`publishedAt`は`null`として再現性を維持する。
+- `scripts/validate_public_artifact.py --release-managed ARTIFACT_DIR`を追加。builderを呼ばずread-onlyでrecursive file set/path/symlink、manifest/descriptor/releaseId、assetとpayload digest、envelope raw bytes hash/length、Python strict public allowlist、既存JS adapter、駅間serviceDate/feed/applicationPeriod整合を検査する。従来validator modeは従来の17-file legacy artifactを検査し続ける。
+- [`tests/test_release_managed_public_site.py`](../tests/test_release_managed_public_site.py) 9件を追加。生成・独立検証、tree/manifest/JSON byte再現性、station/asset/builder contract変更、manifest/JSON/hash/byte/path/station/inner payload/metadata改変、17-file default回帰を確認。
+- 新artifactの公開runtimeは未変更でflat JSONを要求するため、4-8C以前にPagesへdeployしない。旧世代取得/carry-forward、browser Web Crypto、session pin、LRU統合も未実装。Actions workflow、Cloudflare、ODPT APIは未接続。
+
 ### T12 Phase 4-7 本番運用方針反映（2026-10-28）
 
 - 合意済み方針を [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) に反映。既存`Synthetic public site CI`は手動synthetic staging専用に維持し、将来の本番ODPT日次確認/data-only公開と、テスト・手動承認付きapp公開を責務分離する。

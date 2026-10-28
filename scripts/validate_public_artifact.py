@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+import argparse
 from html.parser import HTMLParser
 import json
 import os
@@ -17,6 +18,16 @@ from typing import Any
 # Keep this validator read-only, including Python's import cache.
 sys.dont_write_bytecode = True
 from public_payload_profile import PUBLIC_DATA_SCOPE, validate_public_payload  # noqa: E402
+from release_contract import (  # noqa: E402
+    MANIFEST_SCHEMA_VERSION,
+    STATION_FILES as RELEASE_STATION_FILES,
+    canonicalize_jcs,
+    calculate_release_id,
+    sha256_hex,
+    validate_manifest,
+    verify_envelope_bytes,
+    verify_station_bytes,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 STATION_FILES = {
@@ -36,6 +47,7 @@ JS_MODULES = frozenset({
 EXPECTED_FILES = frozenset({
     "index.html", "styles.css", "preview.css", *JS_MODULES, *STATION_FILES.values(),
 })
+STATIC_FILES = frozenset(EXPECTED_FILES - set(STATION_FILES.values()))
 DIAGNOSTIC_MARKERS = (
     "debugnow", "perf=1", "preview_diagnostics.css", "performance_metrics.mjs", "virtual_now.mjs",
 )
@@ -346,19 +358,200 @@ def validate_artifact(directory: Path) -> dict[str, Any]:
     return {"files": len(EXPECTED_FILES), "stations": len(STATION_FILES), "service_dates": service_dates}
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: python3 scripts/validate_public_artifact.py ARTIFACT_DIR", file=sys.stderr)
-        return 2
+def _read_json_bytes(raw: bytes, error: str) -> Any:
     try:
-        result = validate_artifact(Path(sys.argv[1]))
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+    except (UnicodeError, json.JSONDecodeError, _DuplicateJsonMember):
+        raise ArtifactValidationError(error) from None
+
+
+def _release_file_map(root: Path, manifest: dict[str, Any]) -> dict[str, Path]:
+    release_ids = [manifest["releaseId"], *(item["releaseId"] for item in manifest["retainedReleases"])]
+    expected = {name for name in STATIC_FILES} | {"manifest.json"}
+    for release_id in release_ids:
+        expected.update(f"releases/{release_id}/{filename}" for filename in STATION_FILES.values())
+    legacy = manifest["legacyCompatibilityV1"]
+    if legacy is not None:
+        expected.update(record["url"].lstrip("/") for record in legacy["stations"].values())
+
+    actual: set[str] = set()
+    for path in root.rglob("*"):
+        try:
+            mode = path.lstat().st_mode
+        except OSError:
+            raise ArtifactValidationError("release artifact contains an unreadable entry") from None
+        if stat.S_ISLNK(mode):
+            raise ArtifactValidationError("release artifact contains a symlink")
+        relative = path.relative_to(root).as_posix()
+        if stat.S_ISDIR(mode):
+            if relative != "releases" and not (relative.startswith("releases/") and relative.count("/") == 1):
+                raise ArtifactValidationError("release artifact contains an unexpected directory")
+        elif stat.S_ISREG(mode):
+            actual.add(relative)
+        else:
+            raise ArtifactValidationError("release artifact contains a non-regular file")
+    if actual != expected:
+        raise ArtifactValidationError("release artifact file set differs from manifest and static allowlist")
+    return {relative: root / relative for relative in expected}
+
+
+def _validate_adapter_payload(station_id: str, payload: dict[str, Any]) -> None:
+    node = shutil.which("node")
+    if not node:
+        raise ArtifactValidationError("Node.js is required for release payload adapter verification")
+    script = (
+        "import fs from 'node:fs'; import {validateTimetablePayload,PUBLIC_DATA_SCOPE} "
+        "from './scripts/timetable_adapter.mjs'; "
+        "const payload=JSON.parse(fs.readFileSync(0,'utf8')); "
+        "validateTimetablePayload(payload,PUBLIC_DATA_SCOPE); "
+        "if(payload.serviceDays.some(day=>day.destinationStationId!==process.argv[1])) process.exit(3);"
+    )
+    try:
+        result = subprocess.run([node, "--input-type=module", "-e", script, station_id], cwd=ROOT,
+                                input=json.dumps(payload, ensure_ascii=False), capture_output=True,
+                                text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        raise ArtifactValidationError("JavaScript adapter validation could not run") from None
+    if result.returncode:
+        raise ArtifactValidationError("JavaScript adapter rejected an inner station payload")
+
+
+def _check_descriptor(descriptor: dict[str, Any], release_id: str, asset_bytes: dict[str, bytes],
+                      payloads: dict[str, dict[str, Any]]) -> None:
+    try:
+        if calculate_release_id(descriptor) != release_id:
+            raise ArtifactValidationError("release descriptor does not reproduce manifest releaseId")
+    except ValueError:
+        raise ArtifactValidationError("release descriptor is malformed") from None
+    descriptor_assets = descriptor["assets"]
+    if {item["path"] for item in descriptor_assets} != set(asset_bytes):
+        raise ArtifactValidationError("release descriptor asset list differs from static assets")
+    for item in descriptor_assets:
+        if sha256_hex(asset_bytes[item["path"]]) != item["sha256"]:
+            raise ArtifactValidationError("a static asset hash differs from release descriptor")
+    expected_stations = {item["stationId"]: item["payloadSha256"] for item in descriptor["stations"]}
+    if set(expected_stations) != set(STATION_FILES):
+        raise ArtifactValidationError("release descriptor station list is incomplete")
+    for station_id, payload in payloads.items():
+        if sha256_hex(canonicalize_jcs(payload)) != expected_stations[station_id]:
+            raise ArtifactValidationError("inner payload hash differs from release descriptor")
+
+
+def validate_release_managed_artifact(directory: Path) -> dict[str, Any]:
+    """Read-only independent validation for opt-in manifest/envelope artifacts."""
+    root = _artifact_root(directory)
+    raw_manifest = (root / "manifest.json").read_bytes()
+    manifest = _read_json_bytes(raw_manifest, "release manifest is invalid UTF-8 JSON")
+    if not isinstance(manifest, dict):
+        raise ArtifactValidationError("release manifest root must be an object")
+    try:
+        validate_manifest(manifest)
+    except ValueError:
+        raise ArtifactValidationError("release manifest failed schema or compatibility validation") from None
+    if manifest["schemaVersion"] != MANIFEST_SCHEMA_VERSION or manifest["releaseDescriptor"] is None:
+        raise ArtifactValidationError("release-managed artifact requires a verifiable release descriptor")
+    files = _release_file_map(root, manifest)
+    contents = {name: _read_text(root, name) for name in STATIC_FILES}
+    _check_html(contents)
+    _check_import_graph(contents)
+    _check_payload_references(contents)
+    _check_js_syntax(root)
+
+    asset_bytes = {name: files[name].read_bytes() for name in STATIC_FILES}
+    current_payloads: dict[str, dict[str, Any]] = {}
+    current_dates: list[str] | None = None
+    for station_id, filename in STATION_FILES.items():
+        relative = f"releases/{manifest['releaseId']}/{filename}"
+        raw = files[relative].read_bytes()
+        try:
+            envelope = verify_station_bytes(raw, manifest, station_id)
+        except ValueError:
+            raise ArtifactValidationError("current station envelope/hash/metadata validation failed") from None
+        payload = envelope["payload"]
+        contents[relative] = raw.decode("utf-8")
+        try:
+            validate_public_payload(payload)
+        except (TypeError, ValueError):
+            raise ArtifactValidationError("inner payload failed strict public schema and allowlist validation") from None
+        _validate_adapter_payload(station_id, payload)
+        dates = [day["serviceDate"] for day in payload["serviceDays"]]
+        if not dates or (current_dates is not None and dates != current_dates):
+            raise ArtifactValidationError("current station serviceDate lists do not match")
+        current_dates = dates
+        current_payloads[station_id] = payload
+    _check_descriptor(manifest["releaseDescriptor"], manifest["releaseId"], asset_bytes, current_payloads)
+
+    for old in manifest["retainedReleases"]:
+        dates_for_old: list[str] | None = None
+        common_for_old: dict[str, Any] | None = None
+        for station_id, filename in STATION_FILES.items():
+            relative = f"releases/{old['releaseId']}/{filename}"
+            raw = files[relative].read_bytes()
+            record = old["stations"][station_id]
+            try:
+                envelope = verify_envelope_bytes(raw, expected_release_id=old["releaseId"],
+                    expected_station_id=station_id, expected_sha256=record["sha256"], expected_bytes=record["bytes"])
+                payload = envelope["payload"]
+                validate_public_payload(payload)
+            except ValueError:
+                raise ArtifactValidationError("retained station envelope/hash/schema validation failed") from None
+            contents[relative] = raw.decode("utf-8")
+            if any(day["serviceDate"] < old["serviceDateRange"]["from"]
+                   or day["serviceDate"] > old["serviceDateRange"]["through"] for day in payload["serviceDays"]):
+                raise ArtifactValidationError("retained payload serviceDate falls outside manifest range")
+            _validate_adapter_payload(station_id, payload)
+            dates = [day["serviceDate"] for day in payload["serviceDays"]]
+            if dates_for_old is not None and dates != dates_for_old:
+                raise ArtifactValidationError("retained station serviceDate lists do not match")
+            dates_for_old = dates
+            common = {key: payload[key] for key in
+                      ("generatedAt", "feed", "applicationPeriod", "timezone", "schemaVersion", "dataScope")}
+            if common_for_old is not None and common != common_for_old:
+                raise ArtifactValidationError("retained station common metadata does not match")
+            common_for_old = common
+
+    legacy = manifest["legacyCompatibilityV1"]
+    if legacy is not None:
+        for station_id, filename in STATION_FILES.items():
+            raw = files[filename].read_bytes()
+            record = legacy["stations"][station_id]
+            if len(raw) != record["bytes"] or sha256_hex(raw) != record["sha256"]:
+                raise ArtifactValidationError("legacy compatibility alias hash or byte count differs")
+            payload = _read_json_bytes(raw, "legacy compatibility payload is invalid JSON")
+            contents[filename] = raw.decode("utf-8")
+            try:
+                validate_public_payload(payload)
+            except (TypeError, ValueError):
+                raise ArtifactValidationError("legacy compatibility payload failed public schema") from None
+            _validate_adapter_payload(station_id, payload)
+        legacy_contents = {filename: contents[filename] for filename in STATION_FILES.values()}
+        _check_payloads(legacy_contents)
+
+    _check_content_safety(contents)
+
+    service_dates = current_dates or []
+    return {"files": len(files), "stations": len(STATION_FILES), "service_dates": service_dates,
+            "release_id": manifest["releaseId"], "retained_releases": len(manifest["retainedReleases"]),
+            "release_managed": True}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--release-managed", action="store_true",
+                        help="validate root manifest and releaseId-versioned station envelopes")
+    parser.add_argument("artifact_dir", type=Path)
+    args = parser.parse_args()
+    try:
+        result = (validate_release_managed_artifact(args.artifact_dir) if args.release_managed
+                  else validate_artifact(args.artifact_dir))
     except ArtifactValidationError as error:
         print(f"public artifact validation failed: {error}", file=sys.stderr)
         return 1
     except OSError:
         print("public artifact validation failed: artifact could not be read", file=sys.stderr)
         return 1
-    print(f"public artifact valid: {result['files']} files, {result['stations']} stations, "
+    label = f"release {result['release_id']}; " if result.get("release_managed") else ""
+    print(f"public artifact valid: {label}{result['files']} files, {result['stations']} stations, "
           + ", ".join(result["service_dates"]))
     return 0
 

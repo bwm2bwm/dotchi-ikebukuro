@@ -15,6 +15,14 @@ import uuid
 from typing import Any
 
 from public_payload_profile import PUBLIC_DATA_SCOPE, validate_public_payload
+from release_contract import (
+    RUNTIME_CONTRACT,
+    build_release_descriptor,
+    calculate_release_id,
+    create_manifest,
+    encode_envelope,
+    encode_manifest,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_MARKER = ".synthetic-public-display-v1"
@@ -45,6 +53,7 @@ JS_ARTIFACTS = frozenset({
     "local_preview_payload_loader.mjs", "selection.mjs", "terminal_ui.mjs",
 })
 ARTIFACT_FILENAMES = frozenset((*SOURCE_FILES, *PAYLOAD_FILENAMES.values()))
+BUILDER_CONTRACT_VERSION = "dotchi-public-builder-v1"
 FORBIDDEN_ARTIFACT_MARKERS = (
     "preview.js", "virtual_now.mjs", "performance_metrics.mjs", "preview_diagnostics.css",
     "debugnow", "perf=1", ".env", "apikey", "api_key", "synthetic-secret",
@@ -226,8 +235,46 @@ def _validate_with_adapter(stage: Path) -> None:
             raise PublicSiteBuildError(f"adapter rejected {filename}: {result.stderr.strip()}")
 
 
-def build_public_site(*, fixtures: Path, output: Path) -> dict[str, Any]:
-    """Atomically replace output with a validated site built from explicit synthetic fixtures."""
+def _build_release_managed(stage: Path, payloads: dict[str, dict[str, Any]],
+                           service_dates: list[str]) -> list[str]:
+    asset_bytes = {name: (stage / name).read_bytes() for name in SOURCE_FILES}
+    descriptor = build_release_descriptor(
+        runtime_contract=RUNTIME_CONTRACT,
+        builder_contract_version=BUILDER_CONTRACT_VERSION,
+        payloads=payloads,
+        assets=asset_bytes,
+    )
+    release_id = calculate_release_id(descriptor)
+    release_dir = stage / "releases" / release_id
+    release_dir.mkdir(parents=True)
+    envelope_bytes: dict[str, bytes] = {}
+    for station_id, filename in PAYLOAD_FILENAMES.items():
+        envelope_bytes[station_id] = encode_envelope(
+            release_id=release_id, station_id=station_id, payload=payloads[station_id])
+        (release_dir / filename).write_bytes(envelope_bytes[station_id])
+    first_payload = payloads[next(iter(PAYLOAD_FILENAMES))]
+    manifest = create_manifest(
+        release_id=release_id,
+        release_descriptor=descriptor,
+        published_at=None,
+        generated_at=first_payload["generatedAt"],
+        service_date_range={"from": service_dates[0], "through": service_dates[-1]},
+        feed=first_payload["feed"],
+        application_period=first_payload["applicationPeriod"],
+        station_json_bytes=envelope_bytes,
+    )
+    (stage / "manifest.json").write_bytes(encode_manifest(manifest))
+    validator = ROOT / "scripts" / "validate_public_artifact.py"
+    result = subprocess.run([sys.executable, str(validator), "--release-managed", str(stage)],
+                            cwd=ROOT, capture_output=True, text=True)
+    if result.returncode:
+        detail = result.stderr.strip() or "independent release validator rejected the artifact"
+        raise PublicSiteBuildError(f"release-managed artifact validation failed: {detail}")
+    return sorted(path.relative_to(stage).as_posix() for path in stage.rglob("*") if path.is_file())
+
+
+def build_public_site(*, fixtures: Path, output: Path, release_managed: bool = False) -> dict[str, Any]:
+    """Atomically build either the legacy 17-file site or opt-in release-managed artifact."""
     fixture_dir, output_dir = _ensure_safe_paths(fixtures, output)
     payloads, service_dates = _validate_fixture_directory(fixture_dir)
     output_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -238,12 +285,16 @@ def build_public_site(*, fixtures: Path, output: Path) -> dict[str, Any]:
     old_moved = False
     try:
         _copy_allowlisted_assets(stage)
-        for destination_id, filename in PAYLOAD_FILENAMES.items():
-            shutil.copyfile(fixture_dir / filename, stage / filename)
-        _validate_with_adapter(stage)
-        _validate_artifacts(stage)
-        for path in stage.iterdir():
-            path.chmod(0o644)
+        if release_managed:
+            files = _build_release_managed(stage, payloads, service_dates)
+        else:
+            for destination_id, filename in PAYLOAD_FILENAMES.items():
+                shutil.copyfile(fixture_dir / filename, stage / filename)
+            _validate_with_adapter(stage)
+            _validate_artifacts(stage)
+            files = sorted(ARTIFACT_FILENAMES)
+        for path in stage.rglob("*"):
+            path.chmod(0o755 if path.is_dir() else 0o644)
         stage.chmod(0o755)
         if output_dir.exists():
             os.replace(output_dir, backup)
@@ -259,7 +310,7 @@ def build_public_site(*, fixtures: Path, output: Path) -> dict[str, Any]:
             shutil.rmtree(backup)
             old_moved = False
         return {"output": output_dir, "payload_count": len(payloads), "service_dates": service_dates,
-                "files": sorted(ARTIFACT_FILENAMES)}
+                "files": files, "release_managed": release_managed}
     finally:
         if old_moved and backup.exists() and not output_dir.exists():
             os.replace(backup, output_dir)
@@ -274,15 +325,22 @@ def main() -> int:
                         help="directory containing exactly eight synthetic public-display-v1 payload fixtures")
     parser.add_argument("--output", required=True, type=Path,
                         help="explicit output directory outside the repository (never the public root mock)")
+    parser.add_argument("--release-managed", action="store_true",
+                        help="opt in to manifest.json plus immutable releases/<releaseId>/ station envelopes")
     args = parser.parse_args()
     try:
-        result = build_public_site(fixtures=args.fixtures, output=args.output)
+        result = build_public_site(fixtures=args.fixtures, output=args.output,
+                                   release_managed=args.release_managed)
     except (PublicSiteBuildError, OSError, subprocess.SubprocessError) as error:
         print(f"public site build failed: {error}", file=sys.stderr)
         return 1
     print(f"Synthetic public site built at {result['output']}")
     print(f"Payloads: {result['payload_count']}; serviceDate: {', '.join(result['service_dates'])}")
-    print(f"Allowlisted files: {len(result['files'])}")
+    if result["release_managed"]:
+        print(f"Release-managed files: {len(result['files'])}")
+        print("Runtime compatibility: contract artifact only; not deployable until Phase 4-8C")
+    else:
+        print(f"Allowlisted files: {len(result['files'])}")
     return 0
 
 

@@ -124,6 +124,29 @@ export function calculateReleaseId(descriptor) {
       || descriptor.publicDataScope !== PUBLIC_DATA_SCOPE) {
     fail('invalid_descriptor', 'release descriptor contract versions are unsupported');
   }
+  if (typeof descriptor.runtimeContract !== 'string' || !descriptor.runtimeContract
+      || typeof descriptor.builderContractVersion !== 'string' || !descriptor.builderContractVersion
+      || !Array.isArray(descriptor.assets) || descriptor.assets.length === 0
+      || !Array.isArray(descriptor.stations) || descriptor.stations.length !== Object.keys(STATION_FILES).length) {
+    fail('invalid_descriptor', 'release descriptor contents are malformed');
+  }
+  const paths = descriptor.assets.map((item) => {
+    if (!exactKeys(item, ['path', 'sha256']) || typeof item.path !== 'string' || !item.path || !validHash(item.sha256)) {
+      fail('invalid_descriptor', 'release descriptor asset record is malformed');
+    }
+    return item.path;
+  });
+  if (new Set(paths).size !== paths.length || paths.some((item, index) => index && paths[index - 1] > item)) {
+    fail('invalid_descriptor', 'release descriptor asset paths must be sorted and unique');
+  }
+  const stationIds = descriptor.stations.map((item) => {
+    if (!exactKeys(item, ['stationId', 'payloadSha256']) || !Object.hasOwn(STATION_FILES, item.stationId)
+        || !validHash(item.payloadSha256)) fail('invalid_descriptor', 'release descriptor station record is malformed');
+    return item.stationId;
+  });
+  if (stationIds.join('\0') !== Object.keys(STATION_FILES).sort().join('\0')) {
+    fail('invalid_descriptor', 'release descriptor stations must be complete, unique, and sorted');
+  }
   return `r1-${sha256Hex(canonicalizeJcs(descriptor))}`;
 }
 
@@ -167,7 +190,7 @@ function validateRange(range) {
 }
 
 export function validateManifest(value) {
-  const fields = ['schemaVersion', 'releaseId', 'runtimeContract', 'jsonEnvelopeSchemaVersion',
+  const fields = ['schemaVersion', 'releaseId', 'releaseDescriptor', 'runtimeContract', 'jsonEnvelopeSchemaVersion',
     'payloadSchemaVersion', 'dataScope', 'publishedAt', 'generatedAt', 'serviceDateRange', 'feed',
     'applicationPeriod', 'stations', 'retainedReleases', 'legacyCompatibilityV1'];
   if (!exactKeys(value, fields)) fail('manifest_fields', 'manifest has missing or unknown fields');
@@ -177,7 +200,15 @@ export function validateManifest(value) {
       || value.payloadSchemaVersion !== PAYLOAD_SCHEMA_VERSION || value.dataScope !== PUBLIC_DATA_SCOPE) {
     fail('compatibility_mismatch', 'manifest compatibility values do not match this contract');
   }
-  if (!validTimestamp(value.publishedAt) || !validTimestamp(value.generatedAt)) fail('invalid_timestamp', 'publishedAt/generatedAt must include timezone offsets');
+  if ((value.publishedAt !== null && !validTimestamp(value.publishedAt)) || !validTimestamp(value.generatedAt)) fail('invalid_timestamp', 'publishedAt, when set, and generatedAt must include timezone offsets');
+  if (value.releaseDescriptor !== null && calculateReleaseId(value.releaseDescriptor) !== value.releaseId) fail('release_id_mismatch', 'manifest releaseDescriptor does not produce releaseId');
+  if (value.releaseDescriptor !== null && (value.releaseDescriptor.runtimeContract !== value.runtimeContract
+      || value.releaseDescriptor.manifestSchemaVersion !== value.schemaVersion
+      || value.releaseDescriptor.jsonEnvelopeSchemaVersion !== value.jsonEnvelopeSchemaVersion
+      || value.releaseDescriptor.payloadSchemaVersion !== value.payloadSchemaVersion
+      || value.releaseDescriptor.publicDataScope !== value.dataScope)) {
+    fail('compatibility_mismatch', 'manifest and release descriptor compatibility values differ');
+  }
   validateRange(value.serviceDateRange);
   const feed = value.feed;
   if (!exactKeys(feed, ['version', 'validFrom', 'validThrough', 'sourceUpdatedAt'])
@@ -185,6 +216,7 @@ export function validateManifest(value) {
       || feed.validFrom > feed.validThrough || (feed.sourceUpdatedAt !== null && !validTimestamp(feed.sourceUpdatedAt))) {
     fail('invalid_feed', 'feed metadata is malformed');
   }
+  if (value.serviceDateRange.from < feed.validFrom || value.serviceDateRange.through > feed.validThrough) fail('invalid_date_range', 'serviceDateRange must fit within feed validity');
   const period = value.applicationPeriod;
   if (!exactKeys(period, ['startsAt', 'endsAt']) || !validTimestamp(period.startsAt) || !validTimestamp(period.endsAt)
       || Date.parse(period.endsAt) <= Date.parse(period.startsAt)) fail('invalid_application_period', 'applicationPeriod is malformed');
@@ -219,11 +251,11 @@ export function validateManifest(value) {
 }
 
 export function createManifest({ releaseId, publishedAt, generatedAt, serviceDateRange, feed,
-  applicationPeriod, stationJsonBytes, retainedReleases = [], legacyCompatibilityV1 = null }) {
+  applicationPeriod, stationJsonBytes, retainedReleases = [], legacyCompatibilityV1 = null, releaseDescriptor = null }) {
   if (!validRelease(releaseId)) fail('invalid_release_id', 'invalid releaseId');
   if (!stationJsonBytes || typeof stationJsonBytes !== 'object' || Array.isArray(stationJsonBytes)
       || Object.keys(stationJsonBytes).length !== Object.keys(STATION_FILES).length
-      || Object.keys(stationJsonBytes).some((id) => !(id in STATION_FILES))) {
+      || Object.keys(stationJsonBytes).some((id) => !Object.hasOwn(STATION_FILES, id))) {
     fail('station_set', 'manifest generation requires exactly eight station JSON byte strings');
   }
   const stations = {};
@@ -234,7 +266,7 @@ export function createManifest({ releaseId, publishedAt, generatedAt, serviceDat
       expectedSha256: sha256Hex(raw), expectedBytes: raw.byteLength });
     stations[stationId] = { url: `/releases/${releaseId}/${filename}`, sha256: sha256Hex(raw), bytes: raw.byteLength };
   }
-  const manifest = validateManifest({ schemaVersion: MANIFEST_SCHEMA_VERSION, releaseId, runtimeContract: RUNTIME_CONTRACT,
+  const manifest = validateManifest({ schemaVersion: MANIFEST_SCHEMA_VERSION, releaseId, releaseDescriptor, runtimeContract: RUNTIME_CONTRACT,
     jsonEnvelopeSchemaVersion: ENVELOPE_SCHEMA_VERSION, payloadSchemaVersion: PAYLOAD_SCHEMA_VERSION,
     dataScope: PUBLIC_DATA_SCOPE, publishedAt, generatedAt, serviceDateRange, feed, applicationPeriod,
     stations, retainedReleases, legacyCompatibilityV1 });

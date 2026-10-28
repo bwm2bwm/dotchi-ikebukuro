@@ -201,6 +201,31 @@ def calculate_release_id(descriptor: dict[str, Any]) -> str:
        descriptor["payloadSchemaVersion"] != PAYLOAD_SCHEMA_VERSION or \
        descriptor["publicDataScope"] != PUBLIC_DATA_SCOPE:
         _fail("invalid_descriptor", "release descriptor contract versions are unsupported")
+    if not isinstance(descriptor["runtimeContract"], str) or not descriptor["runtimeContract"] or \
+       not isinstance(descriptor["builderContractVersion"], str) or not descriptor["builderContractVersion"]:
+        _fail("invalid_descriptor", "release descriptor contract IDs must be nonempty strings")
+    assets = descriptor["assets"]
+    if not isinstance(assets, list) or not assets:
+        _fail("invalid_descriptor", "release descriptor assets must be a nonempty array")
+    asset_paths = []
+    for item in assets:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"} or \
+           not isinstance(item["path"], str) or not item["path"] or not _valid_hash(item["sha256"]):
+            _fail("invalid_descriptor", "release descriptor asset record is malformed")
+        asset_paths.append(item["path"])
+    if asset_paths != sorted(asset_paths, key=lambda path: path.encode("utf-16-be")) or len(set(asset_paths)) != len(asset_paths):
+        _fail("invalid_descriptor", "release descriptor asset paths must be sorted and unique")
+    stations = descriptor["stations"]
+    if not isinstance(stations, list) or len(stations) != len(STATION_FILES):
+        _fail("invalid_descriptor", "release descriptor must contain exactly eight stations")
+    station_ids = []
+    for item in stations:
+        if not isinstance(item, dict) or set(item) != {"stationId", "payloadSha256"} or \
+           item.get("stationId") not in STATION_FILES or not _valid_hash(item.get("payloadSha256")):
+            _fail("invalid_descriptor", "release descriptor station record is malformed")
+        station_ids.append(item["stationId"])
+    if station_ids != sorted(STATION_FILES):
+        _fail("invalid_descriptor", "release descriptor stations must be complete, unique, and sorted")
     return "r1-" + sha256_hex(canonicalize_jcs(descriptor))
 
 
@@ -247,7 +272,7 @@ def _station_records(records: Any, release_id: str, *, retained: bool = False) -
 
 def validate_manifest(value: Any) -> dict[str, Any]:
     """Validate the strict Phase 4-7 manifest schema; unknown fields fail closed."""
-    fields = {"schemaVersion", "releaseId", "runtimeContract", "jsonEnvelopeSchemaVersion",
+    fields = {"schemaVersion", "releaseId", "releaseDescriptor", "runtimeContract", "jsonEnvelopeSchemaVersion",
               "payloadSchemaVersion", "dataScope", "publishedAt", "generatedAt",
               "serviceDateRange", "feed", "applicationPeriod", "stations",
               "retainedReleases", "legacyCompatibilityV1"}
@@ -264,8 +289,17 @@ def validate_manifest(value: Any) -> dict[str, Any]:
        type(value["payloadSchemaVersion"]) is not int or value["payloadSchemaVersion"] != PAYLOAD_SCHEMA_VERSION or \
        value["dataScope"] != PUBLIC_DATA_SCOPE:
         _fail("compatibility_mismatch", "manifest schema/data compatibility values do not match")
-    if not _timestamp(value["publishedAt"]) or not _timestamp(value["generatedAt"]):
-        _fail("invalid_timestamp", "publishedAt and generatedAt must include timezone offsets")
+    if (value["publishedAt"] is not None and not _timestamp(value["publishedAt"])) or not _timestamp(value["generatedAt"]):
+        _fail("invalid_timestamp", "publishedAt, when set, and generatedAt must include timezone offsets")
+    if value["releaseDescriptor"] is not None and calculate_release_id(value["releaseDescriptor"]) != release_id:
+        _fail("release_id_mismatch", "manifest releaseDescriptor does not produce releaseId")
+    descriptor = value["releaseDescriptor"]
+    if descriptor is not None and (descriptor["runtimeContract"] != value["runtimeContract"] or
+       descriptor["manifestSchemaVersion"] != value["schemaVersion"] or
+       descriptor["jsonEnvelopeSchemaVersion"] != value["jsonEnvelopeSchemaVersion"] or
+       descriptor["payloadSchemaVersion"] != value["payloadSchemaVersion"] or
+       descriptor["publicDataScope"] != value["dataScope"]):
+        _fail("compatibility_mismatch", "manifest and release descriptor compatibility values differ")
     date_range = value["serviceDateRange"]
     if not isinstance(date_range, dict) or set(date_range) != {"from", "through"} or \
        not _date(date_range.get("from"), "date") or not _date(date_range.get("through"), "date") or \
@@ -278,6 +312,8 @@ def validate_manifest(value: Any) -> dict[str, Any]:
        feed["validFrom"] > feed["validThrough"] or \
        (feed["sourceUpdatedAt"] is not None and not _timestamp(feed["sourceUpdatedAt"])):
         _fail("invalid_feed", "feed metadata is malformed")
+    if date_range["from"] < feed["validFrom"] or date_range["through"] > feed["validThrough"]:
+        _fail("invalid_date_range", "serviceDateRange must fit within feed validity")
     period = value["applicationPeriod"]
     if not isinstance(period, dict) or set(period) != {"startsAt", "endsAt"} or \
        not _timestamp(period["startsAt"]) or not _timestamp(period["endsAt"]):
@@ -325,11 +361,12 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     return value
 
 
-def create_manifest(*, release_id: str, published_at: str, generated_at: str,
+def create_manifest(*, release_id: str, published_at: str | None, generated_at: str,
                     service_date_range: dict[str, str], feed: dict[str, Any],
                     application_period: dict[str, str], station_json_bytes: dict[str, bytes],
                     retained_releases: list[dict[str, Any]] | None = None,
-                    legacy_compatibility_v1: dict[str, Any] | None = None) -> dict[str, Any]:
+                    legacy_compatibility_v1: dict[str, Any] | None = None,
+                    release_descriptor: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build a current-release manifest from final envelope bytes.
 
     ``station_json_bytes`` must contain the complete encoded envelope for each
@@ -351,6 +388,7 @@ def create_manifest(*, release_id: str, published_at: str, generated_at: str,
     manifest = {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
         "releaseId": release_id,
+        "releaseDescriptor": release_descriptor,
         "runtimeContract": RUNTIME_CONTRACT,
         "jsonEnvelopeSchemaVersion": ENVELOPE_SCHEMA_VERSION,
         "payloadSchemaVersion": PAYLOAD_SCHEMA_VERSION,
