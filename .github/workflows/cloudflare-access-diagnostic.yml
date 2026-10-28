@@ -1,0 +1,46 @@
+name: Cloudflare Access staging diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  main-branch-guard:
+    name: Require main branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Reject non-main refs
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Cloudflare Access diagnostic may only run from refs/heads/main." >&2
+          exit 1
+      - name: Confirm allowed ref
+        if: github.ref == 'refs/heads/main'
+        run: echo "Running from refs/heads/main."
+
+  diagnose:
+    name: Check staging Access Service Token
+    needs: main-branch-guard
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    environment:
+      name: pages-staging
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify staging Service Token access
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: python3 -B scripts/diagnose_cloudflare_access.py
