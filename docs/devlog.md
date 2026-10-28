@@ -1,5 +1,14 @@
 # 開発ログ
 
+## 2026-10-28 — T12 Phase 4-8D-2A Production alias HTTP取得・競合検知
+
+- `scripts/fetch_production_artifact.py`を追加。固定originのHTTPS取得、明示したlocalhost-only HTTP test、redirect拒否、safe relative path、status/MIME/Content-Length/raw byte/count budgets、timeoutと有限retry、symlink/既存出力拒否、失敗時stage cleanupを実装した。Service Tokenは`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`環境変数からHTTP headerにし、CLI引数・exception・resultへ出さない。
+- Release-managed fetchは初回manifest raw bytesをstrict parseし、descriptorからcurrent releaseIdを検証。manifest記載のcurrent・期限内retained・有効legacy aliasesと、independent validatorに必要な9 static assetsだけを固定originから取る。active retainedはdescriptor必須。全snapshot検証後にmanifestを再取得してraw SHA-256一致を確認し、D-1 validatorを通った新規出力directoryだけを確定する。expired historyはsnapshotから外す。
+- Legacy fetchは初回manifest HTTP 404かつ`--allow-initial-legacy-migration`がある場合のみ許可。manifest malformed/不正、401/403、HTML login等からlegacyへfallbackしない。strict 17-file validatorを通し、前後固定file-set fingerprintとmanifest absenceを確認する。
+- `fingerprint` CLI/APIはrelease-managed manifest raw SHAまたはlegacy 17-file JCS fingerprintを取得し、`--expected-sha256`でdeploy直前の一致を判定する。同一fetchの開始/終了raceは検出するが、別writerとのdeploy CASではない。run内固定値+upload直前再確認に加え、GitHub concurrencyとDashboard writer停止/唯一writerがD-2B運用上必要。
+- `tests/test_fetch_production_artifact.py` 12件を127.0.0.1だけで検査。release current-only 18-file、retained付き26-file、初回legacy alias付き26-file、flat legacy 17-fileの独立検証、明示fallback、auth header/401/403/secret非漏えい、manifest/JSON失敗、HTML login、別origin redirect未到達、path traversal、interrupted/timeout retry上限、bytes/files上限、legacy/release取得race、fingerprint mismatch、symlink/既存出力、未参照remote file非取得を確認。両modeの取得artifactをD-1 `assemble_public_artifact()`へ直接渡し、完成物もindependent validatorを通過。最終focused test 12件成功。Python全体133件成功、Node全体130件成功。`git diff --check`とCLI help確認も成功。
+- D-2Bの推奨: hostname限定Service Auth tokenと既存human email OTP policy共存を確認し、staging/production tokenを分離。GitHub Environmentにはdownload/recheck stepだけへClient ID/Secretを渡し、共有Pages project concurrencyとmanual writer freezeを加える。Cloudflare/GitHub設定、workflow、実alias、staging、ODPT APIには接続・変更していない。default 17-file artifact/runtime/18-file release contractは不変。commit/push/mergeなし。
+
 ## 2026-10-26 — T12 Phase 3-4 公開成果物の独立検証
 
 - builderとは別の`scripts/validate_public_artifact.py`を追加。指定済みartifact directoryをread-onlyで検査し、builder/temp staging/ODPT・GTFS/private・QA previewには依存しない。共有するのはPhase 1 public schema/allowlist validatorだけ。

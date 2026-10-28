@@ -520,7 +520,74 @@ browser loaderの変更はretained entryの追加descriptor field受け入れと
 - Race control:GitHub deploy jobをPages project単位のnon-canceling concurrency groupへ入れる。download後manifest raw SHA-256とcurrent releaseIdを保存し、assembly・final validation後、Direct Upload直前にProduction aliasのmanifestをno-cacheで再GETし、raw hash/releaseIdが同じことを要求する。差があればartifactを捨てて新しいcurrentを取得し直す。GitHub concurrency外のDashboard/manual deployはCASで封じられないため、D-2では手動uploadをfreezeする運用窓を設けるか、Cloudflare側の唯一writer化を判断する。
 - Rollback:aliasが以前のretained IDへ戻った場合、そのmanifestを新しいsource of truthとして再取得する。そのIDをcurrentから除き、過去のretiredAtを解除し、今回currentから退くgenerationだけをnowでretireする。rollback deploymentが保持manifestを欠く/old bytes欠損なら次のassemblyはfail closed。rollback自体のPages操作後にmanifest/file setを再検証する。
 
-このPhaseはCLI local inputしか扱わず、HTTP取得、Access credential、workflow、Cloudflare Direct Uploadは実装していない。未決事項はD-2前に、production upload concurrency外writer対策、actual payload/tree byte budgetとallowance、Cloudflare Access MIME/redirect behavior、unpublished manifestの扱いを確定する。
+Phase 4-8D-1はCLI local inputだけを扱い、当時はHTTP取得、Access credential、workflow、Cloudflare Direct Uploadを実装しなかった。次のD-2B前に、production upload concurrency外writer対策、actual payload/tree byte budgetとallowance、Cloudflare Access MIME/redirect behavior、unpublished manifestの扱いを確定する。現在のlocalhost専用HTTP取得実装の境界とD-2B提案は次節に記録する。
+
+## 20. Phase 4-8D-2A Production alias取得・fingerprint CLI
+
+### 20.1 CLIと責務
+
+`scripts/fetch_production_artifact.py` はalias HTTP取得だけを担当する。既存builderは呼ばず、取得完了後に`validate_public_artifact.py`の独立validator（Python API）を呼び、結果をD-1 `assemble_public_release.py --previous`へ渡せるdirectoryにする。Cloudflare API、Wrangler、Actions workflow、secret設定、deploy操作は含まない。許可先はCLIで固定したroot originであり、manifest内の相対URLは既存release contractとruntime asset allowlistでさらに制限される。
+
+```sh
+# HTTPS Production alias。Service Tokenはsecret storeから環境へ注入し、CLI引数には書かない。
+export CF_ACCESS_CLIENT_ID="$PAGES_READ_CLIENT_ID"
+export CF_ACCESS_CLIENT_SECRET="$PAGES_READ_CLIENT_SECRET"
+python3 -B scripts/fetch_production_artifact.py fetch \
+  --base-url https://dotchi-ikebukuro-staging.pages.dev \
+  --output /private/tmp/t12-production-snapshot
+
+# 取得したartifactをD-1へ渡す場合
+python3 -B scripts/assemble_public_release.py \
+  --previous /private/tmp/t12-production-snapshot \
+  --new-release /private/tmp/t12-next-release \
+  --as-of 2026-10-28T12:00:00+09:00 \
+  --output /private/tmp/t12-next-assembled
+
+# 初回移行専用。manifestがHTTP 404の場合にだけlegacy取得を許可する。
+python3 -B scripts/fetch_production_artifact.py fetch \
+  --base-url http://127.0.0.1:8765 --allow-insecure-localhost \
+  --allow-initial-legacy-migration --output /private/tmp/t12-legacy-snapshot
+```
+
+上記の環境変数例は値を格納する場所の説明であり、実credentialをrepositoryやshell historyへ置かない。CLIにはAccess値を受け取る引数がなく、`CF-Access-Client-Id` / `CF-Access-Client-Secret` headerとしてだけ送る。片方だけ設定された場合は停止する。exception/log/resultはheader、response body、完全URLを含めない。HTTPは`--allow-insecure-localhost`とloopback IP/`localhost`の組み合わせだけ許可し、通常はHTTPS必須。出力先は存在しないdirectory、親は存在しsymlinkを含まない必要がある。一時stageは出力と同じ親に作り、失敗時は削除する。default budgetは20,000 files、単体25 MiB、全体256 MiB。有限retryは初回+指定回数で、timeout、途中切断、408/425/429/5xx/network errorだけを対象とし、認証・404・redirect・MIME・構造・hash errorはretry対象外。
+
+### 20.2 取得選択・検証・legacy境界
+
+- Release-managed: root manifestを一度取得し、strict JSON/manifest validation、current descriptorからのreleaseId再計算、descriptor asset setと現行9 static assetsの一致を確認。manifestから現在releaseの8 JSON、保持期限内のcurrent/retained JSON、未期限のlegacy flat aliases、およびvalidatorが必要とするstatic assetsだけをallowlistで取得する。originに追加ファイルがあってもlistingせず取得しない。
+- retained entryは有効期間の残り+48時間を含む保持期限が未到来である場合に限り、D-1同様にdescriptor必須とする。期限と24h削除marginを過ぎたentryはlocal snapshot manifestから除き、expired fileも取得しない。raw source manifest bytesはfingerprint用に保持するが、normalized snapshotでは期限切れのretention/legacy metadataだけを削除する。現行runtime assetはD-1 validatorがcurrent descriptorと実bytesを照合する。
+- 取得したJSONはmanifest記載のraw byte count/hashをindependent validatorが照合し、envelope/release/station、inner payload、駅間metadata、descriptorも検査する。最後にsource manifestを再取得し、raw SHA-256が開始時と同一であることを確認してからsnapshotを公開する。
+- Legacy: manifest endpointのHTTP 404だけを「manifestなし」と扱う。404以外、HTML login 200、malformed/invalid manifest、timeout、401/403はlegacyへfallbackしない。legacyは`--allow-initial-legacy-migration`の明示時だけ、現在の17 allowlisted filesを全取得し、既存strict validatorで検証する。開始/終了で17ファイルの固定順hash+bytes fingerprintを比較し、途中でmanifestが出現していないことも再確認する。
+- 同一alias取得中のraceは、release-managedならraw manifest SHA、legacyなら固定17-file fingerprintの前後差でfail-closedにする。これは瞬間的にA→B→Aへ変わるABAや、取得終了後からdeployまでの競合を暗号学的にロックするものではない。後者はD-2B deploy直前のfingerprint再確認とGitHub concurrencyで窓を縮める。Dashboard等の別writerとのCAS保証はなく、手動deploy凍結または唯一writer化が別途必要。
+
+Static assetsの全量取得は省略できない。current descriptorは9 assetのhashをreleaseId preimageに含み、独立validatorが実bytesと照合するためである。manifestが参照する必要ファイルのみ取得するので、directory listingや未参照ファイルの全downloadはしない。過去retained generationのshell assets自体はD-1契約で保持されず、retained descriptor内の過去asset hashは過去bytesとの再照合対象ではない。
+
+### 20.3 fingerprint APIとD-2B直前確認
+
+```sh
+python3 -B scripts/fetch_production_artifact.py fingerprint \
+  --base-url https://dotchi-ikebukuro-staging.pages.dev --mode release-managed
+# 出力のfingerprintを同一deploy run内の安全なstep output/artifactへ保存し、Direct Upload直前:
+python3 -B scripts/fetch_production_artifact.py fingerprint \
+  --base-url https://dotchi-ikebukuro-staging.pages.dev --mode release-managed \
+  --expected-sha256 "$CAPTURED_PRODUCTION_FINGERPRINT"
+```
+
+release-managed fingerprintはroot `manifest.json`の**raw response bytesのSHA-256**。legacy modeはstrict validator通過後に、固定17 pathのpath→`{sha256,bytes}` mapをJCS canonicalizeしSHA-256する。`--expected-sha256` mismatch時はnonzero終了。release-managed `fingerprint`コマンドは1回のmanifest snapshotを返し、legacyは17ファイルを2回読み直す。deploy workflowではdownload時のfingerprintとreleaseIdをrun内に固定し、assembly/final validation後・Direct Upload直前に同コマンドを再実行する。差があれば既に作ったassemblyを捨て、最新aliasを再取得して先頭からやり直す。値はCIログへ平文出力せず、step output等へ限定する。Cloudflare Dashboard deployはGitHub concurrency groupに参加しないため、この手順だけでは同時publishを防げない。
+
+### 20.4 D-2B Cloudflare/GitHub接続への推奨
+
+- Cloudflare Accessは専用Service TokenとService Auth policyをretention runner用に作る。human email OTPの既存Allow policyはそのまま残し、machine token policyは対象Pages hostnameに限定する。共有・広域tokenを避け、stagingとproductionでtokenを分離し、ローテーション・失効手順を用意する。Access policyのpath/HTTP method制限可否は実装前にCloudflare設定で確認する。Pages aliasが同一Access app配下にあり必要scopeへ絞れない場合、別hostname/policyへ分離する判断を先に行う。
+- GitHub Environmentには例として`PAGES_PRODUCTION_READ_CLIENT_ID`、`PAGES_PRODUCTION_READ_CLIENT_SECRET`を環境別に置き、download/recheck jobだけへ渡す。CLIは現状`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`を読むため、workflow側でstep-local mappingする。secretをartifact、command argument、debug trace、exception、HTTP bodyへコピーしない。GitHub Environment/secretはこのPhaseでは作成していない。
+- 現CLIはHTTP status 200、JSON `application/json`、HTML/CSS/JSの対応MIME、実bytesと上限を確認する。unconditional requestなので304、redirect、401/403、404（manifest 404の明示legacy判定を除く）、HTML login、途中切断は公開失敗にする。
+- GitHub Pages-project単位の`cancel-in-progress: false` concurrencyをdata publishとapp publish共通で使う。GitHub job外Dashboard deployを残すならdeploy直前fingerprint後からupload完了まで手動writerを止めるrunbookを用意する。DashboardとActions双方から同時uploadする場合はCAS相当の外部調整がない限り安全保証できない。
+- 初回legacy migrationは明示flag付きdownloadで17-file strict validationし、D-1 assemblyでflat JSONを14日保持するmanifest/eight aliasesを生成してrelease-managed新shellと一括deployする。壊れた/欠損legacyは取り込まない。実stagingのlegacy 17ファイルやAccess認証は今回取得していない。
+- rollback後はalias上の現在manifest/fingerprintを新source of truthとして再取得し、現在artifactを独立検証してからassemblyする。以前のlocal snapshot/ArtifactだけをProductionの現状とみなさない。rollback後もmanifestが欠落・不正、必要generationが404ならfail closedしdeployしない。
+
+### 20.5 ローカルテスト・限界
+
+`tests/test_fetch_production_artifact.py` はfixtureから生成したlegacy 17-fileとrelease-managed 18-fileを127.0.0.1のテストHTTP serverで配信し、normalizationなしの独立validationとD-1入力形を確認する。current-only、retained付き（26 files）、初回legacy-alias付き（26 files）release snapshotを取得する。HTTP/Access header present/missing/401/403/secret非漏えい、malformed/absent manifestとfallback拒否、JSON 404/hash改変、HTML login/MIME、別origin redirect未到達、不正path、有限timeout/中断retry、上限、既存出力/symlink、legacy/releaseの取得途中変更、fingerprint mismatch、未知remote file非取得を自動化する。テスト専用loopback HTTP以外へ通信しない。legacy 17-file snapshotとrelease-managed current snapshotを実際にD-1 `assemble_public_artifact()`へ渡し、完成artifactのindependent validator通過まで確認する。Cloudflare Access policy、実Pages headers/ETag/cache、Service Token、実Cloudflare redirect挙動、GitHub Actions/OIDC/secret masking、Dashboard raceは未検証。
+
+このPhaseのコードはローカル専用CLIとtestだけで、既存17-file builder/default validator/runtime/18-file contract/synthetic fixtures/workflow/stagingは変更しない。実接続、Access設定、GitHub secret、CI自動化、Cloudflare deployment、ODPT API、commit/push/mergeは行わない。D-2Bでは先にCloudflare/GitHub利用枠、Access policy共存、unique writer/concurrency、D-1の実データbyte budget、manual rollback運用を確定し、workflow変更を別作業としてレビューする。
 
 ## 16. 根拠・作業境界
 

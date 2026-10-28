@@ -7,6 +7,15 @@
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
+### T12 Phase 4-8D-2A Production alias取得のローカル実装（2026-10-28）
+
+- `scripts/fetch_production_artifact.py`を追加。固定root originからHTTPSで取得し、明示的loopback-only optionを付けたときだけlocalhost HTTPを許可する。外部redirect・unsafe path・symlink・既存出力先・不正MIME/status・timeout/有限retry・単体/全体bytes/file数上限を検査し、失敗stageは削除する。Cloudflare APIやDeploy機能は持たない。
+- Release-managedはroot manifest raw SHA-256を前後比較し、current/期限内retained/legacy aliasesとvalidatorに必要な9 static assetsだけをdownload。current descriptor/releaseId、JSON hash/bytes/envelope、全artifactを独立validatorで検証する。legacyはmanifest HTTP 404かつ`--allow-initial-legacy-migration`明示時のみ17-file取得を許可し、strict validatorと開始/終了fixed-path fingerprintを通す。不正manifest/401/403/login HTMLをlegacy扱いしない。
+- D-1 `scripts/assemble_public_release.py --previous <snapshot>`へ渡せるvalidated directoryを出力。fingerprint CLIはrelease raw-manifest SHA、legacy fixed 17-file JCS fingerprintを計算し、`--expected-sha256`でdeploy前の一致確認ができる。これはdeploy時点までの排他lock/CASではなく、別writer raceはGitHub concurrency + Dashboard手動writer停止等をD-2Bで設計する。
+- Access headerは`CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`環境変数のみから作り、CLI引数・例外・結果に値を含めない。localhost HTTP test以外のネットワーク接続、Access/GitHub secret設定、Actions実行、Pages、ODPT API接続なし。既存17-file output/runtime/18-file contract/fixture/workflow/stagingは変更なし。
+- `tests/test_fetch_production_artifact.py` localhost HTTP test 12件成功。current-only 18-file、retained付き26-file、legacy alias付き26-file release artifact、および17-file legacy snapshotを取得しvalidator通過。legacy/release snapshotをD-1 assemblyへ直接渡し、出力artifactも再検証。Python全体 `python3 -B -m unittest discover -s tests -v` は133件成功、Node全体 `node --test tests/*.test.mjs` は130件成功。最終focused rerunでlegacy/release中race、別origin redirect未到達、secretをerrorに含めないこと、file-count limitも確認。D-2B未着手事項はCloudflare Service AuthとOTP共存/host scope、staging/prod別token、Environment secret、single-writer運用、Pages/Actions/ODPT制限確認、workflow concurrency/preflight/rollback統合。
+- 詳細: [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) Phase 4-8D-2A。実装・テストだけを追加し、workflow、Cloudflare設定、staging artifactは変更していない。
+
 ### T12 Phase 4-8C QA改善（2026-10-28）
 
 - 固定時計の `cards` は維持し、QA専用 `destination-switch`（8駅で到着表示が異なるsynthetic payload）と `clock-running`（22:05開始、単調経過時間で進行）を追加。release-managed builder/validatorで検証するQA artifactに限る。本番fixture、runtime、18-file契約、workflowは変更なし。
