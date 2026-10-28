@@ -150,6 +150,9 @@ body.destination-modal-open { overflow: hidden; }
 }
 .terminal-badge:empty { display: none; }
 .terminal-ended { border: 1px solid #e5d8b5; color: #66552f; background: #fffaf0; text-align: center; }
+.release-reload-button { display: inline-block; margin-inline-start: 8px; padding: 4px 10px; border: 1px solid #8b7760;
+  border-radius: 6px; background: #fffdf7; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.release-reload-button:disabled { opacity: .65; cursor: wait; }
 .type-normal { color: #55565B; font-weight: 600; }
 .type-express, .type-brand { color: #B84E49; font-weight: 800; }
 .type-supplement { color: #68727a; font-weight: 500; }

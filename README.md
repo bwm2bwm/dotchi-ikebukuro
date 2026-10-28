@@ -112,18 +112,22 @@ deploy後、次の3種のURLを確認します。通常URL、Pagesが発行し�
 
 #### 固定時刻synthetic列車カードQA（ローカル専用）
 
-Cloudflare stagingの表示時刻に候補がない場合は、共有runtimeへ固定時計を注入するローカル専用harnessでカードを確認できます。MacでWi‑FiのLAN IPv4を取得します。
+Cloudflare stagingの表示時刻に候補がない場合は、共有runtimeへQA専用時計を注入するローカルharnessで確認できます。既定の `cards` は従来どおり固定時刻で、目的地別カード差分は `destination-switch`、実時間に沿って時計とカウントダウンを進める場合は `clock-running` を使います。`destination-switch` は8駅分のsynthetic payloadを作り、発着時刻に駅順の差を付けます。実ダイヤ・本番向けfixtureには反映しません。
+
+MacでWi‑FiのLAN IPv4を取得します。release-managed検証ではWeb CryptoのためChromeから `localhost` を使います。serverの必須LAN bindは維持し、必要に応じて同じQAファイルをloopback portにも追加配信できます。
 
 ```sh
 ipconfig getifaddr en0
-python3 -B scripts/serve_synthetic_public_qa.py --bind 192.168.1.23 --port 8765
+python3 -B scripts/serve_synthetic_public_qa.py --bind 192.168.1.23 --port 8765 --localhost-port 8766 --release-managed
 ```
 
-2行目の例のIPは、1行目で表示されたMacのLAN IPv4に置き換えます。起動時にJST当日fixtureと夜間表示scenarioのpublic artifactを各17ファイルでbuildし、独立validatorを通します。QA操作パネルと固定時計entrypointはartifactの外に作り、検証済みartifactを変更しません。シナリオは `cards` を初期表示とし、始発ゲート前後、前serviceDateの25:50、22時台の候補・直通終電・終電・全路線終了から選べます。
+2行目の例のIPは1行目で表示されたMacのLAN IPv4に置き換えます。`--release-managed`を付けない場合はlegacy形式、17ファイルのartifactで動作します。付けた場合はbaseline/evening/destination-switchを各18ファイルでbuildし、独立validatorに通します。QA操作パネル、scenario entrypoint、QA時計moduleはartifact外です。
 
-同じ信頼できるWi‑FiのiPhone Safariで起動ログに表示された `http://<MacのLAN IPv4>:8765/?scenario=cards` を開きます。目的地、路線別／発車順、直通のみを操作してカード、到着、最早着、終電badgeを確認します。JSTの固定scenarioなので、手動確認とDOMテストで同じ状態を再現できます。
+Mac Chromeでは `http://localhost:8766/?scenario=destination-switch` を開き、氷川台・千川・小竹向原・地下鉄成増などへ切り替えて到着時刻の差を確認します。`?scenario=clock-running` を開き、画面の現在時刻と残り時間が進むことを確認します。固定scenarioは時間が進まず、同じ時点を繰り返し確認できます。scenario pickerからも切替できます。目的地、路線別／発車順、直通のみ、最早着、終電badgeは通常どおり確認できます。
 
-QA serverは明示されたプライベートLAN IPv4だけにbindし、wildcard addressでは起動しません。HTTPのsynthetic専用harnessで、Cloudflare Accessは通りません。作業後は起動したTerminalで **Ctrl+C** を押すとserverが停止し、一時artifactとharnessが削除されます。起動コマンドはActions workflowから呼ばず、診断コードはCloudflare deploy artifactに含まれません。CIのDOMテストは `node --test tests/preview_runtime_dom_qa.test.mjs` で実行します。
+iPhone Safariなど別端末では、`--release-managed`を付けずにserverを起動し、起動ログの `http://<MacのLAN IPv4>:8765/?scenario=destination-switch` を開きます。通常のlegacy QAでは利用できますが、release-managedのSHA-256検証に使うWeb CryptoはLAN HTTPで利用できないため、release-managedは `--release-managed --localhost-port 8766` を付けてMac Chromeのlocalhost URLで確認してください。
+
+QA serverの主listenerは明示されたプライベートLAN IPv4だけにbindし、wildcard addressでは起動しません。任意のlocalhost listenerは `127.0.0.1` のみにbindします。HTTPのsynthetic専用harnessで、Cloudflare Accessは通りません。作業後は起動したTerminalで **Ctrl+C** を押すとserverが停止し、一時artifactとharnessが削除されます。起動コマンドはActions workflowから呼ばず、診断コードはCloudflare deploy artifactに含まれません。CIのDOMテストは `node --test tests/preview_runtime_dom_qa.test.mjs` で実行します。
 
 ## ファイル構成
 

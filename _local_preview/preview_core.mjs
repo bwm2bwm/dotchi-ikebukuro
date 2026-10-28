@@ -1,5 +1,7 @@
 import { buildBoard, LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE, TOKYO_TIME_ZONE } from './timetable_adapter.mjs';
 import { createLatestDestinationLoader, createPreparedPayloadCache, loadTimetablePayload,
+  createReleaseRuntimeSession,
+  createReleaseReloadGuard,
   readSavedDestinationId, saveDestinationId, readSavedDisplayMode, saveDisplayMode,
   DESTINATION_PAYLOADS } from './local_preview_payload_loader.mjs';
 import { countdownText, earliestVisible, selectPreviewGroups } from './selection.mjs';
@@ -40,7 +42,7 @@ function collectElements(documentRef) {
 
 /** Start the shared display runtime with an explicit payload profile and cache policy. */
 export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cacheMode, nowProvider = Date.now,
-  hooks = {}, documentRef = document, windowRef = window } = {}) {
+  releaseManaged = false, hooks = {}, documentRef = document, windowRef = window } = {}) {
   if (![LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE].includes(expectedProfile)) {
     throw new TypeError('explicit supported expected payload profile required');
   }
@@ -74,7 +76,16 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
   let prepared = null;
   let loadFailure = null;
   let loading = true;
-  const preparedPayloadCache = createPreparedPayloadCache(2);
+  if (releaseManaged && expectedProfile !== PUBLIC_DATA_SCOPE) throw new TypeError('release-managed mode requires public profile');
+  const releaseReloadGuard = releaseManaged ? createReleaseReloadGuard(windowRef) : null;
+  let releaseSessionPromise = null;
+  let pinnedReleaseId = null;
+  if (releaseManaged) {
+    releaseSessionPromise = createReleaseRuntimeSession({ fetchImpl: windowRef.fetch.bind(windowRef), expectedProfile })
+      .then(session => { pinnedReleaseId = session.releaseId; return session; });
+  }
+  const preparedPayloadCache = createPreparedPayloadCache(2, { namespace: releaseManaged ? () => pinnedReleaseId ?? 'pending-release' : null });
+  let releaseReloadAttempted = releaseReloadGuard?.attempted ?? false;
   let fetchCount = 0;
   let selectedSignature = '';
   let metadataSignature = '';
@@ -88,14 +99,62 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
         payloadBytes: null, cacheHit: true,
       } };
     }
+    if (releaseManaged) {
+      try {
+        const session = await releaseSessionPromise;
+        const value = await session.loadStation(destinationId);
+        return { prepared: value, failure: null, timings: { fetchMs: null, bodyReadMs: null,
+          jsonParseMs: null, adapterMs: null, totalMs: null, payloadBytes: null, cacheHit: false } };
+      } catch (error) {
+        const messages = {
+          manifest_fetch: '時刻表の公開情報を確認できませんでした。通信を確認して更新してください。',
+          manifest_body: '時刻表の公開情報を確認できませんでした。更新してください。',
+          manifest_json: '時刻表の公開情報を確認できませんでした。更新してください。',
+          crypto_unavailable: 'この環境では時刻表の安全性を確認できません。別のブラウザでお試しください。',
+          runtime_incompatible: 'アプリと時刻表の対応関係を確認できません。ページを更新してください。',
+          release_id_mismatch: '時刻表の世代を確認できません。ページを更新してください。',
+          byte_count_mismatch: '時刻表データの確認に失敗しました。ページを更新してください。',
+          hash_mismatch: '時刻表データの確認に失敗しました。ページを更新してください。',
+          json_fetch: '時刻表データを読み込めませんでした。通信を確認して更新してください。',
+        };
+        const failure = messages[error?.code] ?? '時刻表データを確認できませんでした。ページを更新してください。';
+        const detail = { code: error?.code ?? 'release_error', releaseId: pinnedReleaseId };
+        hooks.onReleaseError?.(detail);
+        globalThis.console?.error?.('release-managed runtime rejected data', detail);
+        return { prepared: null, failure, errorCode: error?.code ?? 'release_error', timings: null };
+      }
+    }
     if (Object.hasOwn(DESTINATION_PAYLOADS, destinationId)) fetchCount += 1;
     return loadTimetablePayload(destinationId, windowRef.fetch.bind(windowRef), { expectedProfile, cacheMode });
   });
   const performanceClock = () => globalThis.performance.now();
 
   function setStatus(message, state) {
-    if (statusEl.textContent !== message) statusEl.textContent = message;
+    if (releaseManaged && state === 'error' && releaseReloadAttempted) {
+      message = '更新後も時刻表を確認できませんでした。時間をおいてから再度アクセスしてください。';
+    }
+    if (statusEl.dataset.message !== message) {
+      statusEl.querySelector?.('[data-release-reload]')?.remove?.();
+      statusEl.textContent = message;
+      statusEl.dataset.message = message;
+    }
     statusEl.dataset.state = state;
+    if (releaseManaged && state === 'error' && !releaseReloadAttempted
+        && !statusEl.querySelector?.('[data-release-reload]')) {
+      const button = documentRef.createElement('button');
+      button.type = 'button';
+      button.dataset.releaseReload = 'true';
+      button.className = 'release-reload-button';
+      button.textContent = '更新する';
+      button.addEventListener('click', () => {
+        button.disabled = true;
+        button.textContent = '更新しています…';
+        releaseReloadAttempted = true;
+        releaseReloadGuard.mark();
+        windowRef.location?.reload?.();
+      });
+      statusEl.appendChild(button);
+    }
   }
 
   function updateModeButtons() {
@@ -331,6 +390,10 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
     loadFailure = result.failure;
     loading = false;
     if (prepared) preparedPayloadCache.set(destinationId, prepared);
+    if (prepared && releaseManaged && releaseReloadAttempted) {
+      releaseReloadAttempted = false;
+      releaseReloadGuard.clear();
+    }
     tick(measurement?.startedAt ?? performanceClock(), measurement);
   }
 
@@ -383,5 +446,6 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
     loadDestination,
     get fetchCount() { return fetchCount; },
     get cachedDestinationIds() { return preparedPayloadCache.keys(); },
+    get releaseId() { return pinnedReleaseId; },
   });
 }

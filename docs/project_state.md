@@ -7,6 +7,12 @@
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
+### T12 Phase 4-8C QA改善（2026-10-28）
+
+- 固定時計の `cards` は維持し、QA専用 `destination-switch`（8駅で到着表示が異なるsynthetic payload）と `clock-running`（22:05開始、単調経過時間で進行）を追加。release-managed builder/validatorで検証するQA artifactに限る。本番fixture、runtime、18-file契約、workflowは変更なし。
+- DOM testはrelease-managed manifest pinning、駅別URL fetch、station IDと目的地一致、表示値差、2駅LRU hit/eviction、旧通信の遅延応答、固定/進行時計、legacy回帰をカバーする。Mac Chromeのlocalhost検証用に、既存の明示LAN IPv4 serverへ任意のloopback-only portを追加できる。DOM QA 9件、Node全体129件、Python全体108件が成功。詳細な起動・scenario手順はREADMEと [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md)。
+- 実機Chromeでの確認はREADME手順に沿って別途実施。LAN HTTPはrelease-managed Web Crypto確認に使わない。
+
 ## T12 Phase 4-3 synthetic CI workflow（2026-10-27）
 
 - `.github/workflows/synthetic-public-ci.yml` を追加。`workflow_dispatch`のみで起動し、main以外はguard jobで失敗する。build/validationはGitHub-hosted Ubuntu、Python 3.13、Node.js 24.15.0を使用する。
@@ -70,7 +76,16 @@
 - `scripts/build_public_site.py`に`--release-managed` opt-inを追加。既定は従来どおり17 files。opt-inは9 static assets、`manifest.json`、`releases/<releaseId>/`下の8 JSON envelopeで18 filesを生成。manifestにはreleaseId再計算用descriptorを格納し、未公開local buildの`publishedAt`は`null`として再現性を維持する。
 - `scripts/validate_public_artifact.py --release-managed ARTIFACT_DIR`を追加。builderを呼ばずread-onlyでrecursive file set/path/symlink、manifest/descriptor/releaseId、assetとpayload digest、envelope raw bytes hash/length、Python strict public allowlist、既存JS adapter、駅間serviceDate/feed/applicationPeriod整合を検査する。従来validator modeは従来の17-file legacy artifactを検査し続ける。
 - [`tests/test_release_managed_public_site.py`](../tests/test_release_managed_public_site.py) 9件を追加。生成・独立検証、tree/manifest/JSON byte再現性、station/asset/builder contract変更、manifest/JSON/hash/byte/path/station/inner payload/metadata改変、17-file default回帰を確認。
-- 新artifactの公開runtimeは未変更でflat JSONを要求するため、4-8C以前にPagesへdeployしない。旧世代取得/carry-forward、browser Web Crypto、session pin、LRU統合も未実装。Actions workflow、Cloudflare、ODPT APIは未接続。
+- 4-8B完了時点では新artifact runtimeが未対応だったためdeploy不可だった。Phase 4-8Cでrelease-managed runtime対応を追加した。旧世代取得/carry-forwardとstaging deployment検証は引き続き未実装。Actions workflow、Cloudflare、ODPT APIは未接続。
+
+### T12 Phase 4-8C browser runtime世代管理（2026-10-28）
+
+- `_local_preview/preview_public.js`はHTMLの`dotchi-data-mode` metaを読み、default `legacy`/未設定は従来flat loader、`release-managed`だけmanifest loaderを選択する。未知値は拒否し、URL queryによる切替やruntime error時のlegacy fallbackはない。release builder opt-in時だけmetaをrelease-managedへ差し替え、生成descriptorに含める。既定builderのファイル数・形式は17 filesのまま。
+- Browser-safe loaderを既存public asset [`scripts/local_preview_payload_loader.mjs`](../scripts/local_preview_payload_loader.mjs)へ追加。起動時`/manifest.json`を一度`no-cache` fetchし、JCS/Web Cryptoでdescriptor releaseId再計算、compatibility/8駅/URL/hash/bytes/metadataを検査してsession pin。駅JSONはmanifestのimmutable pathからraw bytesで取得し、byte length→Web Crypto SHA-256→strict UTF-8/JSON→envelope release/station/schema→inner payload metadata→既存public adapterの順で確認する。`node:crypto`をbrowserへ持ち込まない。
+- release-managed 2駅LRUの内部keyはpin済みreleaseId + station ID。session内同駅多重fetchはsingle-flightで共有し、core既存のlatest-request sequencingで古い目的地結果を表示しない。取得/整合エラーはboardを空にし、日本語error status + 一度だけ手動「更新する」buttonを出す。安定したcause codeをconsoleとtest hookへ記録。適用期間外はadapter既存validityで停止し、「列車なし」「終電終了」と区別する。
+- `scripts/serve_synthetic_public_qa.py --release-managed`を追加。synthetic baseline/eveningをそれぞれ18-file release-managed artifactとして独立検証し、QA shell/時計注入はartifact外に保持。通常QAは17-file legacyのまま。専用test `tests/release_runtime.test.mjs` とDOM fail-closed testを追加。
+- 検証: `python3 -B -m unittest discover -s tests -v` 108件成功（352.4秒）、`node --test tests/*.test.mjs` 125件成功。専用release runtime/DOM/legacy QA subset 22件も成功。ローカルQA preparation `python3 -B scripts/serve_synthetic_public_qa.py --prepare-only --release-managed --output /private/tmp/dotchi-phase4-8c-qa-final3` 成功（2 artifact × 18 files）。Cloudflare、Actions、ODPT APIへ接続なし。
+- 未確認: desktop Chromeでの実deployment切替・ETag/304・old-tab behavior、iPhone Safari。Production aliasからの旧generation carry-forward/expiry、deploy workflow、cache headersは未実装。4-8Dで実機のlegacy/release UI回帰とnetwork/cache確認、4-8Eで連続staging deployment/retention/rollbackを行うまで既存staging workflowはlegacyのまま維持する。
 
 ### T12 Phase 4-7 本番運用方針反映（2026-10-28）
 

@@ -216,11 +216,11 @@ Cloudflareの現行公式Pages limits（2026-10-28確認）はFreeで20,000 file
 
 | 状態/イベント | 表示と候補 | cache・fetch | retry / update |
 |---|---|---|---|
-| 初回起動 | clock/controlsを表示し「時刻表を読み込んでいます…」。候補は空 | fetch manifest `no-cache`。payloadはまだfetchしない | network errorなら1回だけ短いdelayで自動retry |
+| 初回起動 | clock/controlsを表示し「時刻表を読み込んでいます…」。候補は空 | fetch manifest `no-cache`。payloadはまだfetchしない | errorは自動retryせず手動更新を案内 |
 | manifest成功・contract/schema適合 | pinned release IDを内部状態へ保持 | release ID、manifest body、station mapをruntime lifetime固定 | 普通の目的地切替ではmanifestを再取得しない |
 | manifest取得失敗・不正・client contract mismatch | fail closed。候補空、明確な「最新データを確認できません。再読み込みしてください。」 | 既存session storage/localStorage manifest fallbackなし。半端なmapで起動しない | 「再読み込み」ボタン。無限auto reloadなし |
 | JSON成功 | 選択駅の通常status/候補を表示 | raw response bytesをSHA-256・bytes照合→JSON parse→releaseId/station/schema/metadata→adapter。検証後だけLRUへ | 通常通り切替 |
-| JSON HTTP error/404/5xx/network | 該当駅の候補空。読み込みerror/status | 不正/失敗値はLRUに保存しない。別release aliasへfallbackしない | network/5xxは一回retry可、その後明示的な更新/reload |
+| JSON HTTP error/404/5xx/network | 該当駅の候補空。読み込みerror/status | 不正/失敗値はLRUに保存しない。別release aliasへfallbackしない | 自動retryせず手動更新を案内 |
 | releaseId不一致 | fail closed、該当駅候補空 | cacheへ入れず、runtime全体をconsistency error状態へ。既存LRUの継続表示も停止 | reloadボタンのみ、繰返しfetchしない |
 | hash/bytes不一致またはWeb Crypto不使用可能 | integrity error、候補空 | JSONをparse/useしない。HTTPS secure contextで`crypto.subtle.digest`必須。未対応ならfail closed | reloadで再取得。回避skipなし |
 | feed/application期間外または必要serviceDate欠落 | 現行adapterどおり候補を空にし期限/データ不足warning | release/hashが正常ならLRUに保持可だが、期限切れデータを候補表示しない | 「最新データを確認」= full reload。latest manifestにも期間外なら停止表示継続 |
@@ -418,7 +418,7 @@ manifest/envelope unknown fieldはfail closed。manifest URLは`/releases/<relea
 
 JavaScript moduleは現在Node.js `node:crypto`を使う契約/test helperで、browser runtimeから直接importする実装ではない。Phase 4-8Cで使う場合は同じbytes/order semanticsを保ちつつWeb Crypto async SHA-256へ接続する。Python/JS JCS・descriptor/releaseId parityはtestで照合済み。payload validatorの意味差（Python profile validatorはallowlist projection比較、JS adapter validatorはruntime向け検証）を独立artifact validatorで再照合する作業は4-8Bで残る。
 
-未実装の境界: current builder output/17-file allowlist、current artifact validator flow、runtime/2駅LRU、synthetic fixture、workflow、Cloudflare deploymentには変更なし。manifest retained listの取得・carry-forward/prune、old generation bytesのProduction alias fetch、builderでの実ID生成、browser Web Crypto integration、runtime state/reloadは4-8B以降の作業。
+4-8B完了時点ではruntime/2駅LRU・Web Crypto接続・pinning/UXは未実装だった。Phase 4-8Cでbrowser runtimeとlocal synthetic QAを追加済み。manifest retained listのProduction aliasからの取得・carry-forward/prune、旧世代bytes引継ぎ、staging deployment切替は未実装で、後続Phaseに残る。legacy builder既定とvalidator mode、fixture contract、GitHub workflowは維持する。
 
 ## 15. Phase 4-8B builder・独立validator統合（2026-10-28）
 
@@ -448,10 +448,36 @@ manifest schemaへ`releaseDescriptor`を追加したのは、artifact上で可�
 
 固定synthetic dates・fixture・static bytes・builder contractではmanifestに`publishedAt: null`を含め、releaseId、manifest bytes、8 envelope bytes、全18-file treeが再生成で一致する。payload 1駅、asset bytes、builder contractの変更でreleaseIdが変わる。current releaseのIDはartifactにdescriptorがあるため再計算可能。retained release entryには当初descriptorを載せないため、validatorはretained file hash/envelope/schema/serviceDate integrityを検査するが、その過去releaseId preimageは再計算できない。retention workflowでold descriptorを維持するか、current同様のdescriptorをretained entryへ加えるかはproduction carry-forward実装前に確定する。
 
-この新artifactは**現行runtimeで配信可能なdeploy artifactではない**。root loaderは引き続きflat station JSONを要求するため、新形式の読み込みはPhase 4-8C後に限る。4-8Cはroot `/manifest.json`を取得し、contract・releaseIdをruntime lifetimeにpinし、選択駅のmanifest URLからraw response bytesを取得、Web Crypto SHA-256/byte count照合後にenvelopeをparseしinner `payload`だけを既存adapterへ渡す。2駅LRU keyは`releaseId + stationId`、pinningはfull reloadまで維持。旧tabはA pathだけを使い、A filesが次deploymentへcarry-forward中なら継続し、retention後の404ではfail closedしreloadを案内。初回移行で旧v1 tabを支える場合はmanifestの`legacyCompatibilityV1` root hashesに一致するflat JSON aliasesを期限限定で引き継ぐ。今回はcarry-forward/source acquisition、runtime pinning、Web Crypto、legacy alias生成はいずれも未実装。
+このartifactはbuilderの`--release-managed` opt-inでのみrelease runtimeを起動し、既定の17-file buildはflat modeを維持する。Phase 4-8Cでmanifest pinning、raw-byte Web Crypto検証、release-aware 2駅LRU、fail-closedと手動更新UXを実装した。旧世代carry-forwardとProduction切替は引き続き未実装であり、staging運用検証を後続Phaseで行う。
+
+### 15.4 Phase 4-8C browser runtime
+
+Public shellは`<meta name="dotchi-data-mode">`を持つ。sourceとdefault buildは`legacy`、release-managed builderはdescriptor hash確定前に値を`release-managed`へ変更する。`preview_public.js`はmeta未設定時legacyを維持し、`legacy`/`release-managed`以外を拒否する。query parameterでruntime modeは切り替えない。release mode起動失敗時にflat JSONへfallbackしない。
+
+Browser-safe release loaderは既存public assetの`scripts/local_preview_payload_loader.mjs`内に実装し、Node専用`release_contract.mjs`/`node:crypto`をimportしない。起動時に`/manifest.json`を`cache: "no-cache"`で一度取得し、厳密なfield set、schema/runtime/data scope、descriptor形状とJCS SHA-256からのreleaseId再計算、8駅、固定URL、SHA-256/bytes、serviceDate/feed/application periodを検証する。各駅切替ではmanifestを再取得せず、pin済みstation URLからraw `ArrayBuffer`を受け取る。Web Crypto SHA-256とbyte lengthをJSON decode/parseより先に照合し、strict UTF-8、envelope schema・releaseId・stationId、payload metadataを確かめた後、既存`prepareTimetablePayload(..., PUBLIC_DATA_SCOPE)`へinner payloadだけを渡す。Web Cryptoがない、HTTP error/404、破損、互換性不一致等はfail closed。
+
+`preview_core.mjs`は既存2件上限LRUを使い、内部cache keyをpin済み`releaseId + stationId`にする。同駅への同時fetchはsession内single-flight promiseを共有する。既存latest-request sequenceで古い目的地の遅着結果を破棄する。loader/integrityエラーはboardを空にして既存の「列車なし」「終電終了」と異なるerror statusへ出し、原因codeをconsoleとoptional hookへ記録する。release-managed error時だけ手動「更新する」buttonを追加し、押下でsessionStorageへ一回の更新試行を記録してfull reloadする。そのreload後も失敗した場合はbuttonを再表示せず「時間をおいて再度アクセス」と案内する。自動retryやreload loopは作らない。成功したstation payload取得時に更新試行markerを消す。適合期間外は既存adapter validity判定により列車を表示しない。
+
+Manifestは`no-cache`再検証を指定する。通常のFetch cacheは304再検証済み本文を200相当representationとして返す場合があり、raw 304/non-successを本文なしで受けた場合はfail closed。generation URLはpin済み世代を指し、normal cacheを利用しつつ毎回hash/bytesを検証する。Cloudflare Pagesの実ETag/304/cache header挙動は実deployment未実施のため未検証。releaseId/hashは配信内容の誤り・混在・破損検出であり、署名や配信元の真正性証明ではない。
+
+Synthetic local QA: `python3 -B scripts/serve_synthetic_public_qa.py --prepare-only --release-managed --output /private/tmp/dotchi-release-qa`。2世代の18-file artifactsを別々にbuild/validateし、QA shell、scenario picker、fixed clockはartifact外に置く。legacy QAは引き続き17 files。追加Node/DOMテストはpinした旧sessionと新session、manifest/JSON 404、Web Crypto不在、byte/hash/station mismatch、LRU eviction、fail-closed board/error/reload CTAを検査する。Chrome実機のdeployment切替・Network/ETag・実機画面、およびiPhone Safariは未確認。
+
+4-8DではChrome/iPhone Safariでlegacyとrelease-managed双方の目的地・直通filter・表示順・最早着・始発/終電・countdown・縦画面を回帰確認し、更新button、old tab、HTTP cache/304を実測する。4-8Eの連続staging deployment/retention/rollback確認が完了するまでProduction切替しない。staging workflowは変更しておらずlegacyを既定に保つ。
+
+## 17. Phase 4-8C QAシナリオ改善（2026-10-28）
+
+`scripts/serve_synthetic_public_qa.py` は既存 `cards` 固定時刻scenarioを維持し、目的地差分を見分ける `destination-switch` と実時間で進む `clock-running` を追加した。前者は8駅のQA専用payloadを生成し、駅順に2分ずつ到着時刻を遅らせる。発車時刻・駅ID・station ownership・service dateは維持し、到着は発車後になる。payloadはrelease-managed builder/validatorを通過するが、本番fixture generatorやCI入力は変更しない。運行上の正確性を表すものではなく、UIの切替検出用synthetic値である。
+
+時計providerは `scripts/synthetic_public_qa_clock.mjs` に分離し、QA shell生成時にharness直下へコピーする。`fixed` は開始時刻を返し続け、`advancing` は `performance.now()` の単調経過時間を開始時刻へ加算する。moduleとscenario UIは検証済みartifactの外にあり、production runtime/APIにQA専用分岐を加えていない。
+
+DOM QAはrelease-managed 18-file artifactsに対してmanifestを1回取得すること、目的地ごとにmanifestの世代別URLと一致するstation JSONをfetchすること、station identityとカード到着時刻が目的地に応じて変わることを検証する。2駅LRU hit/eviction、遅れて到着した旧station responseの破棄、固定時計での不進行・進行時計でのclock/countdown更新、legacy modeも追加確認する。LAN IPv4 bindは従来どおり必須。任意 `--localhost-port` は追加の `127.0.0.1` listenerだけを開き、Mac Chromeでrelease-mode Web Cryptoを利用するためのもの。iPhoneなどLAN HTTPでのWeb Crypto検証は対象外。
+
+## 18. Phase 4-8C QA改善での検証範囲
+
+DOM QAはNode内のDOM harnessとsynthetic release artifactsを使用する。対象DOM QA 9件、Node全体129件、Python全体108件が成功した。Mac Chrome実機での目視は別途README手順に従う。destination-switch到着差は表示切替の識別標識であり、路線の実旅行時間として解釈しない。公開17-file legacy artifact、新形式18-file contract、runtime、workflowは本変更対象外。
 
 ## 16. 根拠・作業境界
 
 設計根拠として`docs/t12_phase4_6b_release_consistency.md`、`docs/project_state.md`、`docs/devlog.md`、`scripts/build_public_site.py`、`scripts/validate_public_artifact.py`、`scripts/public_payload_profile.py`、`scripts/synthetic_public_fixture_factory.py`、`scripts/local_preview_payload_loader.mjs`、`_local_preview/preview_core.mjs`、`scripts/timetable_adapter.mjs`、`.github/workflows/synthetic-public-ci.yml`と関連testsを読んだ。
 
-Phase 4-7はドキュメントのみ、4-8Aは契約module、4-8Bはbuilder/independent validatorの明示opt-in modeを追加した。builder defaultの17-file出力、legacy validator mode、app runtime、synthetic fixture contract、GitHub Actions workflow、existing staging/public artifactは維持。Cloudflare deploy・Actions実行・ODPT API接続・old Production alias fetch・commit/push/mergeなし。
+Phase 4-7はドキュメントのみ、4-8Aは契約module、4-8Bはbuilder/independent validator、4-8Cはexplicit runtime modeとlocal QAを追加した。builder defaultの17-file出力、legacy validator/runtime behavior、synthetic fixture contract、GitHub Actions workflow、existing staging/public deploymentは維持。Cloudflare deploy・Actions実行・ODPT API接続・old Production alias fetch・commit/push/mergeなし。

@@ -3,9 +3,13 @@ import { PUBLIC_DATA_SCOPE } from './timetable_adapter.mjs';
 
 /** Production bootstrap: callers may provide DOM surfaces, but cannot override profile or cache policy. */
 export function startPublicPreview({ documentRef = document, windowRef = window } = {}) {
+  const modeMeta = documentRef.querySelector('meta[name="dotchi-data-mode"]');
+  const mode = modeMeta?.content ?? 'legacy';
+  if (mode !== 'legacy' && mode !== 'release-managed') throw new TypeError('unsupported public data mode');
   return createPreviewRuntime({
     expectedProfile: PUBLIC_DATA_SCOPE,
     cacheMode: 'default',
+    releaseManaged: mode === 'release-managed',
     nowProvider: () => Date.now(),
     documentRef,
     windowRef,
@@ -20,6 +24,14 @@ if (typeof document !== 'undefined') {
     if (status) {
       status.textContent = 'プレビューを初期化できませんでした。ページを再読み込みしてください。';
       status.dataset.state = 'error';
+      if (document.querySelector('meta[name="dotchi-data-mode"]')?.content === 'release-managed') {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'release-reload-button';
+        button.textContent = '更新する';
+        button.addEventListener('click', () => { button.disabled = true; window.location.reload(); });
+        status.appendChild(button);
+      }
     }
     console.error('public preview runtime initialization failed', error);
   }

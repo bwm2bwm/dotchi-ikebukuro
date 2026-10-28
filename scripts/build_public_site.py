@@ -237,6 +237,13 @@ def _validate_with_adapter(stage: Path) -> None:
 
 def _build_release_managed(stage: Path, payloads: dict[str, dict[str, Any]],
                            service_dates: list[str]) -> list[str]:
+    index_path = stage / "index.html"
+    index_html = index_path.read_text(encoding="utf-8")
+    marker = '<meta name="dotchi-data-mode" content="legacy">'
+    if index_html.count(marker) != 1:
+        raise PublicSiteBuildError("public HTML is missing its explicit legacy data-mode marker")
+    index_path.write_text(index_html.replace(marker,
+        '<meta name="dotchi-data-mode" content="release-managed">'), encoding="utf-8")
     asset_bytes = {name: (stage / name).read_bytes() for name in SOURCE_FILES}
     descriptor = build_release_descriptor(
         runtime_contract=RUNTIME_CONTRACT,

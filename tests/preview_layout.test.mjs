@@ -89,7 +89,7 @@ test('destination picker is an ordered modal and does not enlarge the page layou
 test('destination preference stores only a whitelisted ID and exposes development timing separately', () => {
   assert.match(script, /selectedDestinationId = readSavedDestinationId\(\)/);
   assert.match(script, /saveDestinationId\(destination\.id\)/);
-  assert.match(script, /const preparedPayloadCache = createPreparedPayloadCache\(2\)/);
+  assert.match(script, /const preparedPayloadCache = createPreparedPayloadCache\(2(?:,|\))/);
   assert.match(script, /if \(result\.stale\) \{/);
   assert.match(script, /loadHistory: loadPerfHistory/);
   assert.match(script, /cachedDestinationIds/);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a local-only, frozen-clock UI harness from synthetic public artifacts."""
+"""Build a local-only UI harness with QA-only fixed/advancing clocks and synthetic artifacts."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+from threading import Thread
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -23,7 +24,7 @@ from synthetic_public_fixture_factory import (
     generate_fixture_directory,
     make_public_fixture,
 )
-from validate_public_artifact import ArtifactValidationError, validate_artifact
+from validate_public_artifact import ArtifactValidationError, validate_artifact, validate_release_managed_artifact
 
 ROOT = Path(__file__).resolve().parents[1]
 SAFE_TEMP_ROOT = Path('/private/tmp')
@@ -142,10 +143,27 @@ def make_evening_qa_payload(destination_id: str) -> dict[str, Any]:
     return payload
 
 
-def _build_validated_artifact(fixtures: Path, output: Path) -> None:
+def make_destination_switch_qa_payload(destination_id: str) -> dict[str, Any]:
+    """Make station switch visible using monotonic synthetic arrival times."""
+    payload = make_evening_qa_payload(destination_id)
+    station_order = ('Kanamecho', 'Senkawa', 'KotakeMukaihara', 'Hikawadai', 'Heiwadai',
+                     'ChikatetsuAkatsuka', 'ChikatetsuNarimasu', 'Wakoshi')
+    arrival_offset = station_order.index(destination_id) * 2 * 60
+    for day in payload['serviceDays']:
+        for departure in day['departures']:
+            for key in ('primary', 'directAlternative', 'bestTransferAlternative'):
+                journey = departure[key]
+                if journey is None or journey['arrivalServiceSeconds'] is None:
+                    continue
+                journey['arrivalServiceSeconds'] += arrival_offset
+                journey['arrivalText'] = _time_text(journey['arrivalServiceSeconds'])
+    return payload
+
+
+def _build_validated_artifact(fixtures: Path, output: Path, release_managed: bool = False) -> None:
     try:
-        build_public_site(fixtures=fixtures, output=output)
-        validate_artifact(output)
+        build_public_site(fixtures=fixtures, output=output, release_managed=release_managed)
+        (validate_release_managed_artifact(output) if release_managed else validate_artifact(output))
     except (PublicSiteBuildError, ArtifactValidationError, OSError) as error:
         raise QaHarnessError('public artifact build or validation failed') from error
 
@@ -159,7 +177,16 @@ def _write_evening_fixtures(directory: Path) -> None:
     (directory / SYNTHETIC_MARKER).write_text(SYNTHETIC_MARKER_CONTENT, encoding='utf-8')
 
 
-def _write_harness_shell(output: Path) -> None:
+def _write_destination_switch_fixtures(directory: Path) -> None:
+    directory.mkdir()
+    for destination_id, filename in STATION_FILES.items():
+        payload = make_destination_switch_qa_payload(destination_id)
+        (directory / filename).write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+    (directory / SYNTHETIC_MARKER).write_text(SYNTHETIC_MARKER_CONTENT, encoding='utf-8')
+
+
+def _write_harness_shell(output: Path, release_managed: bool = False) -> None:
     baseline_html = (output / 'artifacts' / 'baseline' / 'index.html').read_text(encoding='utf-8')
     replacements = {
         'href="styles.css"': 'href="./artifacts/baseline/styles.css"',
@@ -170,6 +197,8 @@ def _write_harness_shell(output: Path) -> None:
         if baseline_html.count(old) != 1:
             raise QaHarnessError('validated public shell did not match the expected entrypoint')
         baseline_html = baseline_html.replace(old, new)
+    if release_managed and '<meta name="dotchi-data-mode" content="release-managed">' not in baseline_html:
+        raise QaHarnessError('release-managed artifact has no explicit runtime mode')
     qa_panel = '''\n  <details class="synthetic-qa-panel">
     <summary>固定時刻 synthetic QA</summary>
     <label for="qa-scenario">表示シナリオ</label>
@@ -180,6 +209,8 @@ def _write_harness_shell(output: Path) -> None:
       <option value="evening-before">夜間の始発ゲート前 21:14:59 JST</option>
       <option value="evening-gate">夜間の始発ゲート 21:15:00 JST</option>
       <option value="cards">カード・並び順 22:05:00 JST</option>
+      <option value="destination-switch">目的地ごとのカード差分 22:05:00 JST</option>
+      <option value="clock-running">時計進行・残り時間 22:05開始 JST</option>
       <option value="direct-terminal">直通終電 22:59:59 JST</option>
       <option value="all-terminal">終電 23:04:59 JST</option>
       <option value="ended">全路線終了 23:05:01 JST</option>
@@ -201,22 +232,26 @@ def _write_harness_shell(output: Path) -> None:
         raise QaHarnessError('validated public shell body marker is missing')
     output.joinpath('index.html').write_text(baseline_html.replace('<body>', '<body>' + qa_panel, 1), encoding='utf-8')
     output.joinpath('qa_entry.mjs').write_text(QA_ENTRYPOINT, encoding='utf-8')
+    shutil.copyfile(ROOT / 'scripts' / 'synthetic_public_qa_clock.mjs', output / 'qa_clock.mjs')
 
 
 QA_ENTRYPOINT = '''import { createPreviewRuntime } from './artifacts/baseline/preview_core.mjs';
 import { PUBLIC_DATA_SCOPE } from './artifacts/baseline/timetable_adapter.mjs';
 import { DESTINATION_PAYLOADS, DESTINATION_STORAGE_KEY, DISPLAY_MODE_STORAGE_KEY } from './artifacts/baseline/local_preview_payload_loader.mjs';
+import { createQaClock } from './qa_clock.mjs';
 
 const scenarios = Object.freeze({
-  'morning-before': { artifact: 'baseline', now: '2026-10-27T05:09:59+09:00' },
-  'morning-gate': { artifact: 'baseline', now: '2026-10-27T05:10:00+09:00' },
-  'previous-tail': { artifact: 'baseline', now: '2026-10-27T01:40:00+09:00' },
-  'evening-before': { artifact: 'evening', now: '2026-10-26T21:14:59+09:00' },
-  'evening-gate': { artifact: 'evening', now: '2026-10-26T21:15:00+09:00' },
-  cards: { artifact: 'evening', now: '2026-10-26T22:05:00+09:00' },
-  'direct-terminal': { artifact: 'evening', now: '2026-10-26T22:59:59+09:00' },
-  'all-terminal': { artifact: 'evening', now: '2026-10-26T23:04:59+09:00' },
-  ended: { artifact: 'evening', now: '2026-10-26T23:05:01+09:00' },
+  'morning-before': { artifact: 'baseline', now: '2026-10-27T05:09:59+09:00', clock: 'fixed' },
+  'morning-gate': { artifact: 'baseline', now: '2026-10-27T05:10:00+09:00', clock: 'fixed' },
+  'previous-tail': { artifact: 'baseline', now: '2026-10-27T01:40:00+09:00', clock: 'fixed' },
+  'evening-before': { artifact: 'evening', now: '2026-10-26T21:14:59+09:00', clock: 'fixed' },
+  'evening-gate': { artifact: 'evening', now: '2026-10-26T21:15:00+09:00', clock: 'fixed' },
+  cards: { artifact: 'evening', now: '2026-10-26T22:05:00+09:00', clock: 'fixed' },
+  'destination-switch': { artifact: 'destination-switch', now: '2026-10-26T22:05:00+09:00', clock: 'fixed' },
+  'clock-running': { artifact: 'evening', now: '2026-10-26T22:05:00+09:00', clock: 'advancing' },
+  'direct-terminal': { artifact: 'evening', now: '2026-10-26T22:59:59+09:00', clock: 'fixed' },
+  'all-terminal': { artifact: 'evening', now: '2026-10-26T23:04:59+09:00', clock: 'fixed' },
+  ended: { artifact: 'evening', now: '2026-10-26T23:05:01+09:00', clock: 'fixed' },
 });
 
 const params = new URLSearchParams(location.search);
@@ -225,8 +260,9 @@ const select = document.getElementById('qa-scenario');
 const note = document.getElementById('qa-scenario-note');
 select.value = selectedId;
 let selected = scenarios[selectedId];
-let fixedNow = Date.parse(selected.now);
-note.textContent = `synthetic QA · 固定時刻 ${selected.now} · ${selected.artifact} artifact`;
+const nowProvider = createQaClock({ startAt: Date.parse(selected.now), mode: selected.clock,
+  monotonicNow: () => performance.now() });
+note.textContent = `synthetic QA · ${selected.clock === 'advancing' ? '時計進行' : '固定時刻'} ${selected.now} · ${selected.artifact} artifact`;
 try {
   localStorage.removeItem(DESTINATION_STORAGE_KEY);
   localStorage.removeItem(DISPLAY_MODE_STORAGE_KEY);
@@ -234,7 +270,17 @@ try {
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = (input, options) => {
-  const filename = new URL(input, location.href).pathname.split('/').pop();
+  const pathname = new URL(input, location.href).pathname;
+  if (document.querySelector('meta[name="dotchi-data-mode"]')?.content === 'release-managed') {
+    const parts = pathname.split('/');
+    const expectedFile = Object.values(DESTINATION_PAYLOADS).some(name => name.slice(2) === parts[3]);
+    if (pathname !== '/manifest.json' && !(parts.length === 4 && parts[1] === 'releases'
+        && /^r1-[0-9a-f]{64}$/.test(parts[2]) && expectedFile)) {
+      return Promise.reject(new TypeError('QA loader requested an unexpected release path'));
+    }
+    return originalFetch(`./artifacts/${selected.artifact}${pathname}`, options);
+  }
+  const filename = pathname.split('/').pop();
   if (!Object.values(DESTINATION_PAYLOADS).some(path => path.endsWith(filename))) {
     return Promise.reject(new TypeError('QA loader requested an unexpected synthetic payload path'));
   }
@@ -242,7 +288,8 @@ window.fetch = (input, options) => {
 };
 
 const runtime = createPreviewRuntime({ expectedProfile: PUBLIC_DATA_SCOPE, cacheMode: 'default',
-  nowProvider: () => fixedNow, documentRef: document, windowRef: window });
+  releaseManaged: document.querySelector('meta[name="dotchi-data-mode"]')?.content === 'release-managed',
+  nowProvider, documentRef: document, windowRef: window });
 select.addEventListener('change', () => {
   if (!scenarios[select.value]) return;
   const next = new URL(location.href);
@@ -253,8 +300,9 @@ window.syntheticQaRuntime = runtime;
 '''
 
 
-def prepare_harness(output: Path, anchor_date: date = DEFAULT_ANCHOR_DATE) -> dict[str, Any]:
-    """Create two independently validated 17-file artifacts and a separate QA shell."""
+def prepare_harness(output: Path, anchor_date: date = DEFAULT_ANCHOR_DATE,
+                    release_managed: bool = False) -> dict[str, Any]:
+    """Create three validated artifacts and a separate QA shell outside their trees."""
     raw_output = output.expanduser().absolute()
     if raw_output.is_symlink() or raw_output.exists():
         raise QaHarnessError('output must be a new, non-symlink directory')
@@ -270,20 +318,26 @@ def prepare_harness(output: Path, anchor_date: date = DEFAULT_ANCHOR_DATE) -> di
             baseline_fixtures = work / 'baseline-fixtures'
             generate_fixture_directory(baseline_fixtures, anchor_date)
             baseline_site = work / 'baseline-site'
-            _build_validated_artifact(baseline_fixtures, baseline_site)
+            _build_validated_artifact(baseline_fixtures, baseline_site, release_managed)
             shutil.copytree(baseline_site, artifacts / 'baseline')
 
             evening_fixtures = work / 'evening-fixtures'
             _write_evening_fixtures(evening_fixtures)
             evening_site = work / 'evening-site'
-            _build_validated_artifact(evening_fixtures, evening_site)
+            _build_validated_artifact(evening_fixtures, evening_site, release_managed)
             shutil.copytree(evening_site, artifacts / 'evening')
 
-        _write_harness_shell(raw_output)
+            destination_fixtures = work / 'destination-switch-fixtures'
+            _write_destination_switch_fixtures(destination_fixtures)
+            destination_site = work / 'destination-switch-site'
+            _build_validated_artifact(destination_fixtures, destination_site, release_managed)
+            shutil.copytree(destination_site, artifacts / 'destination-switch')
+
+        _write_harness_shell(raw_output, release_managed)
         return {
             'output': raw_output,
-            'artifacts': 2,
-            'files_per_artifact': 17,
+            'artifacts': 3,
+            'files_per_artifact': 18 if release_managed else 17,
             'stations': len(STATION_IDS),
             'service_dates': [
                 (anchor_date.fromordinal(anchor_date.toordinal() + offset)).isoformat()
@@ -319,16 +373,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bind', help='explicit Mac private LAN IPv4 address; server never binds wildcard')
     parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--localhost-port', type=int,
+                        help='also serve the same QA files on 127.0.0.1:<port> for Mac browser Web Crypto')
     parser.add_argument('--prepare-only', action='store_true', help='build to --output without starting a server')
     parser.add_argument('--output', type=Path, help='new QA root; required with --prepare-only')
+    parser.add_argument('--release-managed', action='store_true', help='exercise manifest-pinned runtime with synthetic release artifacts')
     args = parser.parse_args()
     try:
         if args.port < 1024 or args.port > 65535:
             raise QaHarnessError('--port must be between 1024 and 65535')
+        if args.localhost_port is not None and (args.localhost_port < 1024 or args.localhost_port > 65535
+                                                or args.localhost_port == args.port):
+            raise QaHarnessError('--localhost-port must be a distinct port between 1024 and 65535')
         if args.prepare_only:
-            if args.output is None or args.bind is not None:
-                raise QaHarnessError('--prepare-only requires --output and does not accept --bind')
-            result = prepare_harness(args.output)
+            if args.output is None or args.bind is not None or args.localhost_port is not None:
+                raise QaHarnessError('--prepare-only requires --output and does not accept server options')
+            result = prepare_harness(args.output, release_managed=args.release_managed)
             print(f"Synthetic QA harness prepared: {result['output']}")
             print(f"Validated artifacts: {result['artifacts']} x {result['files_per_artifact']} files; "
                   f"stations: {result['stations']}; baseline dates: {', '.join(result['service_dates'])}")
@@ -342,12 +402,22 @@ def main() -> int:
         bind = _private_lan_ipv4(args.bind)
         with tempfile.TemporaryDirectory(prefix='dotchi-synthetic-qa-', dir=SAFE_TEMP_ROOT) as temp_name:
             qa_root = Path(temp_name) / 'site'
-            result = prepare_harness(qa_root)
+            result = prepare_harness(qa_root, release_managed=args.release_managed)
             handler = lambda *handler_args, **handler_kwargs: NoDirectoryListingHandler(  # noqa: E731
                 *handler_args, directory=str(result['output']), **handler_kwargs)
             server = ThreadingHTTPServer((bind, args.port), handler)
+            loopback_server = None
+            if args.localhost_port is not None:
+                try:
+                    loopback_server = ThreadingHTTPServer(('127.0.0.1', args.localhost_port), handler)
+                except OSError:
+                    server.server_close()
+                    raise
+                Thread(target=loopback_server.serve_forever, daemon=True).start()
             print(f"Mac:    http://{bind}:{args.port}/?scenario=cards")
             print(f"iPhone: http://{bind}:{args.port}/?scenario=cards")
+            if args.localhost_port is not None:
+                print(f"Mac Chrome (localhost/Web Crypto): http://localhost:{args.localhost_port}/?scenario=cards")
             print('Synthetic-only local QA. Press Ctrl+C to stop the server and remove temporary files.')
             try:
                 server.serve_forever()
@@ -355,6 +425,9 @@ def main() -> int:
                 print('\nStopping synthetic QA server.')
             finally:
                 server.server_close()
+                if loopback_server is not None:
+                    loopback_server.shutdown()
+                    loopback_server.server_close()
         return 0
     except (QaHarnessError, SyntheticFixtureError, OSError, ValueError) as error:
         print(f'synthetic public QA failed: {error}', file=sys.stderr)
