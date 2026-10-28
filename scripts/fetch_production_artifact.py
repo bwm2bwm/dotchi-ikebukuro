@@ -145,8 +145,18 @@ class AliasHttpClient:
         self.opener = build_opener(_NoRedirect())
 
     def _get(self, path: str, *, kind: str, allow_404: bool = False,
-             allow_manifest_html: bool = False) -> tuple[int, bytes | None, str | None]:
-        relative = _safe_relative_path(path)
+             allow_manifest_html: bool = False, root: bool = False
+             ) -> tuple[int, bytes | None, str | None]:
+        # Root is only available through the explicit legacy index helper below.
+        # Keep the logical filename for safe diagnostics and limits while requesting `/`.
+        if root:
+            if path != "index.html" or kind != "html":
+                raise ArtifactFetchError("root request is restricted to legacy index.html")
+            relative = "index.html"
+            request_url = f"{self.origin}/"
+        else:
+            relative = _safe_relative_path(path)
+            request_url = f"{self.origin}/{relative}"
         limit = self.max_manifest_bytes if kind == "manifest" else self.max_file_bytes
         allowed_types = {
             "manifest": {"application/json"},
@@ -161,7 +171,7 @@ class AliasHttpClient:
             # on the generic Accept value so their media negotiation remains unchanged.
             request_headers["Accept"] = "application/json"
         request_headers["User-Agent"] = ACCESS_DIAGNOSTIC_USER_AGENT
-        request = Request(f"{self.origin}/{relative}", headers=request_headers, method="GET")
+        request = Request(request_url, headers=request_headers, method="GET")
         attempts = self.retries + 1
         for attempt in range(attempts):
             retryable = False
@@ -228,6 +238,12 @@ class AliasHttpClient:
 
     def file(self, path: str, *, kind: str) -> bytes:
         _, body, _ = self._get(path, kind=kind)
+        assert body is not None
+        return body
+
+    def legacy_index(self) -> bytes:
+        """Fetch the legacy root document from `/`, storing it as index.html."""
+        _, body, _ = self._get("index.html", kind="html", root=True)
         assert body is not None
         return body
 
@@ -374,7 +390,7 @@ def _fetch_legacy_snapshot(client: AliasHttpClient, root: Path, *, max_total_byt
     for relative in LEGACY_ASSETS:
         if relative in records:
             continue
-        raw = client.file(relative, kind=_mime_kind(relative))
+        raw = _legacy_file(client, relative)
         total += len(raw)
         if total > max_total_bytes:
             raise ArtifactFetchError("legacy snapshot total exceeds byte limit")
@@ -382,6 +398,13 @@ def _fetch_legacy_snapshot(client: AliasHttpClient, root: Path, *, max_total_byt
         _write_file(root, relative, raw)
     _validate_snapshot(root, "legacy")
     return records, _file_fingerprint(records)
+
+
+def _legacy_file(client: AliasHttpClient, relative: str) -> bytes:
+    """Use the canonical Pages root URL for the logical legacy index.html file."""
+    if relative == "index.html":
+        return client.legacy_index()
+    return client.file(relative, kind=_mime_kind(relative))
 
 
 def _probe_legacy_absence(client: AliasHttpClient, *, allow_initial_legacy: bool
@@ -392,9 +415,9 @@ def _probe_legacy_absence(client: AliasHttpClient, *, allow_initial_legacy: bool
     if status == 404:
         return "http-404", {}, None
     if status == 200 and media_type == "text/html" and body is not None:
-        # Pages serves /index.html for an unknown path when SPA fallback is active.
-        # Only accept that exact response, and only after the caller's explicit migration opt-in.
-        root_html = client.file("index.html", kind="html")
+        # Pages serves the root document for an unknown path when SPA fallback is active.
+        # Only accept that exact root response after the caller's explicit migration opt-in.
+        root_html = client.legacy_index()
         if body != root_html:
             raise ArtifactFetchError("manifest HTML response does not match the root index.html")
         return "spa-html", {"index.html": root_html}, body
@@ -412,7 +435,7 @@ def _confirm_legacy_absence(client: AliasHttpClient, *, expected_kind: str,
     if expected_kind != "spa-html" or status != 200 or media_type != "text/html" \
        or body is None or body != expected_html:
         raise ArtifactFetchError("Production alias changed from SPA fallback during fetch")
-    current_root = client.file("index.html", kind="html")
+    current_root = client.legacy_index()
     if current_root != expected_html:
         raise ArtifactFetchError("root index.html changed during legacy fetch")
 
@@ -475,7 +498,7 @@ def fetch_production_artifact(*, base_url: str, output: Path,
             second_records: dict[str, bytes] = {}
             total = 0
             for relative in LEGACY_ASSETS:
-                raw = client.file(relative, kind=_mime_kind(relative))
+                raw = _legacy_file(client, relative)
                 total += len(raw)
                 if total > max_total_bytes:
                     raise ArtifactFetchError("legacy fingerprint pass exceeds byte limit")
@@ -565,7 +588,7 @@ def production_fingerprint(*, base_url: str, mode: str, allow_initial_legacy: bo
         records: dict[str, bytes] = {}
         total = 0
         for relative in LEGACY_ASSETS:
-            body = client.file(relative, kind=_mime_kind(relative))
+            body = _legacy_file(client, relative)
             total += len(body)
             if total > max_total_bytes:
                 raise ArtifactFetchError("legacy fingerprint total exceeds byte limit")
@@ -577,7 +600,7 @@ def production_fingerprint(*, base_url: str, mode: str, allow_initial_legacy: bo
         second: dict[str, bytes] = {}
         second_total = 0
         for relative in LEGACY_ASSETS:
-            body = client.file(relative, kind=_mime_kind(relative))
+            body = _legacy_file(client, relative)
             second_total += len(body)
             if second_total > max_total_bytes:
                 raise ArtifactFetchError("legacy fingerprint recheck exceeds byte limit")

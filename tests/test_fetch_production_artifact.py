@@ -35,6 +35,7 @@ class LocalAlias:
     def __init__(self, files: dict[str, bytes], *, auth: bool = False):
         self.files = dict(files)
         self.counts: dict[str, int] = {}
+        self.request_paths: list[str] = []
         self.request_headers: dict[str, list[dict[str, str]]] = {}
         self.overrides: dict[str, object] = {}
         self.auth = auth
@@ -54,7 +55,9 @@ class LocalAlias:
                 return
 
             def do_GET(self):
-                path = self.path.split("?", 1)[0].lstrip("/")
+                request_path = self.path.split("?", 1)[0]
+                path = request_path.lstrip("/") or "index.html"
+                owner.request_paths.append(request_path)
                 owner.counts[path] = owner.counts.get(path, 0) + 1
                 owner.request_headers.setdefault(path, []).append(
                     {key.lower(): value for key, value in self.headers.items()})
@@ -64,7 +67,8 @@ class LocalAlias:
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
-                spec = owner.overrides.get(path)
+                spec = (owner.overrides.get("/") if request_path == "/"
+                        else owner.overrides.get(path))
                 if callable(spec):
                     spec = spec(owner, path, owner.counts[path])
                 if spec is None:
@@ -228,6 +232,8 @@ class FetchProductionArtifactTests(unittest.TestCase):
         self.assertTrue(result["fingerprint_verified"])
         self.assertEqual(files_under(self.base / "spa-migration"), self.legacy_files)
         self.assertGreaterEqual(spa.counts.get("index.html", 0), 3)
+        self.assertGreaterEqual(spa.request_paths.count("/"), 3)
+        self.assertNotIn("/index.html", spa.request_paths)
         self.assertEqual(validate_artifact(self.base / "spa-migration")["files"], 17)
         first_manifest_request = spa.request_headers["manifest.json"][0]
         self.assertEqual(first_manifest_request["user-agent"], access_diagnostic.USER_AGENT)
@@ -245,10 +251,26 @@ class FetchProductionArtifactTests(unittest.TestCase):
         self.assertNotIn("not-the-root-page", str(caught.exception))
         self.assertFalse((self.base / "spa-mismatch").exists())
 
+    def test_legacy_root_uses_slash_even_when_index_html_redirects(self):
+        spa = self.alias(self.legacy_files)
+        spa.overrides["manifest.json"] = (
+            200, "text/html", self.legacy_files["index.html"], {})
+        # Pages may canonicalize /index.html. Legacy acquisition must not request that URL.
+        spa.overrides["index.html"] = (308, "text/html", b"", {"Location": "/"})
+
+        result = self.fetch(spa, "spa-root", allow_initial_legacy=True)
+
+        self.assertEqual(result["mode"], "legacy")
+        self.assertEqual(result["files"], 17)
+        self.assertEqual(files_under(self.base / "spa-root"), self.legacy_files)
+        self.assertNotIn("/index.html", spa.request_paths)
+        self.assertGreaterEqual(spa.request_paths.count("/"), 3)
+        self.assertEqual(validate_artifact(self.base / "spa-root")["files"], 17)
+
     def test_spa_migration_fails_closed_for_root_and_manifest_errors(self):
-        for status in (403, 404, 302):
+        for status in (401, 403, 308):
             alias = self.alias(self.legacy_files)
-            alias.overrides["index.html"] = (status, "text/html", b"root-error", {})
+            alias.overrides["/"] = (status, "text/html", b"root-error", {})
             alias.overrides["manifest.json"] = (
                 200, "text/html", self.legacy_files["index.html"], {})
             with self.subTest(root_status=status), self.assertRaises(ArtifactFetchError):
@@ -261,6 +283,26 @@ class FetchProductionArtifactTests(unittest.TestCase):
             self.fetch(denied, "manifest-403", allow_initial_legacy=True)
         self.assertNotIn("private-response", str(caught.exception))
         self.assertFalse((self.base / "manifest-403").exists())
+
+    def test_legacy_root_bytes_are_pinned_across_snapshot_and_fingerprint_passes(self):
+        alias = self.alias(self.legacy_files)
+        alias.overrides["manifest.json"] = (
+            200, "text/html", self.legacy_files["index.html"], {})
+        changed = self.legacy_files["index.html"] + b" "
+        alias.overrides["/"] = lambda _owner, _path, count: (
+            200, "text/html", self.legacy_files["index.html"] if count <= 2 else changed, {})
+        with self.assertRaises(ArtifactFetchError):
+            self.fetch(alias, "root-race", allow_initial_legacy=True)
+        self.assertFalse((self.base / "root-race").exists())
+
+        stable = self.alias(self.legacy_files)
+        stable.overrides["manifest.json"] = (
+            200, "text/html", self.legacy_files["index.html"], {})
+        fingerprint = production_fingerprint(base_url=stable.url, mode="legacy",
+            allow_initial_legacy=True, allow_insecure_loopback=True, sleep=lambda _: None)
+        self.assertRegex(fingerprint["fingerprint"], r"^[0-9a-f]{64}$")
+        self.assertGreaterEqual(stable.request_paths.count("/"), 4)
+        self.assertNotIn("/index.html", stable.request_paths)
 
     def test_spa_fingerprint_and_manifest_transition_are_checked(self):
         stable = self.alias(self.legacy_files)
@@ -410,10 +452,14 @@ class FetchProductionArtifactTests(unittest.TestCase):
             allow_insecure_loopback=True, sleep=lambda _: None)
         self.assertRegex(result["fingerprint"], r"^[0-9a-f]{64}$")
         changing = self.alias(self.legacy_files)
-        first_path = sorted(self.legacy_files)[0]
+        # index.html is fetched at `/`; mutate a separate asset for this file-set race.
+        first_path = next(path for path in sorted(self.legacy_files) if path != "index.html")
         original = self.legacy_files[first_path]
+        content_type = ("application/json" if first_path.endswith(".json") else
+                        "text/html" if first_path.endswith(".html") else
+                        "text/css" if first_path.endswith(".css") else "text/javascript")
         changing.overrides[first_path] = lambda _owner, _path, count: (
-            200, "text/html", original if count == 1 else original + b" ", {})
+            200, content_type, original if count == 1 else original + b" ", {})
         with self.assertRaisesRegex(ArtifactFetchError, "legacy Production alias changed"):
             self.fetch(changing, "legacy-race", allow_initial_legacy=True)
         self.assertFalse((self.base / "legacy-race").exists())

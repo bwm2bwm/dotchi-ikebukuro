@@ -18,10 +18,10 @@
 
 ### T12 Phase 4-8E legacy初回移行のSPA fallback対応（2026-10-28）
 
-- 初回移行flagがある場合だけ、manifestのHTTP 200/`text/html`をPages SPA fallback候補として扱う。response bytesが、同じaliasからHTTP 200/HTMLで取得したroot `index.html`と完全一致した場合だけmanifest不在と判定し、そのroot bytesを17-file初回snapshotへ再利用する。
-- HTML判定後も17ファイルのstrict validator、開始/終了fingerprint、manifest状態の前後確認を維持。403/401、redirect、timeout、root取得失敗、HTML不一致、不正JSON/manifest、legacy schema不正は停止する。通常のrelease-managed JSON manifestとHTTP 404移行経路は維持。
-- Python fetch suite 16件とNode release contract/runtime/workflow subset 18件成功。旧17-file/新18-file契約、workflow jobの承認ゲート・Direct Upload順序は不変。dispatch画面のlegacy移行説明と対応するstatic assertionだけ更新した。Actions #7/#8のHTTP 403原因は未解決であり、実stagingでの再試行も未実施。
-- 更新: fetch CLI、専用Python test、workflow input説明、Node workflow assertion、project state/devlog、Phase 4-7設計メモ、README。Cloudflare接続/設定/デプロイ、Actions実行、commit/push/mergeなし。
+- 初回移行flagがある場合だけ、manifestのHTTP 200/`text/html`をPages SPA fallback候補として扱う。HTMLとのbyte比較に使うroot documentは`/`から取得し、artifact内では従来どおり`index.html`として保存する。旧17-file取得、manifest/root再確認、fingerprint取得も共通のlegacy index取得関数を使う。
+- manifest HTMLとrootのbyte完全一致、17ファイルstrict validator、開始/終了fingerprint、manifest状態の前後確認を維持。rootまたはmanifestの401/403、308を含むredirect、timeout、HTML不一致、不正manifest、legacy schema不正は停止する。通常のrelease-managed経路とHTTP 404移行経路は維持。
+- `tests/test_fetch_production_artifact.py` 18件がlocalhost mockで成功。`/index.html`を308にしながら`/`の200応答で移行できるcase、rootの401/403/308拒否、root bytesのfingerprint race、deploy前legacy fingerprintを含む。Node release contract/runtime/workflow 18件も成功。Actions #7/#8のHTTP 403原因は未解決であり、実stagingでの再試行も未実施。
+- 更新対象: fetch CLI、専用Python test、project state/devlog。workflow、旧17-file仕様、release-managed経路は変更しない。Cloudflare接続/設定/デプロイ、Actions実行、commit/push/mergeなし。
 
 ### T12 Phase 4-8D-2B staging workflow統合（2026-10-28）
 

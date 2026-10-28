@@ -1,5 +1,12 @@
 # 開発ログ
 
+## 2026-10-28 — T12 Phase 4-8E legacy root取得のHTTP 308対応
+
+- legacy `index.html` の取得元を`/index.html`からorigin root `/`へ統一した。`AliasHttpClient.legacy_index()`は同じ固定origin・Service Token headers・TLS検証・redirect拒否・status/MIME/byte上限を使い、取得bytesを論理ファイル`index.html`として返す。
+- SPA manifest候補とのbyte比較、初回17-file snapshot、manifest/root前後確認、legacy fingerprintの取得とdeploy直前再確認で同じ`_legacy_file()`/`legacy_index()`経路を使用。root以外のlegacy filesは従来URLのまま。release-managed取得経路、17-file validator、401/403/308拒否、fingerprint規則は維持。
+- mock testを更新し、`/index.html`だけ308でも`/`の200 HTMLで17-file strict validationに成功するcase、root 401/403/308拒否、root byte変化検知、deploy前legacy fingerprintを確認。sandbox内の最初の実行は127.0.0.1 bind制限で失敗したため、承認されたloopback-only実行で再確認。Python fetch suite 18件、Node release contract/runtime/workflow suite 18件が成功。
+- Cloudflare実通信、GitHub Actions、設定変更、デプロイ、commit/push/mergeなし。
+
 ## 2026-10-28 — T12 Phase 4-8E 初回legacy移行のSPA fallback対応
 
 - Macで確認されたlegacy Production aliasの`GET /manifest.json` HTTP 200/`text/html`に対応。初回migration opt-in時だけmanifest HTMLを受け取り、同一aliasから通常のHTTP 200/`text/html`で取得した`/index.html`とresponse bodyをbyte単位で比較する。完全一致したときだけPages SPA fallbackによるmanifest不在と判定し、比較に使ったroot bytesをlegacy 17-file snapshotに再利用する。
