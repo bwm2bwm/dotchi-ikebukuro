@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from build_public_site import build_public_site  # noqa: E402
 from assemble_public_release import assemble_public_artifact  # noqa: E402
+import compare_access_http_clients as access_diagnostic  # noqa: E402
 from fetch_production_artifact import (  # noqa: E402
     ArtifactFetchError,
     fetch_production_artifact,
@@ -34,6 +35,7 @@ class LocalAlias:
     def __init__(self, files: dict[str, bytes], *, auth: bool = False):
         self.files = dict(files)
         self.counts: dict[str, int] = {}
+        self.request_headers: dict[str, list[dict[str, str]]] = {}
         self.overrides: dict[str, object] = {}
         self.auth = auth
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
@@ -54,6 +56,8 @@ class LocalAlias:
             def do_GET(self):
                 path = self.path.split("?", 1)[0].lstrip("/")
                 owner.counts[path] = owner.counts.get(path, 0) + 1
+                owner.request_headers.setdefault(path, []).append(
+                    {key.lower(): value for key, value in self.headers.items()})
                 if owner.auth and (self.headers.get("CF-Access-Client-Id") != "test-id"
                                    or self.headers.get("CF-Access-Client-Secret") != "test-secret"):
                     self.send_response(401 if not self.headers.get("CF-Access-Client-Id") else 403)
@@ -205,19 +209,27 @@ class FetchProductionArtifactTests(unittest.TestCase):
         self.assertFalse((self.base / "bad-manifest").exists())
 
     def test_initial_legacy_migration_accepts_only_exact_pages_spa_fallback(self):
-        spa = self.alias(self.legacy_files)
+        spa = self.alias(self.legacy_files, auth=True)
         spa.overrides["manifest.json"] = (
             200, "text/html; charset=utf-8", self.legacy_files["index.html"], {})
         with self.assertRaisesRegex(ArtifactFetchError, "Content-Type"):
-            self.fetch(spa, "spa-no-opt-in")
+            self.fetch(spa, "spa-no-opt-in", client_id="test-id", client_secret="test-secret")
         self.assertFalse((self.base / "spa-no-opt-in").exists())
 
-        result = self.fetch(spa, "spa-migration", allow_initial_legacy=True)
+        result = self.fetch(spa, "spa-migration", allow_initial_legacy=True,
+                            client_id="test-id", client_secret="test-secret")
         self.assertEqual(result["mode"], "legacy")
         self.assertEqual(result["files"], 17)
         self.assertEqual(files_under(self.base / "spa-migration"), self.legacy_files)
         self.assertGreaterEqual(spa.counts.get("index.html", 0), 3)
         self.assertEqual(validate_artifact(self.base / "spa-migration")["files"], 17)
+        first_manifest_request = spa.request_headers["manifest.json"][0]
+        self.assertEqual(first_manifest_request["user-agent"], access_diagnostic.USER_AGENT)
+        self.assertEqual(first_manifest_request["accept"], "application/json")
+        self.assertEqual(first_manifest_request["accept-encoding"], "identity")
+        self.assertEqual(first_manifest_request["cf-access-client-id"], "test-id")
+        self.assertEqual(first_manifest_request["cf-access-client-secret"], "test-secret")
+        self.assertNotIn("cookie", first_manifest_request)
 
         mismatch = self.alias(self.legacy_files)
         mismatch.overrides["manifest.json"] = (

@@ -40,6 +40,7 @@ MAX_FILES_DEFAULT = 20_000
 MAX_FILE_BYTES_DEFAULT = 25 * 1024 * 1024
 MAX_TOTAL_BYTES_DEFAULT = 256 * 1024 * 1024
 MAX_MANIFEST_BYTES_DEFAULT = 2 * 1024 * 1024
+ACCESS_DIAGNOSTIC_USER_AGENT = "dotchi-ikebukuro-access-client-compare/1.0"
 LEGACY_ASSETS = tuple(sorted(EXPECTED_FILES))
 TRANSIENT_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
@@ -110,7 +111,11 @@ def _safe_relative_path(path: str) -> str:
 def access_headers(client_id: str | None = None, client_secret: str | None = None) -> dict[str, str]:
     if (client_id is None) != (client_secret is None):
         raise ArtifactFetchError("both Access Service Token environment values are required")
-    headers = {"Accept": "*/*", "Accept-Encoding": "identity"}
+    headers = {
+        "User-Agent": ACCESS_DIAGNOSTIC_USER_AGENT,
+        "Accept": "*/*",
+        "Accept-Encoding": "identity",
+    }
     if client_id is not None:
         if not client_id.strip() or not client_secret or not client_secret.strip():
             raise ArtifactFetchError("Access Service Token environment values must be nonempty")
@@ -127,7 +132,11 @@ class AliasHttpClient:
         if timeout <= 0 or retries < 0 or max_file_bytes < 1 or max_manifest_bytes < 1:
             raise ArtifactFetchError("timeout, retry, and byte limits are invalid")
         self.origin, self.scheme = normalize_base_url(base_url, allow_insecure_loopback=allow_insecure_loopback)
-        self.headers = dict(headers or {"Accept": "*/*", "Accept-Encoding": "identity"})
+        self.headers = dict(headers or {
+            "User-Agent": ACCESS_DIAGNOSTIC_USER_AGENT,
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+        })
         self.timeout = timeout
         self.retries = retries
         self.max_file_bytes = max_file_bytes
@@ -146,7 +155,13 @@ class AliasHttpClient:
             "css": {"text/css"},
             "javascript": {"text/javascript", "application/javascript", "application/x-javascript"},
         }[kind]
-        request = Request(f"{self.origin}/{relative}", headers=self.headers, method="GET")
+        request_headers = dict(self.headers)
+        if kind in {"manifest", "json"}:
+            # Match the successful Access diagnostic for JSON endpoints. Keep static assets
+            # on the generic Accept value so their media negotiation remains unchanged.
+            request_headers["Accept"] = "application/json"
+        request_headers["User-Agent"] = ACCESS_DIAGNOSTIC_USER_AGENT
+        request = Request(f"{self.origin}/{relative}", headers=request_headers, method="GET")
         attempts = self.retries + 1
         for attempt in range(attempts):
             retryable = False
