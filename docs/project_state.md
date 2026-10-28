@@ -13,6 +13,13 @@
 - DOM testはrelease-managed manifest pinning、駅別URL fetch、station IDと目的地一致、表示値差、2駅LRU hit/eviction、旧通信の遅延応答、固定/進行時計、legacy回帰をカバーする。Mac Chromeのlocalhost検証用に、既存の明示LAN IPv4 serverへ任意のloopback-only portを追加できる。DOM QA 9件、Node全体129件、Python全体108件が成功。詳細な起動・scenario手順はREADMEと [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md)。
 - 実機Chromeでの確認はREADME手順に沿って別途実施。LAN HTTPはrelease-managed Web Crypto確認に使わない。
 
+### T12 Phase 4-8D-1 ローカル世代assembly（2026-10-28）
+
+- `scripts/assemble_public_release.py`を追加。legacy 17-fileまたは既存release-managed full artifactをpreviousにし、clean release-managed 18-file artifactとtimezone付き`--as-of`から、retained JSON/legacy aliasesを含む新artifactをatomicに構築・独立検証する。builderの既定出力・workflow・Cloudflareは未変更。
+- retained entryは`releaseDescriptor`を持ち、independent validatorがID再計算・8 station payload canonical hash・raw JSON hash/bytes/schemaを確認する。browser loaderは同descriptorをmanifest metadataとして検証するが、current pin/fetch/render動作は変えていない。descriptorless retainedはD-1 assembly不可。
+- 保持期限はretire後7日以上、effective validity end+48hまで、最大14日。必要期限が14日を超えたらfail closed。削除は期限+24h安全margin後。同一release重複なし。初回legacy移行はflat JSON bytesを14日+24h削除margin付きで維持。
+- default size ceilings: 20,000 files、単一file 25 MiB、total tree 256 MiB。synthetic A→Bは26 files/292,178 bytes/largest 45,180 bytes、A/B→Cは34 files。Python全体121件、Node全体130件が成功。D-2のAccess/HTTP取得、競合再確認、workflow接続は未実装。
+
 ## T12 Phase 4-3 synthetic CI workflow（2026-10-27）
 
 - `.github/workflows/synthetic-public-ci.yml` を追加。`workflow_dispatch`のみで起動し、main以外はguard jobで失敗する。build/validationはGitHub-hosted Ubuntu、Python 3.13、Node.js 24.15.0を使用する。

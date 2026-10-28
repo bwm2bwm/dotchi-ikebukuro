@@ -134,7 +134,7 @@ function checkReleaseManifest(manifest, cryptoImpl) {
     releaseFail('runtime_incompatible', 'descriptor compatibility contract differs from manifest');
   }
   const actualDescriptorHash = digestSha256(new TextEncoder().encode(canonicalJcs(d)), cryptoImpl);
-  return actualDescriptorHash.then(hash => {
+  return actualDescriptorHash.then(async hash => {
     if (`r1-${hash}` !== manifest.releaseId) releaseFail('release_id_mismatch', 'manifest descriptor does not match releaseId');
     const urls = new Set();
     for (const [stationId, filename] of Object.entries(DESTINATION_PAYLOADS)) {
@@ -153,7 +153,10 @@ function checkReleaseManifest(manifest, cryptoImpl) {
     }
     const retainedIds = new Set([manifest.releaseId]);
     for (const retained of manifest.retainedReleases) {
-      if (!exactObjectKeys(retained, ['releaseId', 'publishedAt', 'retiredAt', 'retainUntil', 'serviceDateRange', 'stations'])
+      const baseRetainedKeys = ['releaseId', 'publishedAt', 'retiredAt', 'retainUntil', 'serviceDateRange', 'stations'];
+      const retainedKeys = retained && Object.hasOwn(retained, 'releaseDescriptor')
+        ? [...baseRetainedKeys, 'releaseDescriptor'] : baseRetainedKeys;
+      if (!exactObjectKeys(retained, retainedKeys)
           || !RELEASE_ID_PATTERN.test(retained.releaseId) || retainedIds.has(retained.releaseId)
           || !validTimestamp(retained.publishedAt) || !validTimestamp(retained.retiredAt) || !validTimestamp(retained.retainUntil)
           || !exactObjectKeys(retained.serviceDateRange, ['from', 'through'])
@@ -163,6 +166,37 @@ function checkReleaseManifest(manifest, cryptoImpl) {
         releaseFail('manifest_schema', 'retained release metadata is invalid');
       }
       retainedIds.add(retained.releaseId);
+      if (retained.releaseDescriptor !== undefined) {
+        const oldDescriptor = retained.releaseDescriptor;
+        if (!exactObjectKeys(oldDescriptor, ['manifestSchemaVersion', 'jsonEnvelopeSchemaVersion', 'payloadSchemaVersion',
+          'runtimeContract', 'publicDataScope', 'builderContractVersion', 'assets', 'stations'])
+            || typeof oldDescriptor.builderContractVersion !== 'string' || !oldDescriptor.builderContractVersion
+            || !Array.isArray(oldDescriptor.assets) || oldDescriptor.assets.length === 0
+            || !Array.isArray(oldDescriptor.stations) || oldDescriptor.stations.length !== sortedStationIds.length
+            || oldDescriptor.runtimeContract !== manifest.runtimeContract
+            || oldDescriptor.manifestSchemaVersion !== manifest.schemaVersion
+            || oldDescriptor.jsonEnvelopeSchemaVersion !== manifest.jsonEnvelopeSchemaVersion
+            || oldDescriptor.payloadSchemaVersion !== manifest.payloadSchemaVersion
+            || oldDescriptor.publicDataScope !== manifest.dataScope) {
+          releaseFail('manifest_schema', 'retained release descriptor is invalid');
+        }
+        let oldAssetPath = '';
+        for (const asset of oldDescriptor.assets) {
+          if (!exactObjectKeys(asset, ['path', 'sha256']) || typeof asset.path !== 'string'
+              || !asset.path || asset.path.startsWith('/') || asset.path.includes('\\')
+              || asset.path.split('/').some(part => !part || part === '.' || part === '..')
+              || !SHA256_PATTERN.test(asset.sha256) || (oldAssetPath && oldAssetPath >= asset.path)) {
+            releaseFail('manifest_schema', 'retained release descriptor asset list is invalid');
+          }
+          oldAssetPath = asset.path;
+        }
+        if (oldDescriptor.stations.some((item, index) => !exactObjectKeys(item, ['stationId', 'payloadSha256'])
+            || item.stationId !== sortedStationIds[index] || !SHA256_PATTERN.test(item.payloadSha256))) {
+          releaseFail('manifest_schema', 'retained release descriptor station list is invalid');
+        }
+        const oldHash = await digestSha256(new TextEncoder().encode(canonicalJcs(oldDescriptor)), cryptoImpl);
+        if (`r1-${oldHash}` !== retained.releaseId) releaseFail('release_id_mismatch', 'retained descriptor does not match releaseId');
+      }
       for (const [stationId, filename] of Object.entries(DESTINATION_PAYLOADS)) {
         const item = retained.stations[stationId];
         const expectedUrl = `/releases/${retained.releaseId}/${filename.replace(/^\.\//, '')}`;

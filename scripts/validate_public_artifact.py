@@ -2,7 +2,7 @@
 """Read-only independent validation of a completed public static artifact."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 import argparse
 from html.parser import HTMLParser
 import json
@@ -437,6 +437,44 @@ def _check_descriptor(descriptor: dict[str, Any], release_id: str, asset_bytes: 
             raise ArtifactValidationError("inner payload hash differs from release descriptor")
 
 
+def _check_retained_descriptor(descriptor: dict[str, Any], release_id: str,
+                               payloads: dict[str, dict[str, Any]]) -> None:
+    """Verify retained ID preimage and retained payload bindings.
+
+    Historical shared shell assets are not copied into each generation path;
+    their committed hashes remain verifiable as descriptor contents, while the
+    retained JSON payload hashes can be compared to the bytes in this artifact.
+    """
+    try:
+        if calculate_release_id(descriptor) != release_id:
+            raise ArtifactValidationError("retained release descriptor does not reproduce releaseId")
+    except (TypeError, ValueError, KeyError):
+        raise ArtifactValidationError("retained release descriptor is malformed") from None
+    expected = {item["stationId"]: item["payloadSha256"] for item in descriptor["stations"]}
+    if set(expected) != set(STATION_FILES) or set(payloads) != set(STATION_FILES):
+        raise ArtifactValidationError("retained release descriptor station set is incomplete")
+    for station_id, payload in payloads.items():
+        if sha256_hex(canonicalize_jcs(payload)) != expected[station_id]:
+            raise ArtifactValidationError("retained payload hash differs from release descriptor")
+
+
+def _check_retention_deadline(entry: dict[str, Any], payloads: dict[str, dict[str, Any]]) -> None:
+    payload = payloads[next(iter(STATION_FILES))]
+    try:
+        retired = datetime.fromisoformat(entry["retiredAt"].replace("Z", "+00:00")).astimezone(timezone.utc)
+        recorded = datetime.fromisoformat(entry["retainUntil"].replace("Z", "+00:00")).astimezone(timezone.utc)
+        period_end = datetime.fromisoformat(payload["applicationPeriod"]["endsAt"].replace("Z", "+00:00")).astimezone(timezone.utc)
+        feed_date = date.fromisoformat(payload["feed"]["validThrough"]) + timedelta(days=1)
+        feed_end = datetime.combine(feed_date, datetime.min.time(), tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        raise ArtifactValidationError("retained release validity or timestamp is malformed") from None
+    expected = max(retired + timedelta(days=7), min(period_end, feed_end) + timedelta(hours=48))
+    if expected > retired + timedelta(days=14):
+        raise ArtifactValidationError("retained release exceeds the 14-day validity safety ceiling")
+    if recorded != expected:
+        raise ArtifactValidationError("retained release deadline differs from the retention policy")
+
+
 def validate_release_managed_artifact(directory: Path) -> dict[str, Any]:
     """Read-only independent validation for opt-in manifest/envelope artifacts."""
     root = _artifact_root(directory)
@@ -482,8 +520,11 @@ def validate_release_managed_artifact(directory: Path) -> dict[str, Any]:
     _check_descriptor(manifest["releaseDescriptor"], manifest["releaseId"], asset_bytes, current_payloads)
 
     for old in manifest["retainedReleases"]:
+        if old.get("releaseDescriptor") is None:
+            raise ArtifactValidationError("retained release is missing its verifiable descriptor")
         dates_for_old: list[str] | None = None
         common_for_old: dict[str, Any] | None = None
+        retained_payloads: dict[str, dict[str, Any]] = {}
         for station_id, filename in STATION_FILES.items():
             relative = f"releases/{old['releaseId']}/{filename}"
             raw = files[relative].read_bytes()
@@ -509,9 +550,13 @@ def validate_release_managed_artifact(directory: Path) -> dict[str, Any]:
             if common_for_old is not None and common != common_for_old:
                 raise ArtifactValidationError("retained station common metadata does not match")
             common_for_old = common
+            retained_payloads[station_id] = payload
+        _check_retained_descriptor(old["releaseDescriptor"], old["releaseId"], retained_payloads)
+        _check_retention_deadline(old, retained_payloads)
 
     legacy = manifest["legacyCompatibilityV1"]
     if legacy is not None:
+        legacy_digest_records: dict[str, dict[str, Any]] = {}
         for station_id, filename in STATION_FILES.items():
             raw = files[filename].read_bytes()
             record = legacy["stations"][station_id]
@@ -524,8 +569,11 @@ def validate_release_managed_artifact(directory: Path) -> dict[str, Any]:
             except (TypeError, ValueError):
                 raise ArtifactValidationError("legacy compatibility payload failed public schema") from None
             _validate_adapter_payload(station_id, payload)
+            legacy_digest_records[station_id] = {"sha256": sha256_hex(raw), "bytes": len(raw)}
         legacy_contents = {filename: contents[filename] for filename in STATION_FILES.values()}
         _check_payloads(legacy_contents)
+        if sha256_hex(canonicalize_jcs(legacy_digest_records)) != legacy["sourceLegacyDigest"]:
+            raise ArtifactValidationError("legacy source digest differs from copied flat JSON files")
 
     _check_content_safety(contents)
 

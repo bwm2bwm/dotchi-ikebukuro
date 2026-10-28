@@ -446,9 +446,9 @@ manifest schemaへ`releaseDescriptor`を追加したのは、artifact上で可�
 
 ### 15.3 再現性、retention範囲、runtime引継ぎ
 
-固定synthetic dates・fixture・static bytes・builder contractではmanifestに`publishedAt: null`を含め、releaseId、manifest bytes、8 envelope bytes、全18-file treeが再生成で一致する。payload 1駅、asset bytes、builder contractの変更でreleaseIdが変わる。current releaseのIDはartifactにdescriptorがあるため再計算可能。retained release entryには当初descriptorを載せないため、validatorはretained file hash/envelope/schema/serviceDate integrityを検査するが、その過去releaseId preimageは再計算できない。retention workflowでold descriptorを維持するか、current同様のdescriptorをretained entryへ加えるかはproduction carry-forward実装前に確定する。
+固定synthetic dates・fixture・static bytes・builder contractではmanifestに`publishedAt: null`を含め、releaseId、manifest bytes、8 envelope bytes、全18-file treeが再生成で一致する。payload 1駅、asset bytes、builder contractの変更でreleaseIdが変わる。current releaseのIDはartifactにdescriptorがあるため再計算可能。Phase 4-8D-1でretained release entryにも元の`releaseDescriptor`を持たせ、独立validatorはID preimageと旧payload canonical hashを再検証する。旧世代のshared HTML/CSS/JS bytes自体は保持対象に含まれないため、descriptorに記録された過去asset hashを旧asset fileと照合できない。旧currentをretireするときは入力artifactの独立validatorでasset hashを確認してからdescriptorをretained化する。
 
-このartifactはbuilderの`--release-managed` opt-inでのみrelease runtimeを起動し、既定の17-file buildはflat modeを維持する。Phase 4-8Cでmanifest pinning、raw-byte Web Crypto検証、release-aware 2駅LRU、fail-closedと手動更新UXを実装した。旧世代carry-forwardとProduction切替は引き続き未実装であり、staging運用検証を後続Phaseで行う。
+このartifactはbuilderの`--release-managed` opt-inでのみrelease runtimeを起動し、既定の17-file buildはflat modeを維持する。Phase 4-8Cでmanifest pinning、raw-byte Web Crypto検証、release-aware 2駅LRU、fail-closedと手動更新UXを実装した。4-8D-1はローカルassemblyを追加するが、Production alias取得と実デプロイは行わない。
 
 ### 15.4 Phase 4-8C browser runtime
 
@@ -475,6 +475,52 @@ DOM QAはrelease-managed 18-file artifactsに対してmanifestを1回取得す�
 ## 18. Phase 4-8C QA改善での検証範囲
 
 DOM QAはNode内のDOM harnessとsynthetic release artifactsを使用する。対象DOM QA 9件、Node全体129件、Python全体108件が成功した。Mac Chrome実機での目視は別途README手順に従う。destination-switch到着差は表示切替の識別標識であり、路線の実旅行時間として解釈しない。公開17-file legacy artifact、新形式18-file contract、runtime、workflowは本変更対象外。
+
+## 19. Phase 4-8D-1 ローカルretention assembly
+
+### 19.1 入力・出力と実行
+
+`scripts/assemble_public_release.py` はbuilderから独立したローカル工程。`--previous` は独立validatorを通るrelease-managed full artifact、または既存17-file legacy artifactを受け取る。`--new-release` は既存opt-in builderが作るcleanな18-file generation-only artifact（retained/legacyなし）を受け取る。明示的timezone付きJST/UTC instantを`--as-of`で指定し、既存でない`--output`へatomic assemblyする。
+
+```sh
+python3 -B scripts/generate_synthetic_public_fixtures.py --service-date 2026-10-28 --output /private/tmp/t12-new-fixtures
+python3 -B scripts/build_public_site.py --fixtures /private/tmp/t12-new-fixtures --output /private/tmp/t12-new-release --release-managed
+python3 -B scripts/assemble_public_release.py --previous /private/tmp/t12-old-production-artifact --new-release /private/tmp/t12-new-release --as-of 2026-10-28T12:00:00+09:00 --output /private/tmp/t12-assembled
+python3 -B scripts/validate_public_artifact.py --release-managed /private/tmp/t12-assembled
+```
+
+旧current/retained generationの8 filesだけを同じbytesで引き継ぎ、旧runtime aliasが有効な間はflat root JSONも元bytesで複製する。新static shell/assetsはnew release artifactから採る。出力は`18 + 8R + 8L` files（R=current以外のretained count、L=legacy alias groupが有効なら1）で、directory自体はcountしない。default budgetは20,000 files、single file 25 MiB、whole tree 256 MiB。上限はCLIでさらに下げられる。サイズ/countは完成tree上で計測し、超過ならstage全体を削除して出力先を作らない。
+
+入力はcopy前に旧/newそれぞれのindependent validatorで完全検証する。出力先は既存pathを拒否し、親dirは事前存在・symlinkなしを要求する。stageは同一parentのtemporary directoryへ作成し、manifest/file set/independent validator/budgetが成功した後にdirectory renameする。JSON bytesを再serializeしない。JSON欠損、unexpected file、symlink/non-regular path、path traversal、station/hash/byte mismatch、descriptor不一致、失敗途中の出力はfail closed。
+
+ローカルsynthetic A→Bの実測は26 files、292,178 total bytes、largest file 45,180 bytes。A/B→Cはtestで34 files。どちらもdefault 20,000-file / 25-MiB-single-file / 256-MiB-tree ceilings内。legacy初回移行も26 files（current 18 + flat alias 8）で、8 aliasはsource bytes一致。
+
+### 19.2 保持期限、同一release、legacy初回移行
+
+instantはUTCへ正規化して比較する。releaseの`effectiveValidityEnd`は`applicationPeriod.endsAt`と、feedのinclusive `validThrough`翌日00:00 JSTの早い方。`retiredAt`はcurrentからretainedへ移るassembly時刻。要求期限を`max(retiredAt + 7 days, effectiveValidityEnd + 48 hours)`とし、要求期限が`retiredAt + 14 days`を超えたらassemblyを中止する。超えない場合、その要求期限を`retainUntil`へ記録する。これで有効データ+48時間を14日以内に保持できない場合に削除しない。retained fileは`asOf < retainUntil + 24 hours`なら引き継ぐ。これは削除操作だけに適用する安全marginで、manifest上のretainUntilを変更しない。
+
+同じreleaseIdを再投入するとcurrentの`publishedAt`を維持し、同IDをretainedへ重複追加しない。旧retained releaseへrollbackすると、そのIDをcurrentから外し、直前currentへ新しい`retiredAt`を開始する。local builder由来でprevious currentの`publishedAt`がnullならlocal modelの初回観測時刻として`asOf`を入れる。本番sourceのpublishedAt/null扱いはD-2接続前にreject-or-normalize policyを確定する。
+
+初回legacy migrationでは17-file validatorを通したflat v1 JSON 8 filesをbyte-for-byte複製し、canonical station SHA-256/byte metadataから`sourceLegacyDigest`を構成する。`legacyCompatibilityV1.expiresAt = asOf + 14 days`で、削除には同じ24時間marginを適用する。release-managed runtimeはこれらのaliasesへfallbackしない。期限後の次assemblyで8 aliasesとmetadataをまとめて削除する。legacy validatorはpublic schema、駅所有権、共通feed/serviceDate、file setを確認し、release validatorはaliasのhash/bytesとsourceLegacyDigestも再照合する。
+
+### 19.3 retained descriptorの契約拡張
+
+retained entryへ`releaseDescriptor`を追加する。manifest schemaVersionは1のままで、現行/legacy codeが読むstation map・current manifest fields・envelope・payload schemaは変えない。Python/Node contractとbrowser loaderはdescriptorがあるentryを検証し、descriptor hashからretained releaseIdを再計算する。Independent artifact validatorはdescriptor必須とし、8 retained envelopeのSHA/bytes/schema/station/common metadataと各inner payloadのcanonical hashをdescriptorへ照合する。旧currentをretireする段階では、source artifactの全asset bytesもcurrent descriptorに照合済み。
+
+過去retained generationごとにversioned shell assetsを保存しない既存設計のため、すでにretainedだった世代はasset fileそのものを再照合できない。descriptorがreleaseIdにhash結合され、payload hashを現存8 JSONで照合できることが検証可能範囲。将来shell asset自体を世代別に配信しない限り、この限界は残る。既存descriptorless retained entryは4-8D-1 artifact validatorとassemblerが拒否する。4-8D-1より前にretained deploymentを作っていた場合は、その期間に対応する当時のassetを回収してdescriptorを復元・検証するか、新しい安全なretention baselineを作り直す必要がある。現状のstagingはlegacy flat 17 filesでretained manifestを配っていないため、このmigrationは未発生。
+
+browser loaderの変更はretained entryの追加descriptor field受け入れとJCS/releaseId照合に限る。station selection/fetch, current manifest pinning, current payload verification/rendering/error/UXは変更しない。この加算的metadata acceptanceは新manifestをPhase 4-8C runtimeが読めるために必要で、runtime contract IDは維持する。古いrelease-managed runtimeが未知fieldを拒否するため、descriptor付きretention manifestを生成する前に新しいruntime shellをcurrentにdeployする必要がある。旧flat runtimeはmanifestを読まない。
+
+### 19.4 Phase 4-8D-2 Production接続への受け渡し
+
+- 取得対象: root `manifest.json`; retain期限内のcurrent + retained releaseごとの8 JSON (`/releases/<id>/<filename>`); 有効な`legacyCompatibilityV1`があればroot flat 8 JSON。shell assetsは新release artifactから使い、old generation assetsは取得・carryしない。
+- Access:専用Cloudflare Access Service TokenのClient ID / Client SecretをGitHub Environment secretsに置き、`CF-Access-Client-Id` / `CF-Access-Client-Secret` headerとしてretention download stepだけへ注入。Wrangler tokenと権限/Environmentを分離する。値・headers・response bodyをshell trace/logへ出さない。
+- HTTP:unconditional GET、redirect禁止、各JSONは200のみを通常成功とする。`manifest.json`/JSONは`application/json` Content-Typeを確認し、Content-Lengthがあれば実raw bytesと比較したうえでmanifestのbytes/SHA-256を照合する。304はconditional requestを使わない限りエラー。将来conditional GETを使う場合は同一run内の以前に検証済みraw bodyがあるときだけ304を復元可能にする。
+- timeout/retry:提案初期値はconnect 5s、file 30s、1 deploy fetch全体5分。408/429/5xx/network timeoutだけ最大2回のbounded backoffを許し、401/403/404、redirect、不正MIME、途中切断、hash/bytes不一致は即abort。再試行後も失敗なら公開しない。値はD-2実測で調整する。
+- Race control:GitHub deploy jobをPages project単位のnon-canceling concurrency groupへ入れる。download後manifest raw SHA-256とcurrent releaseIdを保存し、assembly・final validation後、Direct Upload直前にProduction aliasのmanifestをno-cacheで再GETし、raw hash/releaseIdが同じことを要求する。差があればartifactを捨てて新しいcurrentを取得し直す。GitHub concurrency外のDashboard/manual deployはCASで封じられないため、D-2では手動uploadをfreezeする運用窓を設けるか、Cloudflare側の唯一writer化を判断する。
+- Rollback:aliasが以前のretained IDへ戻った場合、そのmanifestを新しいsource of truthとして再取得する。そのIDをcurrentから除き、過去のretiredAtを解除し、今回currentから退くgenerationだけをnowでretireする。rollback deploymentが保持manifestを欠く/old bytes欠損なら次のassemblyはfail closed。rollback自体のPages操作後にmanifest/file setを再検証する。
+
+このPhaseはCLI local inputしか扱わず、HTTP取得、Access credential、workflow、Cloudflare Direct Uploadは実装していない。未決事項はD-2前に、production upload concurrency外writer対策、actual payload/tree byte budgetとallowance、Cloudflare Access MIME/redirect behavior、unpublished manifestの扱いを確定する。
 
 ## 16. 根拠・作業境界
 

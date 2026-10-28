@@ -1,7 +1,7 @@
-"""Phase 4-8A content-addressed release, manifest and envelope contracts.
+"""Shared content-addressed release, manifest, envelope, and byte contracts.
 
-This module is deliberately not wired into the current public builder or
-artifact validator. It operates on JSON-domain values and raw byte strings.
+This module serves the opt-in release-managed builder/validator and local
+assembly tool while the default public artifact remains the legacy format.
 """
 from __future__ import annotations
 
@@ -327,14 +327,27 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         _fail("invalid_retained_releases", "retainedReleases must be an array")
     seen = {release_id}
     for item in retained:
-        retained_fields = {"releaseId", "publishedAt", "retiredAt", "retainUntil", "serviceDateRange", "stations"}
-        if not isinstance(item, dict) or set(item) != retained_fields or not _valid_release_id(item.get("releaseId")):
+        retained_fields = {"releaseId", "releaseDescriptor", "publishedAt", "retiredAt", "retainUntil",
+                            "serviceDateRange", "stations"}
+        legacy_retained_fields = retained_fields - {"releaseDescriptor"}
+        if not isinstance(item, dict) or set(item) not in (retained_fields, legacy_retained_fields) \
+           or not _valid_release_id(item.get("releaseId")):
             _fail("invalid_retained_releases", "retained release entry is malformed")
         if item["releaseId"] in seen:
             _fail("duplicate_release", "current and retained release IDs must be unique")
         seen.add(item["releaseId"])
         if not all(_timestamp(item[key]) for key in ("publishedAt", "retiredAt", "retainUntil")):
             _fail("invalid_retained_releases", "retained timestamps must include timezone offsets")
+        descriptor = item.get("releaseDescriptor")
+        if descriptor is not None:
+            if calculate_release_id(descriptor) != item["releaseId"]:
+                _fail("release_id_mismatch", "retained releaseDescriptor does not produce releaseId")
+            if descriptor["runtimeContract"] != value["runtimeContract"] or \
+               descriptor["manifestSchemaVersion"] != value["schemaVersion"] or \
+               descriptor["jsonEnvelopeSchemaVersion"] != value["jsonEnvelopeSchemaVersion"] or \
+               descriptor["payloadSchemaVersion"] != value["payloadSchemaVersion"] or \
+               descriptor["publicDataScope"] != value["dataScope"]:
+                _fail("compatibility_mismatch", "retained descriptor compatibility values differ")
         rr = item["serviceDateRange"]
         if not isinstance(rr, dict) or set(rr) != {"from", "through"} or \
            not _date(rr.get("from"), "date") or not _date(rr.get("through"), "date") or rr["from"] > rr["through"]:

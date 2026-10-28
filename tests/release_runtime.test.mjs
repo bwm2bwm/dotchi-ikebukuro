@@ -74,6 +74,27 @@ test('manifest descriptor and releaseId stay pinned across destination requests 
   assert.equal((await newSession.loadStation('Hikawadai')).schemaVersion, 1);
 });
 
+test('release runtime accepts retained release descriptors and rejects a descriptor ID mismatch', async () => {
+  const current = releaseFixture();
+  const previous = releaseFixture(true);
+  current.manifest.retainedReleases = [{ releaseId: previous.releaseId,
+    releaseDescriptor: previous.manifest.releaseDescriptor,
+    publishedAt: '2026-10-27T00:00:00Z', retiredAt: '2026-10-28T00:00:00Z',
+    retainUntil: '2026-11-04T00:00:00Z', serviceDateRange: previous.manifest.serviceDateRange,
+    stations: previous.manifest.stations }];
+  const valid = encodeManifest(current.manifest);
+  const session = await createReleaseRuntimeSession({
+    fetchImpl: async url => url === '/manifest.json' ? response(valid) : response(current.stationJsonBytes.Hikawadai),
+    cryptoImpl: webcrypto,
+  });
+  assert.equal(session.releaseId, current.releaseId);
+  const malformed = structuredClone(current.manifest);
+  malformed.retainedReleases[0].releaseDescriptor.builderContractVersion = 'altered';
+  await assert.rejects(createReleaseRuntimeSession({
+    fetchImpl: async () => response(Buffer.from(canonicalizeJcs(malformed))), cryptoImpl: webcrypto,
+  }), { code: 'release_id_mismatch' });
+});
+
 test('release runtime rejects hash/length changes, unavailable Web Crypto and missing manifest', async () => {
   const fixture = releaseFixture();
   const fetchImpl = async url => url === '/manifest.json' ? response(encodeManifest(fixture.manifest))

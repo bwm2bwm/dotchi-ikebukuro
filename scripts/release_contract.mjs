@@ -224,11 +224,20 @@ export function validateManifest(value) {
   if (!Array.isArray(value.retainedReleases)) fail('invalid_retained_releases', 'retainedReleases must be an array');
   const seen = new Set([value.releaseId]);
   for (const entry of value.retainedReleases) {
-    const retainedFields = ['releaseId', 'publishedAt', 'retiredAt', 'retainUntil', 'serviceDateRange', 'stations'];
-    if (!exactKeys(entry, retainedFields) || !validRelease(entry.releaseId)) fail('invalid_retained_releases', 'retained release entry is malformed');
+    const retainedFields = ['releaseId', 'releaseDescriptor', 'publishedAt', 'retiredAt', 'retainUntil', 'serviceDateRange', 'stations'];
+    const legacyRetainedFields = retainedFields.filter((key) => key !== 'releaseDescriptor');
+    if ((!exactKeys(entry, retainedFields) && !exactKeys(entry, legacyRetainedFields)) || !validRelease(entry.releaseId)) fail('invalid_retained_releases', 'retained release entry is malformed');
     if (seen.has(entry.releaseId)) fail('duplicate_release', 'current and retained release IDs must be unique');
     seen.add(entry.releaseId);
     if (![entry.publishedAt, entry.retiredAt, entry.retainUntil].every(validTimestamp)) fail('invalid_retained_releases', 'retained timestamps are malformed');
+    if (entry.releaseDescriptor !== undefined) {
+      if (calculateReleaseId(entry.releaseDescriptor) !== entry.releaseId) fail('release_id_mismatch', 'retained releaseDescriptor does not produce releaseId');
+      if (entry.releaseDescriptor.runtimeContract !== value.runtimeContract
+          || entry.releaseDescriptor.manifestSchemaVersion !== value.schemaVersion
+          || entry.releaseDescriptor.jsonEnvelopeSchemaVersion !== value.jsonEnvelopeSchemaVersion
+          || entry.releaseDescriptor.payloadSchemaVersion !== value.payloadSchemaVersion
+          || entry.releaseDescriptor.publicDataScope !== value.dataScope) fail('compatibility_mismatch', 'retained descriptor compatibility values differ');
+    }
     validateRange(entry.serviceDateRange);
     validateStationRecords(entry.stations, entry.releaseId);
   }
