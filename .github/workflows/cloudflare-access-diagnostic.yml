@@ -39,7 +39,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Compare staging Service Token clients
+      - name: Compare station JSON and manifest Service Token requests
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}

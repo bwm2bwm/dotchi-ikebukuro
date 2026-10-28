@@ -21,7 +21,13 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-URL = "https://dotchi-ikebukuro-staging.pages.dev/timetable-Wakoshi.json"
+URL_STATION_JSON = "https://dotchi-ikebukuro-staging.pages.dev/timetable-Wakoshi.json"
+URL_MANIFEST = "https://dotchi-ikebukuro-staging.pages.dev/manifest.json"
+URL = URL_STATION_JSON  # Keep the original station-only API default for callers/tests.
+ENDPOINT_URLS = {
+    "station_json": URL_STATION_JSON,
+    "manifest": URL_MANIFEST,
+}
 USER_AGENT = "dotchi-ikebukuro-access-client-compare/1.0"
 TIMEOUT_SECONDS = 20
 _RAY = re.compile(r"^[A-Za-z0-9-]{1,64}$")
@@ -63,7 +69,7 @@ def _validate_url(url: str, *, allow_loopback_http: bool) -> None:
     parts = urlsplit(url)
     if parts.username or parts.password or parts.query or parts.fragment or not parts.hostname:
         raise DiagnosticError("diagnostic URL is invalid")
-    if url == URL:
+    if url in ENDPOINT_URLS.values():
         return
     if allow_loopback_http and parts.scheme == "http" and parts.hostname in {"127.0.0.1", "::1", "localhost"}:
         return
@@ -242,11 +248,39 @@ def compare(*, client_id: str, client_secret: str, url: str = URL,
     return curl_result, python_result, _comparison(curl_result, python_result)
 
 
+def compare_endpoints(*, client_id: str, client_secret: str,
+                      endpoint_urls: dict[str, str] | None = None,
+                      allow_loopback_http: bool = False,
+                      curl_path: str | None = None, curl_run: Callable = subprocess.run,
+                      urllib_opener_factory: Callable[[], object] | None = None,
+                      timeout: float = TIMEOUT_SECONDS
+                      ) -> dict[str, tuple[Result, Result, str]]:
+    """Compare both clients against station JSON and manifest endpoints."""
+    selected_urls = ENDPOINT_URLS if endpoint_urls is None else endpoint_urls
+    if set(selected_urls) != set(ENDPOINT_URLS):
+        raise DiagnosticError("diagnostic endpoint set is invalid")
+    results = {}
+    for name in ("station_json", "manifest"):
+        results[name] = compare(client_id=client_id, client_secret=client_secret,
+            url=selected_urls[name], allow_loopback_http=allow_loopback_http,
+            curl_path=curl_path, curl_run=curl_run,
+            urllib_opener_factory=urllib_opener_factory, timeout=timeout)
+    return results
+
+
 def _print_result(name: str, result: Result) -> None:
     print(f"{name}.http_status={result.status if result.status is not None else 'unavailable'}")
     print(f"{name}.content_type={result.content_type}")
     print(f"{name}.cf_ray={result.cf_ray}")
     print(f"{name}.error_type={result.error_type}")
+
+
+def _interpretation(endpoint: str, result: Result) -> str:
+    if result.status == 403:
+        return "access_or_access_control_403"
+    if endpoint == "manifest" and result.status == 200 and result.content_type == "text/html":
+        return "spa_fallback_candidate"
+    return "no_special_interpretation"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         if not client_secret:
             client_secret = getpass.getpass("Cloudflare Access Client Secret (hidden): ")
         _validate_credentials(client_id, client_secret)
-        curl_result, python_result, outcome = compare(client_id=client_id, client_secret=client_secret)
+        results = compare_endpoints(client_id=client_id, client_secret=client_secret)
     except DiagnosticError as error:
         print(f"diagnostic_failed={error}", file=sys.stderr)
         return 2
@@ -272,9 +306,14 @@ def main(argv: list[str] | None = None) -> int:
         # Best-effort reference release; Python strings cannot be reliably zeroized.
         client_id = None
         client_secret = None
-    _print_result("curl", curl_result)
-    _print_result("python_urllib", python_result)
-    print(f"comparison={outcome}")
+    all_successful = True
+    for endpoint, (curl_result, python_result, outcome) in results.items():
+        _print_result(f"{endpoint}.curl", curl_result)
+        print(f"{endpoint}.curl.interpretation={_interpretation(endpoint, curl_result)}")
+        _print_result(f"{endpoint}.python_urllib", python_result)
+        print(f"{endpoint}.python_urllib.interpretation={_interpretation(endpoint, python_result)}")
+        print(f"{endpoint}.comparison={outcome}")
+        all_successful = all_successful and outcome == "curl_200_python_200"
     for normalized, names in _PROXY_VARIABLE_GROUPS.items():
         present = any(os.environ.get(name) for name in names)
         print(f"transport_context.{normalized}={'present' if present else 'absent'}")
@@ -282,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"transport_context.{name.lower()}={'present' if os.environ.get(name) else 'absent'}")
     print("transport_context.curlrc=disabled")
     print("transport_context.redirects=disabled")
-    return 0 if outcome == "curl_200_python_200" else 1
+    return 0 if all_successful else 1
 
 
 if __name__ == "__main__":

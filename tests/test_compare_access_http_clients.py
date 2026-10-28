@@ -27,6 +27,10 @@ class _Server(ThreadingHTTPServer):
     status = 200
     slow = False
     requests: list[dict[str, str]]
+    paths: list[str]
+    responses: dict[str, tuple[int, str]]
+    response_sequences: dict[str, list[tuple[int, str]]]
+    path_counts: dict[str, int]
 
     def handle_error(self, request, client_address):  # noqa: ARG002
         # A timeout test intentionally closes a delayed mock connection.
@@ -41,10 +45,19 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.server.requests.append({key.lower(): value for key, value in self.headers.items()})
+        self.server.paths.append(self.path)
         if self.server.slow:
             time.sleep(0.4)
-        self.send_response(self.server.status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        count = self.server.path_counts.get(self.path, 0)
+        self.server.path_counts[self.path] = count + 1
+        sequence = self.server.response_sequences.get(self.path, [])
+        if count < len(sequence):
+            status, content_type = sequence[count]
+        else:
+            status, content_type = self.server.responses.get(
+                self.path, (self.server.status, "application/json; charset=utf-8"))
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
         self.send_header("CF-Ray", "aabbccddeeff0011-SJC")
         self.send_header("Content-Length", str(len(SENTINEL_BODY)))
         if self.server.status == 302:
@@ -67,6 +80,10 @@ class CompareAccessHttpClientsTests(unittest.TestCase):
         self.server.status = 200
         self.server.slow = False
         self.server.requests = []
+        self.server.paths = []
+        self.server.responses = {}
+        self.server.response_sequences = {}
+        self.server.path_counts = {}
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_port}/timetable-Wakoshi.json"
@@ -128,6 +145,79 @@ class CompareAccessHttpClientsTests(unittest.TestCase):
         self.assertEqual(python_result.status, 403)
         self.assertEqual(comparison, "curl_200_python_403")
 
+    def test_both_station_and_manifest_endpoints_with_spa_candidate(self):
+        self.server.responses["/timetable-Wakoshi.json"] = (200, "application/json; charset=utf-8")
+        self.server.responses["/manifest.json"] = (200, "text/html; charset=utf-8")
+        results = diagnostic.compare_endpoints(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            endpoint_urls={
+                "station_json": f"{self.url.rsplit('/', 1)[0]}/timetable-Wakoshi.json",
+                "manifest": f"{self.url.rsplit('/', 1)[0]}/manifest.json",
+            },
+            allow_loopback_http=True,
+            urllib_opener_factory=self.opener_factory,
+            timeout=2,
+        )
+        station = results["station_json"]
+        manifest = results["manifest"]
+        self.assertEqual(station[2], "curl_200_python_200")
+        self.assertEqual((station[0].content_type, station[1].content_type),
+                         ("application/json", "application/json"))
+        self.assertEqual(manifest[2], "curl_200_python_200")
+        self.assertEqual((manifest[0].content_type, manifest[1].content_type),
+                         ("text/html", "text/html"))
+        self.assertEqual(diagnostic._interpretation("manifest", manifest[0]), "spa_fallback_candidate")
+        self.assertEqual(self.server.paths, [
+            "/timetable-Wakoshi.json", "/timetable-Wakoshi.json",
+            "/manifest.json", "/manifest.json",
+        ])
+        for request in self.server.requests:
+            self.assertEqual(request["user-agent"], diagnostic.USER_AGENT)
+            self.assertEqual(request["accept"], "application/json")
+            self.assertEqual(request["accept-encoding"], "identity")
+            self.assertNotIn("cookie", request)
+
+    def test_station_200_and_manifest_403_are_separately_classified(self):
+        self.server.responses["/timetable-Wakoshi.json"] = (200, "application/json")
+        self.server.responses["/manifest.json"] = (403, "application/json")
+        results = diagnostic.compare_endpoints(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            endpoint_urls={
+                "station_json": f"{self.url.rsplit('/', 1)[0]}/timetable-Wakoshi.json",
+                "manifest": f"{self.url.rsplit('/', 1)[0]}/manifest.json",
+            },
+            allow_loopback_http=True,
+            urllib_opener_factory=self.opener_factory,
+            timeout=2,
+        )
+        self.assertEqual(results["station_json"][2], "curl_200_python_200")
+        self.assertEqual(results["manifest"][2], "curl_403_python_403")
+        self.assertEqual(diagnostic._interpretation("manifest", results["manifest"][0]),
+                         "access_or_access_control_403")
+
+    def test_curl_and_urllib_disagreement_is_reported_for_manifest(self):
+        self.server.responses["/timetable-Wakoshi.json"] = (200, "application/json")
+        self.server.response_sequences["/manifest.json"] = [
+            (200, "text/html"), (403, "application/json")]
+        results = diagnostic.compare_endpoints(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            endpoint_urls={
+                "station_json": f"{self.url.rsplit('/', 1)[0]}/timetable-Wakoshi.json",
+                "manifest": f"{self.url.rsplit('/', 1)[0]}/manifest.json",
+            },
+            allow_loopback_http=True,
+            urllib_opener_factory=self.opener_factory,
+            timeout=2,
+        )
+        curl_result, python_result, comparison = results["manifest"]
+        self.assertEqual(comparison, "curl_200_python_403")
+        self.assertEqual(diagnostic._interpretation("manifest", curl_result), "spa_fallback_candidate")
+        self.assertEqual(diagnostic._interpretation("manifest", python_result),
+                         "access_or_access_control_403")
+
     def test_curl_config_keeps_secrets_out_of_argv_and_aligns_protocol(self):
         seen = {}
 
@@ -184,10 +274,16 @@ class CompareAccessHttpClientsTests(unittest.TestCase):
         err = io.StringIO()
         with patch.dict(os.environ, {"CF_ACCESS_CLIENT_ID": CLIENT_ID,
                                      "CF_ACCESS_CLIENT_SECRET": CLIENT_SECRET}), \
-             patch.object(diagnostic, "compare", return_value=(
-                 diagnostic.Result(status=200, content_type="application/json"),
-                 diagnostic.Result(status=403, content_type="application/json"),
-                 "curl_200_python_403")), \
+             patch.object(diagnostic, "compare_endpoints", return_value={
+                 "station_json": (
+                     diagnostic.Result(status=200, content_type="application/json"),
+                     diagnostic.Result(status=200, content_type="application/json"),
+                     "curl_200_python_200"),
+                 "manifest": (
+                     diagnostic.Result(status=200, content_type="text/html"),
+                     diagnostic.Result(status=403, content_type="application/json"),
+                     "curl_200_python_403"),
+             }), \
              redirect_stdout(out), redirect_stderr(err):
             code = diagnostic.main(["--run-live"])
         self.assertEqual(code, 1)
@@ -195,8 +291,10 @@ class CompareAccessHttpClientsTests(unittest.TestCase):
         self.assertNotIn(CLIENT_ID, combined)
         self.assertNotIn(CLIENT_SECRET, combined)
         self.assertNotIn(SENTINEL_BODY, combined)
-        self.assertIn("curl.http_status=200", combined)
-        self.assertIn("python_urllib.http_status=403", combined)
+        self.assertIn("station_json.curl.http_status=200", combined)
+        self.assertIn("manifest.python_urllib.http_status=403", combined)
+        self.assertIn("manifest.curl.interpretation=spa_fallback_candidate", combined)
+        self.assertIn("manifest.python_urllib.interpretation=access_or_access_control_403", combined)
 
     def test_missing_environment_secret_stops_noninteractive_run_before_network(self):
         output = io.StringIO()

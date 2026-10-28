@@ -23,7 +23,11 @@ test('diagnostic workflow is manual, main-only, read-only, and Environment gated
 
 test('diagnostic runs the fixed curl/Python comparator and leaves the publishing workflow untouched', () => {
   assert.match(workflow, /scripts\/compare_access_http_clients\.py --run-live/);
-  assert.match(script, /URL = "https:\/\/dotchi-ikebukuro-staging\.pages\.dev\/timetable-Wakoshi\.json"/);
+  assert.match(script, /URL_STATION_JSON = "https:\/\/dotchi-ikebukuro-staging\.pages\.dev\/timetable-Wakoshi\.json"/);
+  assert.match(script, /URL_MANIFEST = "https:\/\/dotchi-ikebukuro-staging\.pages\.dev\/manifest\.json"/);
+  assert.match(script, /def compare_endpoints/);
+  assert.match(script, /spa_fallback_candidate/);
+  assert.match(script, /access_or_access_control_403/);
   assert.match(script, /"--http1\.1"/);
   assert.match(script, /"--disable"/);
   assert.match(script, /Accept: application\/json/);
