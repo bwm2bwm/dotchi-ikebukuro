@@ -1,5 +1,14 @@
 # 開発ログ
 
+## 2026-10-28 — T12 Phase 4-8D-2B GitHub Actions release-managed統合
+
+- `.github/workflows/synthetic-public-ci.yml`は`workflow_dispatch`を維持し、`main-branch-guard → build → validate → release-and-deploy`へ変更。buildはsynthetic fixtureから`--release-managed` 18-file artifactを作り、run-scoped immutable Artifact ID/archive digestで別jobへ渡す。validate jobは`--release-managed` independent validatorとtree SHA-256を出し、Environment jobで同一ID/digest/treeを再確認してから処理する。
+- `publish_staging` boolean inputをdefault falseにし、false時はrelease/deploy jobをskip。true時だけ`pages-staging` Environmentを要求し、Required Reviewer承認後にEnvironment secretsを利用可能にする。`allow_initial_legacy_migration`もdefault falseの別inputで、初回のみ明示する。fetch CLIがmanifest HTTP 404の場合だけstrict legacy 17-file migrationを行い、manifest不正/401/403からfallbackしない。
+- 承認済みjob内でproduction alias `https://dotchi-ikebukuro-staging.pages.dev`からsnapshotをfetchし、既存CLIのfetch前後fingerprint、strict legacy/release validatorを利用。既存D-1 assemblyで旧世代とnew releaseを結合し、completed artifactを独立検証する。Direct Upload直前には取得時fingerprintを既存`fingerprint --expected-sha256` APIで照合し、差異・エラー時はuploadしない。
+- Actions内staging writer concurrency groupをref非依存・`cancel-in-progress:false`に設定。Access Client ID/Secretはfetch/recheck stepだけ、Cloudflare API token/Account IDはcredential/project checkとDirect Upload stepだけに渡す。diagnostic logはCloudflare project listのstdout/stderrを抑止し、既存safe parserへ処理を渡す。Dashboard手動deployはこのlockに含まれず、check-to-uploadにも完全CASはないので、workflow実行中のmanual writer停止をrunbookへ記載。
+- READMEを新しい二重gate（dispatch入力default false + `pages-staging` approval）、run sequence、初回migration、Dashboard競合へ更新。`tests/release_managed_workflow.test.mjs` 4件でmanual-only/default false/main+needs+Environment/step order/secret scope/project targetを検証。Ruby YAML parse、job structure、全run block `bash -n`が成功。local synthetic legacy17 + release18 → assembly26 → independent validate成功。Python全体133件、Node全体134件が成功。workflow専用testも全4件成功。
+- このrunではworkflow_dispatch実行、Cloudflareへの接続/Direct Upload、ODPTアクセス、GitHub設定/secret変更、commit/push/mergeを行わない。stagingは現状legacy17-fileのまま。
+
 ## 2026-10-28 — T12 Phase 4-8D-2A Production alias HTTP取得・競合検知
 
 - `scripts/fetch_production_artifact.py`を追加。固定originのHTTPS取得、明示したlocalhost-only HTTP test、redirect拒否、safe relative path、status/MIME/Content-Length/raw byte/count budgets、timeoutと有限retry、symlink/既存出力拒否、失敗時stage cleanupを実装した。Service Tokenは`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`環境変数からHTTP headerにし、CLI引数・exception・resultへ出さない。

@@ -70,15 +70,19 @@ python3 scripts/validate_public_artifact.py /tmp/dotchi-public-site
 
 ### GitHub Actions synthetic CI
 
-`.github/workflows/synthetic-public-ci.yml` は手動起動専用です。mainへworkflowを取り込んだ後、GitHubの **Actions → Synthetic public site CI → Run workflow** から `main` を選んで起動します。main以外を選んだ実行はguard jobで失敗し、buildへ進みません。
+`.github/workflows/synthetic-public-ci.yml` は手動起動専用です。mainへworkflowを取り込んだ後、GitHubの **Actions → Synthetic public site CI → Run workflow** から `main` を選びます。main以外を選んだ実行はguard jobで失敗し、buildへ進みません。
 
-build jobはrunner一時領域でJST当日基準のsynthetic fixtureから17ファイルを作り、3日間有効のArtifactとして保存します。別runnerのvalidate jobはArtifact IDで同じ成果物を取得し、独立validatorを実行します。取得時のSHA-256 archive digest検証に加え、validation後の展開済みファイル集合digestをdeploy jobでも再計算して一致を確認します。
+workflow_dispatchの`publish_staging`は既定でfalseです。このまま起動するとsynthetic fixtureのrelease-managed buildと独立validationまで実行し、Environment secretsには触れず、deploy jobはskipされます。stagingへ進める場合だけ`publish_staging=true`を選びます。既存Productionがlegacy 17 filesのままである初回移行時だけ、別入力`allow_initial_legacy_migration=true`も明示します。release-managed manifestが欠落/不正ならlegacy扱いへfallbackせず失敗します。
+
+build jobはrunner一時領域でJST当日基準のsynthetic fixtureから18-file release-managed artifactを作り、3日間有効のArtifactとして保存します。別runnerのvalidate jobはArtifact IDで同じ成果物を取得し、release-managed independent validatorを実行します。取得時のSHA-256 archive digest検証に加え、validation後の展開済みfile tree digestをEnvironment jobでも再計算して一致を確認します。
 
 ### Cloudflare Pages stagingへの承認付きdeploy
 
-workflowは `main-branch-guard → build → validate → deploy` の順です。deployは `needs: validate` とし、`pages-staging` GitHub Environmentの承認後にだけ開始します。Cloudflare tokenはdeploy job内のCloudflare関連stepにだけ渡し、build/validateはCloudflare・ODPT secretsを参照しません。Wrangler `4.152.0`を固定し、既存プロジェクト `dotchi-ikebukuro-staging` の `main` branchへ同runの検証済みArtifactをDirect Uploadします。プロジェクト一覧で対象projectの存在を確認し、存在しない場合は失敗します。workflowからprojectを作成する処理はありません。
+`main-branch-guard → build → validate → release-and-deploy`の順です。最後のjobは`publish_staging=true`の場合だけ有効になり、`pages-staging` GitHub EnvironmentのRequired Reviewer承認後に開始します。承認前はAccess/Cloudflare secretsがjobへ供給されず、Production aliasの取得もdeployも起きません。Cloudflare Access tokenはsnapshot fetchとdeploy前fingerprint recheck stepだけ、Cloudflare API tokenはcredential/project確認とDirect Upload stepだけに渡します。Wrangler `4.152.0`を固定し、既存project `dotchi-ikebukuro-staging`の`main` branchへ、assembly済み成果物をDirect Uploadします。projectが見つからない場合は失敗し、workflowからprojectを作成しません。
 
-手動起動は **Actions → Synthetic public site CI → Run workflow → Branch: main → Run workflow** です。validation成功後にdeploy jobが承認待ちになります。GitHubの **Environments → pages-staging → Review deployments** で内容を確認して承認するとdeployします。承認しない／拒否した場合はdeployされません。Artifactは3日で期限切れになるため、承認待ちが長引いて期限切れになったrunは承認せず、workflowを再実行してください。構成実装時のローカル検証ではGitHub ActionsやCloudflareを実行していません。初回deployの結果は以下に記録しています。
+`release-and-deploy`はAccess認証付きでProduction aliasのsnapshotを取得し、fetch前後のfingerprintを確認します。初回legacy許可を入力した場合もHTTP 404時だけ17-file strict validationを行います。D-1 assembly、完成artifactの独立validation、alias fingerprint再確認、Direct Uploadの順で、どれかが失敗すればupload stepに到達しません。同workflow内のstaging publishは固定concurrency groupで直列化します。GitHub Actions外のCloudflare Dashboard deployはこのlockに参加しないため、Actions実行中は手動Dashboard deployを避けてください。fingerprint確認からDirect Uploadまで完全排他されるわけではありません。
+
+このPhaseではActions workflowを起動せず、Cloudflareへdeployしていません。既存stagingは引き続きlegacy 17-fileのままです。実際にstagingへ進める前に`publish_staging=true`を選び、初回ならlegacy migrationも別途明示し、Environment approvalを行ってください。Artifactは3日で期限切れになるため、承認待ちが長引いて期限切れになったrunは承認せずworkflowを再実行します。
 
 初回deployはGitHub Actions run **#4** で成功しました。全guard/build/validate/approval/artifact検証/deploy処理が成功し、Wrangler project確認は`project_found`（Wrangler/diagnostic終了コードはいずれも0）でした。Cloudflare Pages `dotchi-ikebukuro-staging`の`main` branchへ、syntheticデータのみを含むdeployment（画面表示ID `13e10889`）を配信しています。既存GitHub Pages root mockは変更していません。
 

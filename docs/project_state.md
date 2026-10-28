@@ -16,6 +16,14 @@
 - `tests/test_fetch_production_artifact.py` localhost HTTP test 12件成功。current-only 18-file、retained付き26-file、legacy alias付き26-file release artifact、および17-file legacy snapshotを取得しvalidator通過。legacy/release snapshotをD-1 assemblyへ直接渡し、出力artifactも再検証。Python全体 `python3 -B -m unittest discover -s tests -v` は133件成功、Node全体 `node --test tests/*.test.mjs` は130件成功。最終focused rerunでlegacy/release中race、別origin redirect未到達、secretをerrorに含めないこと、file-count limitも確認。D-2B未着手事項はCloudflare Service AuthとOTP共存/host scope、staging/prod別token、Environment secret、single-writer運用、Pages/Actions/ODPT制限確認、workflow concurrency/preflight/rollback統合。
 - 詳細: [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) Phase 4-8D-2A。実装・テストだけを追加し、workflow、Cloudflare設定、staging artifactは変更していない。
 
+### T12 Phase 4-8D-2B staging workflow統合（2026-10-28）
+
+- `.github/workflows/synthetic-public-ci.yml`をrelease-managedへ統合。手動`workflow_dispatch`、main guard、synthetic 18-file build、immutable Artifact ID/digest搬送、release-managed独立validate、Environment承認後のalias snapshot取得、D-1 assembly、完成tree独立validate、deploy直前fingerprint再確認、Direct Uploadの順。
+- `publish_staging` dispatch inputはdefault false。falseならbuild/validateだけでdeploy jobをskipし、Environment secrets/APIへ触れない。trueでも`pages-staging` Required Reviewer承認後でないとrelease job stepが始まらない。legacy 17-fileの初回移行は別の`allow_initial_legacy_migration` inputもtrueにした場合だけ許可し、HTTP 404以外からはfallbackしない。
+- 同一Pages project向け固定concurrency groupでActions内publishを直列化。Download stepのArtifact digestとvalidated tree digestを再確認し、Access tokenはfetchと直前recheck、Cloudflare API tokenはproject確認とDirect Uploadだけへstep scopeで渡す。取得/fingerprint/validation/assembly失敗ではDirect Uploadへ進まない。
+- 認証情報なしでworkflow YAML/job/dispatch/credential scope/sequenceを4件のNode static test、Ruby YAML parse、全`run` blockの`bash -n`で検証。Python全体133件、Node全体134件、D-1 local legacy migration build→assembly→validate（26 files）も成功。Actionsは起動せず、Cloudflare stagingは引き続きlegacy 17 files。
+- READMEにdispatch操作、二入力gate、Environment承認、初回移行とDashboard競合の注意を反映。残る条件は実Environment protection/secret availabilityのActions上確認、staging deployment前のユーザー承認、Dashboard writer停止、Cloudflare upload fail/rollback実地確認。Commit/Push/Merge/Deployなし。
+
 ### T12 Phase 4-8C QA改善（2026-10-28）
 
 - 固定時計の `cards` は維持し、QA専用 `destination-switch`（8駅で到着表示が異なるsynthetic payload）と `clock-running`（22:05開始、単調経過時間で進行）を追加。release-managed builder/validatorで検証するQA artifactに限る。本番fixture、runtime、18-file契約、workflowは変更なし。
