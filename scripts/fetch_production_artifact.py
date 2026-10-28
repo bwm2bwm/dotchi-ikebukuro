@@ -492,7 +492,9 @@ def fetch_production_artifact(*, base_url: str, output: Path,
                 raise ArtifactFetchError("output appeared during fetch; refusing to replace it")
             os.replace(stage, output_path)
             return {**stats, "mode": "legacy", "fingerprint": initial_fingerprint,
-                    "files_validated": validation["files"], "release_id": None}
+                    "files_validated": validation["files"], "release_id": None,
+                    "manifest_classification": ("spa_fallback" if initial_kind == "spa-html" else "http_404"),
+                    "fingerprint_verified": True}
 
         assert initial_manifest is not None
         manifest = _validate_release_manifest(initial_manifest)
@@ -512,7 +514,8 @@ def fetch_production_artifact(*, base_url: str, output: Path,
         return {**stats, "mode": "release-managed", "fingerprint": initial_fingerprint,
                 "release_id": manifest["releaseId"], "retained_releases": len(normalized["retainedReleases"]),
                 "legacy_compatibility": normalized["legacyCompatibilityV1"] is not None,
-                "files_validated": validation["files"]}
+                "files_validated": validation["files"],
+                "manifest_classification": "release-managed", "fingerprint_verified": True}
     except (OSError, ArtifactValidationError, ValueError) as error:
         if isinstance(error, ArtifactFetchError):
             raise

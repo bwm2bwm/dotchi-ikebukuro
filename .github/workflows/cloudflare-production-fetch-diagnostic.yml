@@ -1,0 +1,145 @@
+name: Cloudflare Production artifact fetch diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  main-branch-guard:
+    name: Require main branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Reject non-main refs
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Production artifact fetch diagnostic may only run from refs/heads/main." >&2
+          exit 1
+      - name: Confirm allowed ref
+        if: github.ref == 'refs/heads/main'
+        run: echo "Running from refs/heads/main."
+
+  diagnose:
+    name: Fetch and strictly validate current Production artifact
+    needs: main-branch-guard
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    environment:
+      name: pages-staging
+    env:
+      PRODUCTION_ALIAS: https://dotchi-ikebukuro-staging.pages.dev
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Set up Node.js for independent artifact validation
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.15.0'
+          package-manager-cache: false
+
+      - name: Fetch through the production CLI and validate the snapshot
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          snapshot_parent="$(mktemp -d "$RUNNER_TEMP/t12-fetch-diagnostic.XXXXXX")"
+          snapshot_dir="$snapshot_parent/artifact"
+          trap 'rm -rf -- "$snapshot_parent"' EXIT
+
+          fetch_args=(fetch --base-url "$PRODUCTION_ALIAS" --output "$snapshot_dir" --allow-initial-legacy-migration)
+          set +e
+          fetch_result="$(python3 -B scripts/fetch_production_artifact.py "${fetch_args[@]}" 2>&1)"
+          fetch_status=$?
+          set -e
+
+          if (( fetch_status != 0 )); then
+            failure_stage=artifact_fetch_or_validation
+            http_status=unavailable
+            error_type=fetch_validation_failed
+            if [[ "$fetch_result" =~ HTTP\ status\ ([0-9]{3})\ for\ ([A-Za-z0-9._/-]+) ]]; then
+              http_status="${BASH_REMATCH[1]}"
+              request_path="${BASH_REMATCH[2]}"
+              case "$request_path" in
+                manifest.json) failure_stage=manifest_request ;;
+                index.html) failure_stage=spa_root_request ;;
+                *) failure_stage=artifact_file_request ;;
+              esac
+              error_type="http_${http_status}"
+            elif [[ "$fetch_result" == *"manifest HTML response does not match"* ]]; then
+              failure_stage=manifest_classification
+              error_type=spa_html_mismatch
+            elif [[ "$fetch_result" == *"failed independent validation"* ]]; then
+              failure_stage=legacy_strict_validation
+              error_type=artifact_validation_failed
+            elif [[ "$fetch_result" == *"changed during fetch"* || "$fetch_result" == *"changed from SPA fallback"* ]]; then
+              failure_stage=fingerprint_or_generation_check
+              error_type=production_alias_changed
+            elif [[ "$fetch_result" == *"TLS request failed"* ]]; then
+              failure_stage=artifact_fetch
+              error_type=tls_error
+            elif [[ "$fetch_result" == *"timed out"* ]]; then
+              failure_stage=artifact_fetch
+              error_type=timeout
+            fi
+            echo "diagnostic_result=failed"
+            echo "failure_stage=$failure_stage"
+            echo "http_status=$http_status"
+            echo "error_type=$error_type"
+            exit 1
+          fi
+
+          set +e
+          summary="$(printf '%s' "$fetch_result" | python3 -c '
+          import json, sys
+          result = json.load(sys.stdin)
+          mode = result.get("mode")
+          classification = result.get("manifest_classification")
+          files = result.get("files")
+          validated = result.get("files_validated")
+          if mode not in {"legacy", "release-managed"}:
+              raise SystemExit(2)
+          if classification not in {"spa_fallback", "http_404", "release-managed"}:
+              raise SystemExit(2)
+          if not isinstance(files, int) or not isinstance(validated, int):
+              raise SystemExit(2)
+          if result.get("fingerprint_verified") is not True:
+              raise SystemExit(2)
+          if mode == "legacy" and (classification not in {"spa_fallback", "http_404"} or validated != 17):
+              raise SystemExit(2)
+          if mode == "release-managed" and classification != "release-managed":
+              raise SystemExit(2)
+          strict = "passed" if mode == "legacy" else "not_applicable"
+          print("manifest_classification=" + classification)
+          print("files_fetched=" + str(files))
+          print("legacy_strict_validation=" + strict)
+          print("fingerprint_match=confirmed")
+          ' 2>/dev/null)"
+          summary_status=$?
+          set -e
+          if (( summary_status != 0 )); then
+            echo "diagnostic_result=failed"
+            echo "failure_stage=diagnostic_summary_validation"
+            echo "http_status=unavailable"
+            echo "error_type=unexpected_cli_result"
+            exit 1
+          fi
+          echo "diagnostic_result=passed"
+          printf '%s\n' "$summary"

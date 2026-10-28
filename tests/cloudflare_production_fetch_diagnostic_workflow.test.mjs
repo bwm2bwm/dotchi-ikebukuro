@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const workflow = await readFile(path.join(root, '.github/workflows/cloudflare-production-fetch-diagnostic.yml'), 'utf8');
+const publishWorkflow = await readFile(path.join(root, '.github/workflows/synthetic-public-ci.yml'), 'utf8');
+
+test('production fetch diagnostic is manual, main-only, read-only, and Environment gated', () => {
+  assert.match(workflow, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow, /^  schedule:/m);
+  assert.match(workflow, /^permissions:\n  contents: read$/m);
+  assert.match(workflow, /needs: main-branch-guard/);
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /environment:\n      name: pages-staging/);
+  assert.match(workflow, /CF_ACCESS_CLIENT_ID: \$\{\{ secrets\.CF_ACCESS_CLIENT_ID \}\}/);
+  assert.match(workflow, /CF_ACCESS_CLIENT_SECRET: \$\{\{ secrets\.CF_ACCESS_CLIENT_SECRET \}\}/);
+  assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN|wrangler|pages deploy|upload-artifact|actions\/upload-artifact/);
+  assert.doesNotMatch(workflow, /set -x|echo .*CF_ACCESS_CLIENT/);
+});
+
+test('diagnostic reuses the production fetch CLI and reports only sanitized validation metadata', () => {
+  assert.match(workflow, /fetch_args=\(fetch /);
+  assert.match(workflow, /scripts\/fetch_production_artifact\.py/);
+  assert.match(workflow, /--allow-initial-legacy-migration/);
+  assert.match(workflow, /--base-url "\$PRODUCTION_ALIAS"/);
+  assert.match(workflow, /CF_ACCESS_CLIENT_ID: \$\{\{ secrets\.CF_ACCESS_CLIENT_ID \}\}/);
+  assert.match(workflow, /rm -rf -- "\$snapshot_parent"/);
+  assert.match(workflow, /manifest_classification=/);
+  assert.match(workflow, /files_fetched=/);
+  assert.match(workflow, /legacy_strict_validation=/);
+  assert.match(workflow, /fingerprint_match=confirmed/);
+  assert.match(workflow, /failure_stage=/);
+  assert.match(workflow, /http_status=/);
+  assert.match(workflow, /error_type=/);
+  assert.doesNotMatch(workflow, /echo ["']?\$fetch_result|echo .*fingerprint[^_a-z]/);
+  assert.doesNotMatch(publishWorkflow, /cloudflare-production-fetch-diagnostic/);
+});
