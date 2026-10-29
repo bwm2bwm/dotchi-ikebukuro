@@ -691,3 +691,12 @@
 - Tests: D-1 dedicated Python 13 cases成功（A→B、A/B→C、同release再投入、7/14/48時間境界と14日超過abort、JST/UTC同instant、current validity、期限+24h削除、legacy初回移行/expiry、manifest/path/missing/hash/descriptor/symlink、budget/cleanup）。Python全体 `python3 -B -m unittest discover -s tests -v` 121件成功（566.6秒）。Node全体 `node --test tests/*.test.mjs` 130件成功（40.7秒）、descriptor付きretained manifestのbrowser acceptance/mismatchも検査。追加のvalidator連携smoke 2件・syntax・`git diff --check`も成功。
 - 実測artifact: A→Bは26 files、292,178 bytes、最大file 45,180 bytes。A/B→Cは34 files、legacy→release-managed初回移行は26 files。default limitsは20,000 files / 25 MiB per file / 256 MiB total。workflow, CI, Cloudflare, ODPT/API, commit/push/mergeは変更・実行・接続なし。
 - D-2へ、Production aliasから取得するmanifest/current+retained station JSON/任意legacy aliases、Access Service Token headerのscope、200/MIME/redirect/304、timeout/retry、deploy前manifest fingerprint再確認、project concurrencyとDashboard writer freeze、rollback modelを設計書へ引継ぎ。実際のHTTP取得・GitHub Actions統合は未実装。
+
+## 2026-10-29 — T12 release-managed第2世代更新QA完了
+
+- Synthetic public site CI #12はSuccess。新Deployment B `2cfdeba2`をProduction currentとし、旧Deployment A `b357cd8c`を保持した。manifestは`current=B`、`retained=A`。完成artifactは34ファイル/8駅。
+- Read-only診断 #6はPASS。A世代保持とartifact fingerprintを確認した。Mac ChromeではB世代JSONのHTTP 200、画面時計の更新、目的地切替を確認。Bの時刻表切替に必要な基本動作はQA済み。
+- **保留:** 旧Aタブ継続配信、Rollback実地検証、未認証Access、Preview URL、cache挙動、`allow_initial_legacy_migration=true`のログ調査。これらは今回のSuccess/診断#6の範囲に含めない。
+- RollbackはDeployment全体の切替であり、Aをcurrentに戻すとB世代JSONがcurrent aliasから取得できないB pin済みタブはfail closedし、更新を求める可能性がある。cacheからの一時取得は保証しない。Aのservice-date/feed/application期間がQA時点で有効かも別途確認が必要。旧タブ継続配信と実Rollbackを未検証のため、Rollbackは保留とし、通常の更新・QAで実施しない。
+- 次回の第3世代以降の更新時は、切替後に旧Aタブを対象とする継続配信QAを実施する。未読み込み駅のJSON取得、失敗時のfail-closed表示と更新後のcurrent世代への移行を確認し、Rollbackを行う場合は別途事前条件と復旧先を確認する。
+- 次候補はODPT実データ公開準備。実ODPTの自動公開は未承認であり、今回実施した処理はsynthetic dataに限定。ODPTアクセス、追加Actions実行、Cloudflare設定変更、Rollback、commit/push/mergeは行っていない。
