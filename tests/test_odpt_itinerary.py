@@ -20,6 +20,7 @@ from odpt_itinerary import (  # noqa: E402
     VERIFIED_DESTINATION_IDS,
     _destination_data_issues,
     _legacy_destination_event_diagnostics,
+    _transfer_wait_in_bounds,
     choose_primary,
     format_service_time,
     parse_gtfs_time,
@@ -29,6 +30,12 @@ from odpt_stop_patterns import classify, resolve_type  # noqa: E402
 
 
 class DestinationEventDiagnosticTests(unittest.TestCase):
+    def test_transfer_wait_policy_boundaries(self):
+        self.assertFalse(_transfer_wait_in_bounds(59, 60, 3600))
+        self.assertTrue(_transfer_wait_in_bounds(60, 60, 3600))
+        self.assertTrue(_transfer_wait_in_bounds(3600, 60, 3600))
+        self.assertFalse(_transfer_wait_in_bounds(3601, 60, 3600))
+
     @staticmethod
     def event(drop_off_type: str, arrival_seconds: int | None = None) -> StopEvent:
         return StopEvent("destination", None, 2, arrival_seconds, None, "0", drop_off_type, None)
@@ -381,6 +388,23 @@ class LocalFeedItineraryTests(unittest.TestCase):
         self.assertTrue(any(r.primary_itinerary and r.primary_itinerary.arrival_seconds >= 86400
                             for r in results))
         self.assertEqual(sum(r.primary_itinerary.kind == "direct" for r in results if r.primary_itinerary), 287)
+
+    def test_opt_in_60_minute_cap_resolves_verified_long_waits_without_changing_default(self):
+        self.assertEqual(self.generator.max_transfer_seconds, 600)
+        v2_generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
+                                          destination_station_id="Hikawadai",
+                                          max_transfer_seconds=3600)
+        rows = v2_generator.generate("2026-10-29")
+        new_long_waits = [row for row in rows if row.best_transfer_alternative
+                          and row.direct_alternative is None
+                          and row.best_transfer_alternative.transfer_wait_seconds > 600]
+        self.assertEqual(len(new_long_waits), 4)
+        self.assertEqual(sorted(row.best_transfer_alternative.transfer_wait_seconds
+                                for row in new_long_waits), [660, 660, 660, 780])
+        self.assertTrue(all(row.primary_itinerary.kind == "transfer" and row.direct_alternative is None
+                            for row in new_long_waits))
+        self.assertTrue(all(row.best_transfer_alternative.second_leg.alight.can_alight
+                            for row in new_long_waits))
 
     def test_saturday_and_holiday_exceptions(self):
         saturday = self.generator.generate("2026-10-24")

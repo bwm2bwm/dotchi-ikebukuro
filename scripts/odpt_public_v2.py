@@ -27,9 +27,11 @@ SCHEMA_VERSION = 2
 DATA_SCOPE = "public-display-v2"
 MANIFEST_SCOPE = "private-odpt-public-display-v2-candidate-manifest"
 ROUTES = ("6", "9")
+V2_MIN_TRANSFER_SECONDS = 60
+V2_MAX_TRANSFER_SECONDS = 3600
 ROUTE_FILENAMES = {key: f"timetable-{key}.json" for key in DESTINATIONS}
 PUBLIC_ID_PATTERN = re.compile(r"p2-[0-9a-f]{32}\Z")
-EXCLUSION_REASONS = ("explicit_pass_info", "no_valid_arrival", "primary_arrival_missing",
+EXCLUSION_REASONS = ("explicit_pass_info", "transfer_wait_limit_info", "no_valid_arrival", "primary_arrival_missing",
                      "quality_warning", "unknown")
 EXCLUSION_CLASSIFICATIONS = ("INFO", "WARNING", "UNKNOWN")
 
@@ -175,6 +177,9 @@ def _exclusion_detail(result: Any) -> tuple[str, str]:
         return "explicit_pass_info", "INFO"
     if warning_codes:
         return "quality_warning", "WARNING"
+    if (result.status == "no_valid_arrival" and result.primary_itinerary is None
+            and getattr(result, "transfer_wait_policy_excluded", False)):
+        return "transfer_wait_limit_info", "INFO"
     if result.primary_itinerary is not None:
         return "primary_arrival_missing", "UNKNOWN"
     if result.status == "no_valid_arrival" and not codes:
@@ -256,7 +261,8 @@ def _exact_fields(value: Any, required: set[str], path: str) -> dict[str, Any]:
     return value
 
 
-def _validate_journey(value: Any, path: str, expected_kind: str | None = None) -> None:
+def _validate_journey(value: Any, path: str, expected_kind: str | None = None,
+                      max_transfer_wait_seconds: int = V2_MAX_TRANSFER_SECONDS) -> None:
     if value is None:
         if expected_kind:
             return
@@ -277,7 +283,8 @@ def _validate_journey(value: Any, path: str, expected_kind: str | None = None) -
                                  f"{path}_transfer")
         if transfer["stationId"] != "KotakeMukaihara":
             raise V2Error(f"{path}_transfer_station_invalid")
-        if not _safe_nonnegative_int(transfer["waitSeconds"]) or not 60 <= transfer["waitSeconds"] <= 600:
+        if (not _safe_nonnegative_int(transfer["waitSeconds"])
+                or not V2_MIN_TRANSFER_SECONDS <= transfer["waitSeconds"] <= max_transfer_wait_seconds):
             raise V2Error(f"{path}_transfer_wait_invalid")
         if transfer["outgoingRouteId"] not in ROUTES:
             raise V2Error(f"{path}_transfer_route_invalid")
@@ -329,6 +336,7 @@ def _expected_classification_counts(reason_counts: dict[str, int]) -> dict[str, 
     counts = {classification: 0 for classification in EXCLUSION_CLASSIFICATIONS}
     reason_classification = {
         "explicit_pass_info": "INFO",
+        "transfer_wait_limit_info": "INFO",
         "quality_warning": "WARNING",
         "no_valid_arrival": "UNKNOWN",
         "primary_arrival_missing": "UNKNOWN",
@@ -415,7 +423,11 @@ def _validate_exclusion_audit(audit: Any, expected_station_ids: list[str],
     return audit
 
 
-def validate_v2_payload(payload: Any) -> dict[str, Any]:
+def validate_v2_payload(payload: Any,
+                        max_transfer_wait_seconds: int = V2_MAX_TRANSFER_SECONDS) -> dict[str, Any]:
+    if (not _safe_nonnegative_int(max_transfer_wait_seconds)
+            or max_transfer_wait_seconds not in {600, V2_MAX_TRANSFER_SECONDS}):
+        raise V2Error("transfer_wait_policy_invalid")
     top = _exact_fields(payload, {"schemaVersion", "dataScope", "generatedAt", "timezone",
                                  "applicationPeriod", "stationId", "originStationId", "serviceDays"},
                         "payload")
@@ -474,9 +486,12 @@ def validate_v2_payload(payload: Any) -> dict[str, Any]:
             departure = row["departureServiceSeconds"]
             if not _safe_nonnegative_int(departure):
                 raise V2Error("departure_time_invalid")
-            _validate_journey(row["primary"], f"{row_path}_primary")
-            _validate_journey(row["directAlternative"], f"{row_path}_direct", "direct")
-            _validate_journey(row["bestTransferAlternative"], f"{row_path}_transfer", "transfer")
+            _validate_journey(row["primary"], f"{row_path}_primary",
+                              max_transfer_wait_seconds=max_transfer_wait_seconds)
+            _validate_journey(row["directAlternative"], f"{row_path}_direct", "direct",
+                              max_transfer_wait_seconds)
+            _validate_journey(row["bestTransferAlternative"], f"{row_path}_transfer", "transfer",
+                              max_transfer_wait_seconds)
             primary = row["primary"]
             if primary["departureServiceSeconds"] != departure:
                 raise V2Error("primary_departure_mismatch")
@@ -522,6 +537,18 @@ def validate_bundle(bundle_dir: Path, manifest: dict[str, Any],
         raise V2Error("source_fingerprint_mismatch")
     if manifest.get("evaluationServiceDates") != dates:
         raise V2Error("manifest_date_set_mismatch")
+    transfer_policy = manifest.get("transferSearchPolicy")
+    if transfer_policy is None:
+        # Earlier private bundles were generated with the shared generator's
+        # 600-second default and remain valid under that recorded-era policy.
+        bundle_max_transfer_wait = 600
+    elif transfer_policy == {
+            "minimumWaitSeconds": V2_MIN_TRANSFER_SECONDS,
+            "maximumWaitSeconds": V2_MAX_TRANSFER_SECONDS,
+            "crossServiceDateSearch": False}:
+        bundle_max_transfer_wait = V2_MAX_TRANSFER_SECONDS
+    else:
+        raise V2Error("transfer_search_policy_mismatch")
     candidate_dir = _validate_bundle_tree(bundle_dir, manifest)
     entries = manifest.get("candidateFiles")
     if not isinstance(entries, dict) or set(entries) != set(DESTINATIONS):
@@ -544,7 +571,7 @@ def validate_bundle(bundle_dir: Path, manifest: dict[str, Any],
             payload = json.loads(data)
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise V2Error("candidate_json_invalid") from None
-        validate_v2_payload(payload)
+        validate_v2_payload(payload, max_transfer_wait_seconds=bundle_max_transfer_wait)
         if payload["stationId"] != station_id:
             raise V2Error("candidate_station_mismatch")
         if [item["serviceDate"] for item in payload["serviceDays"]] != dates:
@@ -628,18 +655,20 @@ def _validate_odpt0_report(report: dict[str, Any], anchor: date,
 
 
 def _assert_odpt0_generation_matches(report: dict[str, Any], metrics: dict[str, Any]) -> None:
+    """Keep ODPT-0 tied to source rows and matches, not v2 transfer policy.
+
+    ODPT-0's primary direct/transfer counts use the shared generator's default
+    600-second cap. ODPT-1D intentionally uses 3600 seconds, so those primary
+    counts can differ while source generation and ODPT matching must remain exact.
+    """
     day_rows = report.get("dayResults")
     if not isinstance(day_rows, list):
         raise V2Error("odpt0_generation_consistency_mismatch")
     expected_count = sum(day.get("journeyCount", 0) for day in day_rows)
-    expected_direct = sum(day.get("primaryDirectCount", 0) for day in day_rows)
-    expected_transfer = sum(day.get("primaryTransferCount", 0) for day in day_rows)
     match_counts: collections.Counter[str] = collections.Counter()
     for day in day_rows:
         match_counts.update(day.get("odptMatchStatusCounts", {}))
     if (expected_count != metrics["itineraryResultCount"]
-            or expected_direct != metrics["primaryDirectCount"]
-            or expected_transfer != metrics["primaryTransferCount"]
             or dict(sorted(match_counts.items()))
             != dict(sorted(metrics["odptMatchStatusCounts"].items()))):
         raise V2Error("odpt0_generation_consistency_mismatch")
@@ -679,7 +708,9 @@ def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dic
                                          "exclusionStationDates": []}
     for station_id in DESTINATIONS:
         generator = ItineraryGenerator(gtfs_zip=snapshot / snapshot_qa.GTFS_NAME,
-                                       odpt_dir=snapshot, destination_station_id=station_id)
+                                       odpt_dir=snapshot, destination_station_id=station_id,
+                                       min_transfer_seconds=V2_MIN_TRANSFER_SECONDS,
+                                       max_transfer_seconds=V2_MAX_TRANSFER_SECONDS)
         if any(_strict_date(item) < generator.feed_start or _strict_date(item) > generator.feed_end
                for item in requested_dates):
             raise V2Error("requested_service_date_outside_feed")
@@ -745,6 +776,11 @@ def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dic
             "generatorFingerprint": _source_generator_fingerprint(),
             "evaluationAnchorServiceDate": anchor.isoformat(),
             "evaluationServiceDates": requested_dates,
+            "transferSearchPolicy": {
+                "minimumWaitSeconds": V2_MIN_TRANSFER_SECONDS,
+                "maximumWaitSeconds": V2_MAX_TRANSFER_SECONDS,
+                "crossServiceDateSearch": False,
+            },
             "quality": {"odpt0Status": qa_report["status"],
                         "itineraryResultCount": aggregate_metrics["itineraryResultCount"],
                         "odptMatchStatusCounts": dict(sorted(aggregate_metrics["odptMatchStatusCounts"].items())),

@@ -207,6 +207,9 @@ class DepartureResult:
     transfer_candidates_count: int
     status: str
     data_quality: list[str] = field(default_factory=list)
+    # A valid destination transfer existed but was outside the configured
+    # search policy. Kept private and separate from source-data diagnostics.
+    transfer_wait_policy_excluded: bool = False
 
 
 def choose_primary(direct: Itinerary | None, best_transfer: Itinerary | None) -> Itinerary | None:
@@ -219,6 +222,10 @@ def choose_primary(direct: Itinerary | None, best_transfer: Itinerary | None) ->
         item.transfer_wait_seconds or 0,
         item.second_leg.trip.trip_id if item.second_leg else "",
     ))
+
+
+def _transfer_wait_in_bounds(wait_seconds: int, minimum: int, maximum: int) -> bool:
+    return minimum <= wait_seconds <= maximum
 
 
 def parse_service_date(value: str | date) -> date:
@@ -665,7 +672,9 @@ class ItineraryGenerator:
         trips = enriched
 
         direct_by_origin: dict[str, Itinerary] = {}
-        transfer_by_origin: dict[str, list[Itinerary]] = defaultdict(list)
+        best_transfer_by_origin: dict[str, Itinerary] = {}
+        transfer_candidate_counts: dict[str, int] = defaultdict(int)
+        transfer_wait_policy_excluded: set[str] = set()
         diagnostics: dict[str, set[str]] = defaultdict(set)
         arrivals: dict[str, StopEvent] = {}
         departures: dict[str, StopEvent] = {}
@@ -883,33 +892,44 @@ class ItineraryGenerator:
                 if out_trip.route_id != OPPOSITE_ROUTE[in_trip.route_id]:
                     continue
                 wait = out_event.departure_seconds - in_event.arrival_seconds
-                if wait < 0 or wait > self.max_transfer_seconds:
+                if wait < 0:
+                    continue
+                if wait > self.max_transfer_seconds:
+                    h_event = departure_destinations.get(out_id)
+                    if h_event is not None and h_event.arrival_seconds is not None and h_event.can_alight:
+                        transfer_wait_policy_excluded.add(in_id)
                     continue
                 wait_histogram[wait] += 1
                 raw_pairs += 1
-                if wait < self.min_transfer_seconds:
+                if not _transfer_wait_in_bounds(wait, self.min_transfer_seconds,
+                                                self.max_transfer_seconds):
                     continue
                 h_event = departure_destinations.get(out_id)
                 if h_event is None or h_event.arrival_seconds is None or not h_event.can_alight:
                     continue
                 first = Leg(in_trip, in_trip.origin_event, in_event, in_trip.departure_seconds, in_event.arrival_seconds)
                 second = Leg(out_trip, out_event, h_event, out_event.departure_seconds, h_event.arrival_seconds)
-                transfer_by_origin[in_id].append(Itinerary(
+                candidate = Itinerary(
                     "transfer", in_trip.departure_seconds, h_event.arrival_seconds, in_trip.departure_text,
                     format_service_time(h_event.arrival_seconds) or "", first, second, "小竹向原", wait,
                     arrival_station_id=self.destination_station_id,
-                ))
+                )
+                transfer_candidate_counts[in_id] += 1
+                current = best_transfer_by_origin.get(in_id)
+                candidate_key = (candidate.arrival_seconds, candidate.transfer_wait_seconds or 0,
+                                 candidate.second_leg.trip.trip_id if candidate.second_leg else "")
+                current_key = ((current.arrival_seconds, current.transfer_wait_seconds or 0,
+                                current.second_leg.trip.trip_id if current.second_leg else "")
+                               if current else None)
+                if current_key is None or candidate_key < current_key:
+                    best_transfer_by_origin[in_id] = candidate
         self.last_wait_histogram = dict(wait_histogram)
         self.last_raw_transfer_pairs = raw_pairs
 
         results: list[DepartureResult] = []
         for trip_id, trip in trips.items():
             direct = direct_by_origin.get(trip_id)
-            transfers = sorted(transfer_by_origin.get(trip_id, []), key=lambda item: (
-                item.arrival_seconds, item.transfer_wait_seconds or 0,
-                item.second_leg.trip.trip_id if item.second_leg else "",
-            ))
-            best_transfer = transfers[0] if transfers else None
+            best_transfer = best_transfer_by_origin.get(trip_id)
             primary = choose_primary(direct, best_transfer)
             if primary:
                 status = "ok" if direct else "transfer_only"
@@ -938,7 +958,9 @@ class ItineraryGenerator:
                 departure_text=trip.departure_text, headsign=trip.headsign, odpt=enrichment,
                 type_resolution=type_resolution,
                 primary_itinerary=primary, direct_alternative=direct, best_transfer_alternative=best_transfer,
-                transfer_candidates_count=len(transfers), status=status, data_quality=data_quality,
+                transfer_candidates_count=transfer_candidate_counts.get(trip_id, 0),
+                status=status, data_quality=data_quality,
+                transfer_wait_policy_excluded=(trip_id in transfer_wait_policy_excluded and primary is None),
             ))
         if transfer_enabled:
             transfer_data_insufficient_count = len(

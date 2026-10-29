@@ -88,7 +88,7 @@ function validateJourney(value, expectedKind, departureSeconds, routeId, code) {
   }
   const transfer = exact(journey.transfer, ['stationId', 'waitSeconds', 'outgoingRouteId'], `${code}_transfer_fields_invalid`);
   if (transfer.stationId !== 'KotakeMukaihara' || !integer(transfer.waitSeconds)
-      || transfer.waitSeconds < 60 || transfer.waitSeconds > 600
+      || transfer.waitSeconds < 60 || transfer.waitSeconds > 3600
       || !Object.hasOwn(ROUTES, transfer.outgoingRouteId) || transfer.outgoingRouteId === routeId) {
     fail(`${code}_transfer_invalid`);
   }

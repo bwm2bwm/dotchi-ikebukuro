@@ -86,6 +86,26 @@ test('v2 validator rejects missing dates, duplicate IDs, invalid times, and tran
   await assert.rejects(validateV2Payload(badCoverage, { stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto }), /route_coverage_invalid/);
 });
 
+test('v2 QA adapter accepts 60-minute transfers and rejects one second beyond', async () => {
+  const valid = await payload();
+  const row = valid.serviceDays[0].departures[1];
+  row.primary.transfer.waitSeconds = 3600;
+  row.bestTransferAlternative.transfer.waitSeconds = 3600;
+  row.id = await computeV2PublicId('Hikawadai', dates[0], row, webcrypto);
+  await assert.doesNotReject(validateV2Payload(valid, {
+    stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto,
+  }));
+
+  const invalid = structuredClone(valid);
+  const bad = invalid.serviceDays[0].departures[1];
+  bad.primary.transfer.waitSeconds = 3601;
+  bad.bestTransferAlternative.transfer.waitSeconds = 3601;
+  bad.id = await computeV2PublicId('Hikawadai', dates[0], bad, webcrypto);
+  await assert.rejects(validateV2Payload(invalid, {
+    stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto,
+  }), /primary_transfer_invalid/);
+});
+
 test('service seconds preserve JST service dates after midnight and through 25:xx', () => {
   assert.equal(serviceSecondsToEpochMs('2026-10-28', 24 * 3600 + 10 * 60), jst('2026-10-29T00:10:00'));
   assert.equal(serviceSecondsToEpochMs('2026-10-28', 25 * 3600 + 30 * 60), jst('2026-10-29T01:30:00'));

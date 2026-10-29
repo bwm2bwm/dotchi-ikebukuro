@@ -71,6 +71,9 @@ def _bundle(root: Path, *, dates=None, state="complete"):
     manifest = {"dataScope": v2.MANIFEST_SCOPE,
                 "sourceFingerprint": "a" * 64,
                 "evaluationServiceDates": dates,
+                "transferSearchPolicy": {"minimumWaitSeconds": 60,
+                                         "maximumWaitSeconds": 3600,
+                                         "crossServiceDateSearch": False},
                 "applicationPeriod": None,
                 "candidateFiles": entries,
                 "quality": {"itineraryResultCount": audit["totalGeneratedCount"],
@@ -82,8 +85,11 @@ def _bundle(root: Path, *, dates=None, state="complete"):
 
 
 class FakeGenerator:
-    def __init__(self, gtfs_zip, odpt_dir, destination_station_id):
+    def __init__(self, gtfs_zip, odpt_dir, destination_station_id,
+                 min_transfer_seconds=60, max_transfer_seconds=600):
         self.destination_station_id = destination_station_id
+        self.min_transfer_seconds = min_transfer_seconds
+        self.max_transfer_seconds = max_transfer_seconds
         self.feed_start = date(2026, 9, 19)
         self.feed_end = date(2027, 3, 12)
         self.last_destination_status = {}
@@ -109,6 +115,18 @@ class FakeGenerator:
 
 
 class PublicV2Tests(unittest.TestCase):
+    def test_odpt0_quality_consistency_does_not_pin_v2_transfer_policy_counts(self):
+        report = {"dayResults": [{"journeyCount": 10, "primaryDirectCount": 8,
+                                  "primaryTransferCount": 2,
+                                  "odptMatchStatusCounts": {"unique_match": 10}}]}
+        metrics = {"itineraryResultCount": 10, "primaryDirectCount": 6,
+                   "primaryTransferCount": 4,
+                   "odptMatchStatusCounts": {"unique_match": 10}}
+        v2._assert_odpt0_generation_matches(report, metrics)
+        metrics["itineraryResultCount"] = 9
+        with self.assertRaisesRegex(v2.V2Error, "odpt0_generation_consistency_mismatch"):
+            v2._assert_odpt0_generation_matches(report, metrics)
+
     def test_valid_payload_preserves_24_plus_seconds(self):
         payload = _payload("Hikawadai")
         self.assertIs(v2.validate_v2_payload(payload), payload)
@@ -185,6 +203,16 @@ class PublicV2Tests(unittest.TestCase):
                                  "outgoingRouteId": "9"}}
         row["primary"] = transfer
         row["bestTransferAlternative"] = transfer
+        with self.assertRaisesRegex(v2.V2Error, "transfer_wait_invalid"):
+            v2.validate_v2_payload(payload)
+        transfer["transfer"]["waitSeconds"] = 120
+        row["id"] = v2.public_id("Wakoshi", payload["serviceDays"][0]["serviceDate"], row)
+        self.assertIs(v2.validate_v2_payload(payload), payload)
+        transfer["transfer"]["waitSeconds"] = 3600
+        row["id"] = v2.public_id("Wakoshi", payload["serviceDays"][0]["serviceDate"], row)
+        self.assertIs(v2.validate_v2_payload(payload), payload)
+        transfer["transfer"]["waitSeconds"] = 3601
+        row["id"] = v2.public_id("Wakoshi", payload["serviceDays"][0]["serviceDate"], row)
         with self.assertRaisesRegex(v2.V2Error, "transfer_wait_invalid"):
             v2.validate_v2_payload(payload)
         transfer["transfer"]["waitSeconds"] = 120
@@ -327,6 +355,39 @@ class PublicV2Tests(unittest.TestCase):
                                  status="no_valid_arrival", primary_itinerary=None,
                                  best_transfer_alternative=None)
         self.assertEqual(v2._exclusion_detail(passed), ("explicit_pass_info", "INFO"))
+
+    def test_valid_transfer_excluded_only_by_policy_is_private_info(self):
+        policy_excluded = SimpleNamespace(data_quality=[], status="no_valid_arrival",
+                                          primary_itinerary=None,
+                                          best_transfer_alternative=None,
+                                          transfer_wait_policy_excluded=True)
+        self.assertEqual(v2._exclusion_detail(policy_excluded),
+                         ("transfer_wait_limit_info", "INFO"))
+        data_unknown = SimpleNamespace(data_quality=[], status="no_valid_arrival",
+                                       primary_itinerary=None,
+                                       best_transfer_alternative=None,
+                                       transfer_wait_policy_excluded=False)
+        self.assertEqual(v2._exclusion_detail(data_unknown), ("no_valid_arrival", "UNKNOWN"))
+
+    def test_transfer_search_policy_is_fixed_and_cross_date_search_stays_off(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            bundle_dir, manifest, dates = _bundle(root)
+            self.assertEqual(v2.validate_bundle(bundle_dir, manifest, list(v2.DESTINATIONS),
+                                                dates, "a" * 64)["candidateDepartureCount"], 24)
+            altered = copy.deepcopy(manifest)
+            altered["transferSearchPolicy"]["crossServiceDateSearch"] = True
+            with self.assertRaisesRegex(v2.V2Error, "transfer_search_policy_mismatch"):
+                v2.validate_bundle(bundle_dir, altered, list(v2.DESTINATIONS), dates, "a" * 64)
+
+    def test_legacy_private_bundle_without_policy_uses_previous_600_second_cap(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            bundle_dir, manifest, dates = _bundle(Path(directory))
+            del manifest["transferSearchPolicy"]
+            (bundle_dir / "private-generator-manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+            report = v2.validate_bundle(bundle_dir, manifest, list(v2.DESTINATIONS), dates, "a" * 64)
+            self.assertEqual(report["candidateDepartureCount"], 24)
 
     def test_digest_excludes_generated_at_but_not_payload_content(self):
         first = {"Hikawadai": _payload("Hikawadai", "2026-10-29T12:00:00Z")}
