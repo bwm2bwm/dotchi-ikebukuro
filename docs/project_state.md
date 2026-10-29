@@ -1,9 +1,9 @@
 # プロジェクト状態
 
-## T11/T12/T13/T15 状況（2026-10-28）
+## T11/T12/T13/T15 状況（2026-10-29）
 
 - **T11 利用条件確認: 完了。** ODPT事務局から、相談した想定利用方法における時刻表データの加工・配信、server-side保存/cache、基本ライセンスとガイドラインを守る広告・任意支援付き無料公開は問題ないとの回答を受領。データ更新状況は開発者サイトのNewsで適宜掲載するとのこと。回答の対象範囲を超えた包括的許可とは解釈しない。記録は [`odpt_research.md`](odpt_research.md) のT11節。
-- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。Phase 4-6Bでstagingの新旧Deployment切替を実機確認し、旧タブから新JSONを取得する経路を確認。fixtureの`generatedAt`がservice-date基準日の前日を表す仕様と、release世代を跨ぐ混在を検出しない現行設計を記録した。Phase 4-7でmanifest + release envelope + 世代別JSON + Production aliasからの期限内世代引継ぎ方式を詳細設計。記録は [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md) と [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md)。Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下も確認済み。固定時刻QAのDOM確認はローカルテストで再現可能。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
+- **T12 正式配信方式・ホスティング: 進行中。** Phase 1（公開payload profileのallowlist射影）、Phase 2（adapter・loader対応、synthetic互換性確認）、Phase 3-1（共有runtimeとlocal/public entrypointの分離）、Phase 3-2（public HTMLと診断CSSの分離）、Phase 3-3（synthetic専用静的builder）、Phase 3-4（builderと独立したartifact validator）、Phase 4-2（synthetic fixture生成）、Phase 4-3（手動synthetic CI）、Phase 4-5（承認付きCloudflare Pages staging deploy workflowとsynthetic初回deploy・Access確認）、Phase 4-6A（固定時刻ローカルsynthetic DOM QA）を完了。Phase 4-6Bでstagingの新旧Deployment切替を実機確認し、旧タブから新JSONを取得する経路を確認。fixtureの`generatedAt`がservice-date基準日の前日を表す仕様と、release世代を跨ぐ混在を検出しない現行設計を記録した。Phase 4-7でmanifest + release envelope + 世代別JSON + Production aliasからの期限内世代引継ぎ方式を詳細設計。記録は [`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md) と [`t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md)。Brotli・ETag/304、Mac Chromeの初回JSON取得約56ms、iPhone Safariの目的地切替体感1秒以下も確認済み。固定時刻QAに加え、2026-10-29にローカルrelease-managed harnessでカード表示中の実時間カウントダウン進行を確認した。実ダイヤの変換・公開はしていない。推奨案はCloudflare Pages静的配信 + GitHub Actions。Workersは不要。比較・条件・段階計画は [`hosting_research.md`](hosting_research.md)。
 - **T13: 未着手。T15: 未着手。**
 - 現在のGitHub Pages root mockとApplication Supportのlocal previewは維持。実ダイヤの一般公開はしていない。GitHub remote settings / secretの有無は今回確認していない。`.env.local`、API key、ODPT APIにはアクセスしていない。
 
@@ -12,7 +12,14 @@
 - GitHub Actions Synthetic public site CI #10は成功し、Cloudflare Pages Production Deployment `b357cd8c`でlegacy 17-fileからrelease-managed形式へ初回移行した。完成artifactは26ファイル。移行前Deploymentは`f3be074d`。`/manifest.json`と世代別`/timetable-Wakoshi.json`はHTTP 200 / `application/json`で応答した。
 - Mac Chromeでアプリ表示、目的地切替、世代別JSON取得を確認。iPhone Safariで画面表示、時計更新、目的地切替、基本操作を確認。19時台に「本日の終電は終了しました」となる挙動は、synthetic fixtureの運行時間帯とruntimeの判定に整合する。
 - ローカルrelease-managed QA harnessは`morning-gate`（06:10発）、`destination-switch`（目的地に応じたカード・到着時刻差）、`previous-tail`（翌01:50発）を確認。サーバーPID 72156へCtrl+Cを送り停止し、TCP 8765/8766のlistenerがないことを確認した。
-- 残課題: 列車カードが表示中の実時間カウントダウン進行は未確認。データはsyntheticであり、ODPT実データの自動公開は未承認。過去のHTTP 403根本原因は未特定だが、現在の取得・検証・deploy経路は実環境で成功済み。これらは次のQA/運用承認項目として維持する。
+- 実時間カウントダウン進行は2026-10-29にローカルsynthetic harnessで確認済み。実stagingでの進行確認、ODPT実データの自動公開は未実施・未承認。過去のHTTP 403根本原因は未特定だが、現在の取得・検証・deploy経路は実環境で成功済み。
+
+### 2026-10-29 実時間カウントダウンQA完了（ローカルsynthetic）
+
+- ユーザーがMac Chromeでrelease-managedローカルQA harnessの`clock-running`を確認。22:05頃の仮想時刻でsynthetic列車カードが表示され、画面時計が毎秒進むこと、同じカードの残り時間が秒単位で減ることを確認し、3項目すべて合格。
+- 対象はローカルharnessの仮想時刻とsynthetic fixtureによるruntime表示。固定時刻scenarioは始発ゲート・25:50便などの時点表示確認として別に扱う。このQAは実staging、ODPT実データ、OS壁時計補正を検証していない。
+- QA server PID 4012へ起動セッションからCtrl+Cを送り停止。8765/8766にlistenerが残っていないことを確認し、無関係なプロセスは停止していない。
+- 次の候補タスク: **release-managed第2世代更新QA（世代保持・切替・継続配信・rollback）**。
 
 ### T12 Phase 4-8D-2A Production alias取得のローカル実装（2026-10-28）
 

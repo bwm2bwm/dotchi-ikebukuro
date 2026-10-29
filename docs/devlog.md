@@ -1,5 +1,13 @@
 # 開発ログ
 
+## 2026-10-29 — 実時間カウントダウンQA完了・ローカルQA server停止
+
+- ユーザーがMac Chromeでrelease-managedローカルQA harnessの`clock-running`を確認。22:05頃の仮想時刻でsynthetic列車カードを表示し、画面時計が毎秒進むこと、同じカードの残り時間が秒単位で減ることを確認。3項目すべて合格。
+- この結果はローカルharnessの仮想時刻とsynthetic fixtureに限る。固定時刻QAの`morning-gate`（06:10発・60分前ゲート）と`previous-tail`（前service dateの25:50発）は時点ごとの表示確認として区別する。実staging上の実時間カウントダウン、ODPT実データ、OS壁時計補正は未検証。
+- 起動したQA server PID 4012へ起動セッションからCtrl+Cを送り停止。停止後、8765/8766のlistenerがないことを確認。無関係なプロセスは停止していない。
+- 次の候補タスク: **release-managed第2世代更新QA（世代保持・切替・継続配信・rollback）**。
+- アプリ本体、QA script、synthetic fixture、公開artifact、GitHub Actions、Cloudflare設定/deployment、ODPT APIは変更・実行・接続していない。Commit/Push/Mergeなし。
+
 ## 2026-10-28 — T12 Phase 4-8E 初回release-managed staging移行・QA完了、ローカルQA server停止
 
 - GitHub Actions Synthetic public site CI #10が成功し、Cloudflare Pages Production Deployment `b357cd8c`でlegacy 17-fileからrelease-managedへ初回移行した。migration後artifactは26ファイル。`manifest.json`と世代別`timetable-Wakoshi.json`はHTTP 200 / `application/json`。Mac Chromeで表示・目的地切替・JSON取得、iPhone Safariで画面・時計更新・目的地切替・基本操作を確認した。
