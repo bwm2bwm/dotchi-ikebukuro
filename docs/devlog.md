@@ -1,5 +1,13 @@
 # 開発ログ
 
+## 2026-10-29 — Production artifact fetch diagnosticをrelease-managed専用に更新
+
+- `.github/workflows/cloudflare-production-fetch-diagnostic.yml`から`--allow-initial-legacy-migration`を除去。fetch結果が`mode=release-managed`、`manifest_classification=release-managed`、fingerprint確認済みでなければ失敗する。初回legacy移行を担う公開workflowは変更していない。
+- fetch CLIが既に取得・検証したsnapshotを使うsummary renderer `scripts/summarize_production_artifact_snapshot.py`を追加。既存`validate_release_managed_artifact()`を適用し、manifest current release、retained releaseと期限、legacy互換期限、current 8駅のファイル名/bytes/SHA-256、fetch file count/fingerprint、validator結果をStep Summaryへ出す。余分なネットワーク取得やArtifact uploadはない。
+- Access Secretはfetch step環境にだけ注入し、Summary生成前にunset。Summaryはvalidatorが認めたreleaseId/hash/timestampと固定駅名/ファイル名のみを出力し、raw JSON本文・Cookie・認証header・Secretは出さない。取得snapshotは`umask 077`のRunner tempに置き、EXIT trapで削除する。失敗時も固定分類だけをSummary/ログへ記録する。
+- 追加test: Python 5件（Summary成功、legacy拒否、不正manifest、駅JSON欠損、SummaryのSecret/本文/Markdown注入耐性）成功。Node workflow static test 2件成功。既存公開deploy workflowとの非干渉、read-only構成も検査。
+- Actions、Cloudflare接続・Deploy/Rollback、ODPT APIアクセスなし。変更は診断workflow、専用summary script/test、workflow static test、本state/devlogのみ。Commit/Push/Mergeなし。
+
 ## 2026-10-29 — 実時間カウントダウンQA完了・ローカルQA server停止
 
 - ユーザーがMac Chromeでrelease-managedローカルQA harnessの`clock-running`を確認。22:05頃の仮想時刻でsynthetic列車カードを表示し、画面時計が毎秒進むこと、同じカードの残り時間が秒単位で減ることを確認。3項目すべて合格。

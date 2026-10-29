@@ -21,6 +21,13 @@
 - QA server PID 4012へ起動セッションからCtrl+Cを送り停止。8765/8766にlistenerが残っていないことを確認し、無関係なプロセスは停止していない。
 - 次の候補タスク: **release-managed第2世代更新QA（世代保持・切替・継続配信・rollback）**。
 
+### 2026-10-29 Cloudflare Production artifact fetch diagnostic改修
+
+- `.github/workflows/cloudflare-production-fetch-diagnostic.yml`から初回legacy移行許可を外し、release-managed以外を成功扱いしないよう変更。既存の`pages-staging` Environment Secretをfetch stepだけで使い、取得後にshell環境からunsetする。公開用synthetic deploy workflow、builder、runtimeは変更していない。
+- 既存fetch CLIが取得・検証した一時snapshotを再利用し、`scripts/summarize_production_artifact_snapshot.py`が既存独立validatorを実行したうえで、releaseId、active retained期限、legacy互換期限、現行8駅のbytes/SHA-256、ファイル数、fingerprint、validator結果をActions Step Summaryへ出す。未検証JSON本文、Cookie、認証header、Secret値はsummary/ログへ出さず、snapshotはrunner一時領域からstep終了時に削除する。
+- 成功、legacy拒否、不正manifest、駅JSON欠損、Summaryの本文/Secret/Markdown注入耐性の専用Python test 5件とworkflow static test 2件が成功。GitHub Actionsは実行していない。Cloudflare接続、Deploy/Rollback、ODPT APIアクセス、Commit/Push/Mergeなし。
+- Dashboard上のProduction Deployment IDはこのWorkflowでは取得せず、別途読み取り確認が必要。
+
 ### T12 Phase 4-8D-2A Production alias取得のローカル実装（2026-10-28）
 
 - `scripts/fetch_production_artifact.py`を追加。固定root originからHTTPSで取得し、明示的loopback-only optionを付けたときだけlocalhost HTTPを許可する。外部redirect・unsafe path・symlink・既存出力先・不正MIME/status・timeout/有限retry・単体/全体bytes/file数上限を検査し、失敗stageは削除する。Cloudflare APIやDeploy機能は持たない。

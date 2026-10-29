@@ -19,22 +19,26 @@ test('production fetch diagnostic is manual, main-only, read-only, and Environme
   assert.match(workflow, /CF_ACCESS_CLIENT_SECRET: \$\{\{ secrets\.CF_ACCESS_CLIENT_SECRET \}\}/);
   assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN|wrangler|pages deploy|upload-artifact|actions\/upload-artifact/);
   assert.doesNotMatch(workflow, /set -x|echo .*CF_ACCESS_CLIENT/);
+  assert.match(workflow, /unset CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET/);
+  assert.match(workflow, /GITHUB_STEP_SUMMARY/);
 });
 
-test('diagnostic reuses the production fetch CLI and reports only sanitized validation metadata', () => {
+test('diagnostic requires release-managed and reuses the validated snapshot for a metadata-only summary', () => {
   assert.match(workflow, /fetch_args=\(fetch /);
   assert.match(workflow, /scripts\/fetch_production_artifact\.py/);
-  assert.match(workflow, /--allow-initial-legacy-migration/);
+  assert.doesNotMatch(workflow, /--allow-initial-legacy-migration/);
   assert.match(workflow, /--base-url "\$PRODUCTION_ALIAS"/);
   assert.match(workflow, /CF_ACCESS_CLIENT_ID: \$\{\{ secrets\.CF_ACCESS_CLIENT_ID \}\}/);
   assert.match(workflow, /rm -rf -- "\$snapshot_parent"/);
-  assert.match(workflow, /manifest_classification=/);
-  assert.match(workflow, /files_fetched=/);
-  assert.match(workflow, /legacy_strict_validation=/);
+  assert.match(workflow, /summarize_production_artifact_snapshot\.py --snapshot "\$snapshot_dir"/);
+  assert.match(workflow, /manifest_classification=release-managed/);
   assert.match(workflow, /fingerprint_match=confirmed/);
+  assert.match(workflow, /independent_validator=passed/);
   assert.match(workflow, /failure_stage=/);
   assert.match(workflow, /http_status=/);
   assert.match(workflow, /error_type=/);
-  assert.doesNotMatch(workflow, /echo ["']?\$fetch_result|echo .*fingerprint[^_a-z]/);
+  assert.match(workflow, /manifest_classification=legacy_rejected/);
+  assert.match(workflow, /printf '%s\\n' "\$summary" >> "\$GITHUB_STEP_SUMMARY"/);
+  assert.doesNotMatch(workflow, /echo ["']?\$fetch_result|echo .*CF_ACCESS_CLIENT/);
   assert.doesNotMatch(publishWorkflow, /cloudflare-production-fetch-diagnostic/);
 });
