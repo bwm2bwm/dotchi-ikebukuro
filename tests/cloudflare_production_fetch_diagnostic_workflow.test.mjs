@@ -34,6 +34,15 @@ test('diagnostic requires release-managed and reuses the validated snapshot for 
   assert.match(workflow, /manifest_classification=release-managed/);
   assert.match(workflow, /fingerprint_match=confirmed/);
   assert.match(workflow, /independent_validator=passed/);
+  assert.ok(workflow.includes('HTTP\\ status\\ ([0-9]{3})\\ for\\ request_path=([A-Za-z0-9._/-]+)'));
+  assert.ok(workflow.includes('/manifest.json) failure_stage=manifest_request'));
+  assert.ok(workflow.includes('/) failure_stage=root_request'));
+  assert.ok(workflow.includes('/index.html|/styles.css|/preview.css|/preview_public.js'));
+  assert.ok(workflow.includes('failure_stage=static_asset_request'));
+  assert.ok(workflow.includes('/releases/*|/timetable.json|/timetable-*.json) failure_stage=artifact_file_request'));
+  assert.ok(workflow.includes('*) failure_stage=unclassified_http_request'));
+  assert.match(workflow, /request_path=\$request_path/);
+  assert.doesNotMatch(workflow, /index\.html\) failure_stage=spa_root_request/);
   assert.match(workflow, /failure_stage=/);
   assert.match(workflow, /http_status=/);
   assert.match(workflow, /error_type=/);

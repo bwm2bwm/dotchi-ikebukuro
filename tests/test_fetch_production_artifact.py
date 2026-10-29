@@ -157,6 +157,8 @@ class FetchProductionArtifactTests(unittest.TestCase):
     def test_release_managed_download_is_independently_validated_and_fingerprint_pinned(self):
         alias = self.alias()
         result = self.fetch(alias, "release")
+        self.assertNotIn("/", alias.request_paths)
+        self.assertIn("/index.html", alias.request_paths)
         self.assertEqual(result["mode"], "release-managed")
         self.assertEqual(result["manifest_classification"], "release-managed")
         self.assertTrue(result["fingerprint_verified"])
@@ -188,6 +190,25 @@ class FetchProductionArtifactTests(unittest.TestCase):
         self.assertEqual(migration_result["files"], 26)
         self.assertTrue((self.base / "migration" / "timetable.json").is_file())
         validate_release_managed_artifact(self.base / "migration")
+
+    def test_release_managed_index_asset_redirect_reports_its_actual_path_and_fails_closed(self):
+        alias = self.alias()
+        alias.overrides["index.html"] = (308, "text/html", b"REDIRECT_BODY_SENTINEL", {
+            "Location": "https://redirect.invalid/?token=LOCATION_QUERY_SENTINEL",
+            "Set-Cookie": "session=COOKIE_SENTINEL; Secure; HttpOnly",
+        })
+
+        with self.assertRaises(ArtifactFetchError) as caught:
+            self.fetch(alias, "redirected-index")
+
+        self.assertEqual(str(caught.exception),
+            "HTTP status 308 for request_path=/index.html")
+        for sentinel in ("REDIRECT_BODY_SENTINEL", "redirect.invalid", "LOCATION_QUERY_SENTINEL",
+                         "COOKIE_SENTINEL", "session="):
+            self.assertNotIn(sentinel, str(caught.exception))
+        self.assertIn("/index.html", alias.request_paths)
+        self.assertNotIn("/", alias.request_paths)
+        self.assertFalse((self.base / "redirected-index").exists())
 
     def test_legacy_requires_explicit_initial_migration_and_passes_strict_validator(self):
         alias = self.alias(self.legacy_files)
@@ -270,18 +291,31 @@ class FetchProductionArtifactTests(unittest.TestCase):
     def test_spa_migration_fails_closed_for_root_and_manifest_errors(self):
         for status in (401, 403, 308):
             alias = self.alias(self.legacy_files)
-            alias.overrides["/"] = (status, "text/html", b"root-error", {})
+            alias.overrides["/"] = (status, "text/html", b"ROOT_RESPONSE_BODY_SENTINEL", {
+                "Location": "https://redirect.invalid/?token=LOCATION_QUERY_SENTINEL",
+                "Set-Cookie": "session=COOKIE_SENTINEL; Secure; HttpOnly",
+            })
             alias.overrides["manifest.json"] = (
                 200, "text/html", self.legacy_files["index.html"], {})
-            with self.subTest(root_status=status), self.assertRaises(ArtifactFetchError):
+            with self.subTest(root_status=status), self.assertRaises(ArtifactFetchError) as caught:
                 self.fetch(alias, f"root-error-{status}", allow_initial_legacy=True)
+            self.assertEqual(str(caught.exception),
+                f"HTTP status {status} for request_path=/")
+            for sentinel in ("ROOT_RESPONSE_BODY_SENTINEL", "redirect.invalid", "LOCATION_QUERY_SENTINEL",
+                             "COOKIE_SENTINEL", "session="):
+                self.assertNotIn(sentinel, str(caught.exception))
             self.assertFalse((self.base / f"root-error-{status}").exists())
 
         denied = self.alias(self.legacy_files)
-        denied.overrides["manifest.json"] = (403, "application/json", b"private-response", {})
+        denied.overrides["manifest.json"] = (403, "application/json", b"MANIFEST_BODY_SENTINEL", {
+            "Set-Cookie": "session=COOKIE_SENTINEL; Secure; HttpOnly",
+        })
         with self.assertRaisesRegex(ArtifactFetchError, "HTTP status 403") as caught:
             self.fetch(denied, "manifest-403", allow_initial_legacy=True)
-        self.assertNotIn("private-response", str(caught.exception))
+        self.assertEqual(str(caught.exception),
+            "HTTP status 403 for request_path=/manifest.json")
+        self.assertNotIn("MANIFEST_BODY_SENTINEL", str(caught.exception))
+        self.assertNotIn("COOKIE_SENTINEL", str(caught.exception))
         self.assertFalse((self.base / "manifest-403").exists())
 
     def test_legacy_root_bytes_are_pinned_across_snapshot_and_fingerprint_passes(self):

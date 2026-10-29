@@ -157,6 +157,7 @@ class AliasHttpClient:
         else:
             relative = _safe_relative_path(path)
             request_url = f"{self.origin}/{relative}"
+        request_path = urlsplit(request_url).path
         limit = self.max_manifest_bytes if kind == "manifest" else self.max_file_bytes
         allowed_types = {
             "manifest": {"application/json"},
@@ -179,7 +180,8 @@ class AliasHttpClient:
                 with self.opener.open(request, timeout=self.timeout) as response:
                     status = response.status
                     if status != 200:
-                        raise ArtifactFetchError(f"HTTP status {status} for {relative}")
+                        raise ArtifactFetchError(
+                            f"HTTP status {status} for request_path={request_path}")
                     media_type = response.headers.get_content_type().lower()
                     html_manifest = kind == "manifest" and allow_manifest_html and media_type == "text/html"
                     if media_type not in allowed_types and not html_manifest:
@@ -209,7 +211,8 @@ class AliasHttpClient:
                     return 404, None, None
                 retryable = error.code in TRANSIENT_STATUS
                 if not retryable or attempt + 1 >= attempts:
-                    raise ArtifactFetchError(f"HTTP status {error.code} for {relative}") from None
+                    raise ArtifactFetchError(
+                        f"HTTP status {error.code} for request_path={request_path}") from None
             except _RetryableTransferError:
                 if attempt + 1 >= attempts:
                     raise ArtifactFetchError(f"incomplete response body for {relative}") from None

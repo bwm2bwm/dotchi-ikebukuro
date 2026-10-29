@@ -1,5 +1,11 @@
 # 開発ログ
 
+## 2026-10-29 — Production artifact fetch diagnosticのHTTP pathログ改善
+
+- Actions run `40808966967`のread-only metadataでSHA `7e6a2b0b90ae73faf0f3c3d0b15de8742b934d24`、`main`、`workflow_dispatch`を確認し、現行HEADと完全一致。logs archiveはHTTP 403で取得不可。CLIのrelease-managed planは`index.html`静的assetを要求するため、legacy opt-inなしで出た`HTTP status 308 for index.html`は実path `/index.html`の取得エラーに対応する。従来Workflowは論理asset名を見て誤って`spa_root_request`に分類していた。308 redirect先は未確認。
+- `scripts/fetch_production_artifact.py`のHTTP status errorを論理asset名から、実際のrequest URL path部分 (`request_path`) とstatusへ変更。Workflowは`/`、`/index.html`等のstatic asset、manifest、release JSON、期限内flat alias JSONを実pathで分類し、実pathをSummaryとstep logへ出す。未知pathはunclassified。host、query、header、response bodyはエラー・ログに含めない。
+- mock testでrelease-managed成功時の`/index.html`取得とroot非要求、static index 308およびroot 308/401/403・manifest 403のfail-closed、Location query/Cookie/body sentinelの非漏えいを検証。legacy opt-in、公開Workflow、runtime、正常時Summary/validatorは変更なし。GitHub Actionsは実行していない。Cloudflare/ODPT access、Deploy/Rollback、Commit/Push/Mergeなし。
+
 ## 2026-10-29 — Production artifact fetch diagnosticをrelease-managed専用に更新
 
 - `.github/workflows/cloudflare-production-fetch-diagnostic.yml`から`--allow-initial-legacy-migration`を除去。fetch結果が`mode=release-managed`、`manifest_classification=release-managed`、fingerprint確認済みでなければ失敗する。初回legacy移行を担う公開workflowは変更していない。
