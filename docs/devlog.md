@@ -1,5 +1,13 @@
 # 開発ログ
 
+## 2026-10-29 — 第2世代release-managed更新の承認前A/B検証
+
+- `.github/workflows/synthetic-public-ci.yml`へ任意の`service_date`と`expected_previous_release_id`入力を追加。省略service-dateはbuild開始時にJST当日へ解決し、従来の基準日挙動を保ったまま固定値をfixture生成器へ渡す。入力検証CLIが実在日付、`r1-` + 小文字hex 64桁、publish時の期待A必須条件を検査する。
+- build jobがclean release Bを生成後、期待AがあればreleaseIdを比較し、B=Aで停止。validate jobは不変Artifact IDを独立validatorにかけ、service-date、A/B結果、B ID、validator結果をStep Summaryへ記録する。実Production snapshot取得前にこのA/B検証が完了する。
+- `pages-staging`承認後のsnapshot fetchは、current releaseIdが期待Aと一致することをassembly前に確認。初回legacy migrationは明示opt-in時のみ、期待Aなしでlegacy mode snapshotに限定。既存assembly、完成物validator、直前fingerprint再確認、Direct Upload順は維持。追加のrelease preflight Summaryに本番A一致・B≠A・validator・fingerprint結果を記録する。
+- 追加Python入力検証test 7件、Workflow static test 6件が成功。release contract/runtimeの関連Node testも含めて再確認し、YAML parse、Workflow全run blockの`bash -n`、`git diff --check`が成功。`project_state.md`、READMEを同期。runtime、schema、fixture source、ODPT処理、artifact形式は変更していない。
+- GitHub Actions起動、Cloudflare接続、Deploy/Rollback、ODPTアクセス、Secrets変更、Commit/Push/Mergeなし。
+
 ## 2026-10-29 — release-managed index.htmlを正規rootから取得
 
 - release-managed snapshotで静的artifact `index.html`だけ取得先を`/index.html`から正規root `/`へ変更し、取得bytesは従来どおりartifactの`index.html`へ保存する。独立validatorがmanifest release descriptorのbytes/SHA-256とartifact file setを検証する。redirectは追わず、rootが308等の非200なら停止する。
