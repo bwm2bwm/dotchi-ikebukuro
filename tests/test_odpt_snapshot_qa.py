@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -166,6 +167,43 @@ class SnapshotQATests(unittest.TestCase):
         self.assertEqual(qa._compare_previous(altered, previous)["status"], "MISMATCH")
         altered["serviceDate"] = "2026-10-30"
         self.assertEqual(qa._compare_previous(altered, previous)["status"], "INCOMPARABLE")
+
+    def test_confirmed_pass_through_with_valid_transfer_is_info_once_per_itinerary(self):
+        transfer = SimpleNamespace(kind="transfer", departure_seconds=100, arrival_seconds=300)
+        result = SimpleNamespace(
+            origin_trip_id="synthetic-route9-pass",
+            best_transfer_alternative=transfer,
+            data_quality=["destination_explicit_pass", "destination_alighting_prohibited",
+                          "destination_arrival_missing", "direct_arrival_unavailable"],
+        )
+        summary = qa._diagnostic_summary([result])
+        self.assertEqual(summary["INFO"]["codeOccurrences"], 4)
+        self.assertEqual(summary["INFO"]["affectedItineraryInstances"], 1)
+        self.assertEqual(summary["WARNING"]["codeOccurrences"], 0)
+        self.assertEqual(summary["INFO"]["codes"]["destination_arrival_missing"]["affectedItineraryInstances"], 1)
+
+    def test_unconfirmed_missing_arrival_and_failed_transfer_remain_warning(self):
+        no_transfer = SimpleNamespace(kind="transfer", departure_seconds=None, arrival_seconds=None)
+        missing_only = SimpleNamespace(
+            origin_trip_id="synthetic-missing-arrival", best_transfer_alternative=None,
+            data_quality=["destination_arrival_missing", "direct_arrival_unavailable"],
+        )
+        pass_without_transfer = SimpleNamespace(
+            origin_trip_id="synthetic-pass-no-transfer", best_transfer_alternative=no_transfer,
+            data_quality=["destination_explicit_pass", "destination_alighting_prohibited",
+                          "destination_arrival_missing", "direct_arrival_unavailable"],
+        )
+        invalid_time = SimpleNamespace(
+            origin_trip_id="synthetic-invalid-time", best_transfer_alternative=None,
+            data_quality=["destination_time_order_conflict"],
+        )
+        summary = qa._diagnostic_summary([missing_only, pass_without_transfer, invalid_time])
+        self.assertEqual(summary["INFO"]["codeOccurrences"], 3)
+        self.assertEqual(summary["INFO"]["affectedItineraryInstances"], 1)
+        self.assertEqual(summary["WARNING"]["codeOccurrences"], 4)
+        self.assertEqual(summary["WARNING"]["affectedItineraryInstances"], 3)
+        self.assertEqual(summary["WARNING"]["codes"]["destination_arrival_missing"]["occurrences"], 1)
+        self.assertEqual(summary["INFO"]["codes"]["destination_arrival_missing"]["occurrences"], 1)
 
     def test_twenty_four_plus_hour_schedule_is_preserved_by_generator(self):
         from odpt_itinerary import parse_gtfs_time

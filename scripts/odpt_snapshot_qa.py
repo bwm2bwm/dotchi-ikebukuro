@@ -146,6 +146,75 @@ def _journey_metrics(results: list[Any]) -> dict[str, Any]:
             "departuresAtOrAfter24Hours": over_24h}
 
 
+def _classify_diagnostics(result: Any) -> dict[str, set[str]]:
+    """Classify codes by observed context, without changing itinerary generation."""
+    codes = set(result.data_quality)
+    info: set[str] = set()
+    warning: set[str] = set()
+    explicit_pass = "destination_explicit_pass" in codes
+    confirmed_non_alighting = explicit_pass and "destination_alighting_prohibited" in codes
+    transfer = result.best_transfer_alternative
+    valid_transfer = (transfer is not None and transfer.kind == "transfer"
+                      and transfer.departure_seconds is not None
+                      and transfer.arrival_seconds is not None
+                      and transfer.arrival_seconds >= transfer.departure_seconds)
+    for code in codes:
+        if code == "destination_explicit_pass":
+            info.add(code)
+        elif code == "destination_alighting_prohibited" and explicit_pass:
+            info.add(code)
+        elif code == "destination_arrival_missing" and confirmed_non_alighting:
+            info.add(code)
+        elif code == "direct_arrival_unavailable" and valid_transfer:
+            info.add(code)
+        else:
+            warning.add(code)
+    return {"INFO": info, "WARNING": warning}
+
+
+def _diagnostic_summary(results: list[Any]) -> dict[str, Any]:
+    code_occurrences = {"INFO": collections.Counter(), "WARNING": collections.Counter()}
+    code_itineraries = {"INFO": collections.defaultdict(set),
+                        "WARNING": collections.defaultdict(set)}
+    affected_itineraries = {"INFO": set(), "WARNING": set()}
+    for result in results:
+        itinerary_key = result.origin_trip_id
+        for severity, codes in _classify_diagnostics(result).items():
+            if codes:
+                affected_itineraries[severity].add(itinerary_key)
+            for code in codes:
+                code_occurrences[severity][code] += 1
+                code_itineraries[severity][code].add(itinerary_key)
+    return {
+        severity: {
+            "codeOccurrences": sum(code_occurrences[severity].values()),
+            "affectedItineraryInstances": len(affected_itineraries[severity]),
+            "codes": {
+                code: {"occurrences": code_occurrences[severity][code],
+                       "affectedItineraryInstances": len(code_itineraries[severity][code]),
+                       "reason": _diagnostic_reason(code, severity)}
+                for code in sorted(code_occurrences[severity])
+            },
+        }
+        for severity in ("INFO", "WARNING")
+    }
+
+
+def _diagnostic_reason(code: str, severity: str) -> str:
+    if severity == "INFO":
+        return {
+            "destination_explicit_pass": "GTFS explicitly marks this stop as no-alighting; the direct destination is intentionally skipped.",
+            "destination_alighting_prohibited": "No-alighting is corroborated by destination_explicit_pass.",
+            "destination_arrival_missing": "Arrival time is absent at a stop corroborated as an explicit no-alighting pass-through.",
+            "direct_arrival_unavailable": "No direct arrival is available, but a time-valid transfer itinerary remains.",
+        }.get(code, "Contextual informational condition.")
+    if code == "destination_arrival_missing":
+        return "Arrival time is missing without confirmed explicit pass-through and no-alighting evidence."
+    if code == "direct_arrival_unavailable":
+        return "Direct arrival is unavailable and no valid transfer candidate remains."
+    return "Diagnostic is not covered by a confirmed informational exception; review the data or itinerary condition."
+
+
 def _safe_output_path(output_dir: Path, snapshot: Path) -> Path:
     output_dir = output_dir.expanduser().resolve()
     snapshot = snapshot.resolve()
@@ -201,6 +270,7 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
             except Exception:
                 raise QAError("itinerary_generation_failed") from None
             metrics = _journey_metrics(results)
+            metrics["diagnosticSeverity"] = _diagnostic_summary(results)
             destination_status = getattr(generator, "last_destination_status", {}) or {}
             status = "ok" if results else "no_candidates"
             if not results and not generator.active_service_ids(day):
@@ -222,15 +292,43 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
     expected_pairs = len(DESTINATIONS) * len(requested_dates)
     counts = collections.Counter(row["status"] for row in day_rows)
     failures = counts["outside_feed_range"] + counts["requested_date_unavailable"]
+    missing_station_dates = max(0, expected_pairs - len(day_rows))
     warnings = sum(row.get("journeyCount", 0) == 0 for row in day_rows
                    if row["status"] in {"no_candidates", "no_active_service"})
     matched_statuses = {"matched", "unique_match"}
     unmatched = sum(sum(v for key, v in row.get("odptMatchStatusCounts", {}).items()
                         if key not in matched_statuses) for row in day_rows)
-    quality_warnings = sum(sum(v for key, v in row.get("dataQualityCodeCounts", {}).items()
-                               if key != "destination_explicit_pass") for row in day_rows)
-    status = ("FAIL" if failures or len(day_rows) != expected_pairs else
-              "WARNING" if warnings or unmatched or quality_warnings else "PASS")
+    severity_summary = {
+        severity: {"codeOccurrences": 0, "affectedItineraryInstances": 0, "codes": {}}
+        for severity in ("INFO", "WARNING")
+    }
+    for row in day_rows:
+        for severity in severity_summary:
+            metrics = row.get("diagnosticSeverity", {}).get(severity, {})
+            target = severity_summary[severity]
+            target["codeOccurrences"] += metrics.get("codeOccurrences", 0)
+            target["affectedItineraryInstances"] += metrics.get("affectedItineraryInstances", 0)
+            for code, counts_for_code in metrics.get("codes", {}).items():
+                entry = target["codes"].setdefault(code, {"occurrences": 0, "affectedItineraryInstances": 0})
+                entry["occurrences"] += counts_for_code["occurrences"]
+                entry["affectedItineraryInstances"] += counts_for_code["affectedItineraryInstances"]
+    fail_gate_count = failures + missing_station_dates + int(len(day_rows) > expected_pairs)
+    status = ("FAIL" if fail_gate_count else
+              "WARNING" if warnings or unmatched or severity_summary["WARNING"]["codeOccurrences"] else "PASS")
+    severity_summary["FAIL"] = {
+        "failGateCount": fail_gate_count,
+        "affectedStationDates": failures + missing_station_dates,
+        "reasons": {
+            "outsideFeedRangeOrRequestedDateUnavailable": failures,
+            "missingStationDateResults": missing_station_dates,
+            "unexpectedExtraStationDateResults": int(len(day_rows) > expected_pairs),
+        },
+    }
+    severity_reasons = {
+        "INFO": "Confirmed pass-through/no-alighting exclusions; missing arrival is INFO only with both explicit-pass and no-alighting evidence; direct-unavailable is INFO only when a valid transfer remains.",
+        "WARNING": "Unconfirmed/malformed destination data, invalid time/order, unresolved transfer, unmatched ODPT, or station-date with no candidates/service.",
+        "FAIL": "Requested date outside feed validity, missing requested station-date result, or unexpected result cardinality. Invalid source structure or source mutation aborts before a report is emitted.",
+    }
     body = {"schemaVersion": 1, "status": status, "serviceDate": anchor.isoformat(),
             "requestedServiceDates": [d.isoformat() for d in requested_dates],
             "stationCount": len(DESTINATIONS), "dayResultCount": len(day_rows),
@@ -241,11 +339,13 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
                                  "perStationDateResultDigests": result_digests},
             "summary": {"outsideFeedRangeOrMissingDates": failures, "noCandidateOrNoActiveServiceStationDates": warnings,
                         "unmatchedOdptJourneyCount": unmatched,
-                        "dataQualityWarningCodeCount": quality_warnings,
+                        "diagnosticSeverity": severity_summary,
+                        "severityDecisionReasons": severity_reasons,
                         "note": "Counts are descriptive; no minimum journey or ODPT-match threshold is imposed."},
             "rules": ["All 8 verified destinations and anchor date ±1 calendar day are evaluated.",
                       "A requested date outside GTFS feed validity is FAIL; no journey candidates are reported, not threshold-failed.",
-                      "ODPT matching and existing itinerary rules are unchanged; unmatched statuses and non-pass data-quality codes are reported as WARNING.",
+                      "Diagnostic severity is context-based; informational pass-through codes do not raise overall status.",
+                      "ODPT matching and existing itinerary rules are unchanged; unmatched statuses and unresolved diagnostics are reported as WARNING.",
                       "GTFS feed validity and ODPT source dc:date/dct:issued are independent metadata; filesystem mtime is not acquisition time.",
                       "Source SHA-256/size inventory must remain identical before and after generation."]}
     return body
@@ -267,7 +367,14 @@ def _write_report(report: dict[str, Any], output_dir: Path) -> tuple[Path, Path]
              f"日付欠落/期間外: {report['summary']['outsideFeedRangeOrMissingDates']}",
              f"候補なし/active serviceなし station-date: {report['summary']['noCandidateOrNoActiveServiceStationDates']}",
              f"ODPT未照合 journey: {report['summary']['unmatchedOdptJourneyCount']}",
-             f"data quality warning codes: {report['summary']['dataQualityWarningCodeCount']}",
+             *[f"{severity}: code occurrences={report['summary']['diagnosticSeverity'][severity]['codeOccurrences']}, "
+               f"affected itinerary instances={report['summary']['diagnosticSeverity'][severity]['affectedItineraryInstances']}; "
+               f"reason={report['summary']['severityDecisionReasons'][severity]}"
+               for severity in ("INFO", "WARNING")],
+             f"FAIL: gates={report['summary']['diagnosticSeverity']['FAIL']['failGateCount']}, "
+             f"affected station-dates={report['summary']['diagnosticSeverity']['FAIL']['affectedStationDates']}; "
+             f"reason={report['summary']['severityDecisionReasons']['FAIL']}",
+             f"診断コード別件数はJSON reportを参照。1旅程の複数codeはoccurrencesとaffected itinerary instancesを分離。",
              f"過去report比較: {report['reproducibility'].get('comparison', {}).get('status', '未指定')}",
              "実行日時や旅程本文・列車IDはレポートに含めません。"]
     for path, content in ((json_path, encoded), (text_path, "\n".join(lines) + "\n")):
