@@ -9,9 +9,10 @@
 
 ### 2026-10-29 Production fetch diagnosticのHTTP path記録
 
-- Actions diagnostic #3のrun metadataはCheckout SHA `7e6a2b0b90ae73faf0f3c3d0b15de8742b934d24`、branch `main`、Workflow dispatchで、現行HEADと完全一致。ログarchive取得はGitHub API HTTP 403のため不可。現行CLIのrelease-managed planはstatic asset `index.html`を通常要求する。legacy opt-inがないrunで出た`HTTP status 308 for index.html`はこの`/index.html`要求に対応するコード経路であり、Workflowは論理名`index.html`をSPA rootと誤分類していた。308応答のredirect先は未確認。
+- Actions diagnostic #3のrun metadataはCheckout SHA `7e6a2b0b90ae73faf0f3c3d0b15de8742b934d24`、branch `main`、Workflow dispatchで、現行HEADと完全一致。ログarchive取得はGitHub API HTTP 403のため不可。release-managedの`index.html`を取得する物理pathが`/index.html`だったため、Workflowは論理名`index.html`をSPA rootと誤分類していた。後続修正でrelease-managed shellは正規root `/`から取得し、artifact内では`index.html`に保存する。308応答のredirect先は未確認。
 - CLIのHTTP status errorは論理asset名でなく、queryを除いた実要求path (`request_path`) とstatusを記録する。診断Workflowは`/manifest.json`、legacy root `/`、固定static asset、`/releases/...`、期限内flat alias JSONを実pathで分類し、未知pathはunclassifiedとする。host、query、headers、bodyは記録しない。308/401/403を含む非200は引き続き拒否し、legacy opt-inと公開Workflow/runtimeは変更しない。
-- mock regressionでrelease-managed成功時は`/index.html`を取得しroot `/`を要求しないこと、static index 308とroot 308/401/403・manifest 403のpath/status記録、response body/Location query/Cookie非出力を確認する。正常時Summary/独立validator経路も維持。
+- release-managed static `index.html`は正規root `/`から取得し、artifact内の名前は`index.html`のまま独立validatorでdescriptor hashを確認する。`/index.html` redirectは利用せず、root `/`も308なら失敗する。legacy処理は従来どおりopt-in時だけroot取得する。
+- mock regressionで`/index.html`が308、root `/`が200の正常release取得、root 308拒否、root HTML hash不一致、malformed manifest、legacy禁止を確認する。正常時Summary/独立validator経路も維持。
 
 ### T12 Phase 4-8E 初回release-managed staging移行・実機QA完了（2026-10-28）
 

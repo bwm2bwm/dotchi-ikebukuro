@@ -147,11 +147,11 @@ class AliasHttpClient:
     def _get(self, path: str, *, kind: str, allow_404: bool = False,
              allow_manifest_html: bool = False, root: bool = False
              ) -> tuple[int, bytes | None, str | None]:
-        # Root is only available through the explicit legacy index helper below.
-        # Keep the logical filename for safe diagnostics and limits while requesting `/`.
+        # The canonical root may serve the logical index.html artifact.
+        # Keep its filename for limits and output while requesting `/`.
         if root:
             if path != "index.html" or kind != "html":
-                raise ArtifactFetchError("root request is restricted to legacy index.html")
+                raise ArtifactFetchError("root request is restricted to index.html")
             relative = "index.html"
             request_url = f"{self.origin}/"
         else:
@@ -246,6 +246,10 @@ class AliasHttpClient:
 
     def legacy_index(self) -> bytes:
         """Fetch the legacy root document from `/`, storing it as index.html."""
+        return self.root_index()
+
+    def root_index(self) -> bytes:
+        """Fetch the canonical root document from `/` as the logical index.html."""
         _, body, _ = self._get("index.html", kind="html", root=True)
         assert body is not None
         return body
@@ -452,7 +456,8 @@ def _fetch_release_snapshot(client: AliasHttpClient, root: Path, raw_manifest: b
     records: dict[str, bytes] = {}
     total = len(raw_manifest)
     for relative in sorted(plan):
-        raw = client.file(relative, kind=_mime_kind(relative))
+        raw = (client.root_index() if relative == "index.html"
+               else client.file(relative, kind=_mime_kind(relative)))
         total += len(raw)
         if total > max_total_bytes:
             raise ArtifactFetchError("release snapshot total exceeds byte limit")

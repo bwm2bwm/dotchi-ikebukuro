@@ -156,13 +156,16 @@ class FetchProductionArtifactTests(unittest.TestCase):
 
     def test_release_managed_download_is_independently_validated_and_fingerprint_pinned(self):
         alias = self.alias()
+        alias.overrides["index.html"] = (308, "text/html", b"", {"Location": "/"})
         result = self.fetch(alias, "release")
-        self.assertNotIn("/", alias.request_paths)
-        self.assertIn("/index.html", alias.request_paths)
+        self.assertIn("/", alias.request_paths)
+        self.assertNotIn("/index.html", alias.request_paths)
         self.assertEqual(result["mode"], "release-managed")
         self.assertEqual(result["manifest_classification"], "release-managed")
         self.assertTrue(result["fingerprint_verified"])
         self.assertEqual(result["files"], 18)
+        self.assertEqual((self.base / "release" / "index.html").read_bytes(),
+                         self.release_files["index.html"])
         self.assertEqual(validate_release_managed_artifact(self.base / "release")["release_id"], result["release_id"])
         self.assertEqual((self.base / "release" / "manifest.json").read_bytes(), self.release_files["manifest.json"])
         assemble_public_artifact(previous=self.base / "release", new_release=self.next_release,
@@ -190,6 +193,29 @@ class FetchProductionArtifactTests(unittest.TestCase):
         self.assertEqual(migration_result["files"], 26)
         self.assertTrue((self.base / "migration" / "timetable.json").is_file())
         validate_release_managed_artifact(self.base / "migration")
+
+    def test_release_managed_root_redirect_is_rejected(self):
+        alias = self.alias()
+        alias.overrides["/"] = (308, "text/html", b"", {"Location": "/index.html"})
+
+        with self.assertRaises(ArtifactFetchError) as caught:
+            self.fetch(alias, "root-redirect")
+
+        self.assertEqual(str(caught.exception),
+            "HTTP status 308 for request_path=/")
+        self.assertIn("/", alias.request_paths)
+        self.assertNotIn("/index.html", alias.request_paths)
+        self.assertFalse((self.base / "root-redirect").exists())
+
+    def test_release_managed_root_index_hash_mismatch_fails_closed(self):
+        alias = self.alias()
+        alias.overrides["/"] = (200, "text/html", self.release_files["index.html"] + b" ", {})
+
+        with self.assertRaises(ArtifactFetchError):
+            self.fetch(alias, "bad-root-index")
+
+        self.assertIn("/", alias.request_paths)
+        self.assertFalse((self.base / "bad-root-index").exists())
 
     def test_release_managed_index_asset_redirect_reports_its_actual_path_and_fails_closed(self):
         alias = self.alias()

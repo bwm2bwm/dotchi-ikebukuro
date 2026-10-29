@@ -1,5 +1,11 @@
 # 開発ログ
 
+## 2026-10-29 — release-managed index.htmlを正規rootから取得
+
+- release-managed snapshotで静的artifact `index.html`だけ取得先を`/index.html`から正規root `/`へ変更し、取得bytesは従来どおりartifactの`index.html`へ保存する。独立validatorがmanifest release descriptorのbytes/SHA-256とartifact file setを検証する。redirectは追わず、rootが308等の非200なら停止する。
+- legacy初回migrationもこれまでどおり明示opt-in時のroot取得を維持。公開Workflow、runtime、fixture、公開artifactは変更していない。
+- mock testで`/index.html` 308 + `/` 200の正常取得、root 308拒否、root HTML hash不一致、malformed manifest、legacy禁止を確認。GitHub Actions、Cloudflare、ODPT access、Deploy/Rollback、Commit/Push/Mergeなし。
+
 ## 2026-10-29 — Production artifact fetch diagnosticのHTTP pathログ改善
 
 - Actions run `40808966967`のread-only metadataでSHA `7e6a2b0b90ae73faf0f3c3d0b15de8742b934d24`、`main`、`workflow_dispatch`を確認し、現行HEADと完全一致。logs archiveはHTTP 403で取得不可。CLIのrelease-managed planは`index.html`静的assetを要求するため、legacy opt-inなしで出た`HTTP status 308 for index.html`は実path `/index.html`の取得エラーに対応する。従来Workflowは論理asset名を見て誤って`spa_root_request`に分類していた。308 redirect先は未確認。
