@@ -1,5 +1,15 @@
 # 開発ログ
 
+## 2026-10-29 — ODPT-1C public-display-v2ローカル画面QA
+
+- QA専用 `_local_preview/odpt_v2_qa.html`、`preview_odpt_v2_qa.mjs`、`odpt_v2_qa.css`、`odpt_v2_qa_adapter.mjs` を追加。public `public_index.html`、`preview_public.js`、`timetable_adapter.mjs`、builder、Workflowからimportせず、既存v1 profile受理条件とsynthetic経路は変更していない。
+- JS adapterは`schemaVersion=2` / `dataScope=public-display-v2`の完全allowlist、station/service-date集合、routeCoverage enum・件数、primary/direct/transfer整合、乗換駅・route・待ち時間、ID形式・公開内容からのSHA-256 ID再計算を検証する。browser fetch後にcandidate JSONのmanifest由来SHA-256/bytesも照合し、時刻・ID・hashの不一致は候補を表示せずfail-closed。v2の`id`をカード識別子として使い、route名とJST時刻だけを導出。service secondsはservice date JST午前0時に加算し24/25時台を維持。小竹向原乗換と待ち時間を表示し、unknownのホーム/接続保証は出さない。
+- UIは目的地8駅、路線別/発車順、直通のみ、最早着、発車countdown、目的地切替、JST virtual datetimeを備える。仮想時刻は実時間に戻すまで進行し、1秒間隔で表示更新。source `generatedAt`は生成日時だけ表示し、source取得時刻・更新時刻に読み替えない。`applicationPeriod=null`はQAバナーに「公開未承認・適用期間未設定」と表示し、有効期間を捏造しない。
+- routeCoverageの`scheduledTripCount`を候補件数として使わず、候補行からroute別候補を数える。`insufficient`/`unknown`路線は該当service dateで表示・終電判定を抑止。private manifestの駅日付監査から導出した最小QA stateに`no_valid_arrival` UNKNOWN件数と明示通過INFO件数を分けて保持する。UNKNOWN除外がある駅日付は両routeを終電未確認にし、INFOだけならwarning/終電阻止にしない。終電の対象候補集合も直通フィルター時に再計算する。
+- `scripts/prepare_odpt_v2_qa.py`はODPT-1Bのprivate bundle validatorを呼び、manifest内のcandidate hash/bytesを検証してから、一時dirにQA HTML/CSS/JS、8駅JSON、非公開QA stateだけをstageし、全件のschema/ID/hash再検証後atomic renameする。manifest本文、source fingerprint、source metadata、旅程本文の監査情報はsiteへコピーしない。repository内、既存出力先、symlink、余分/欠落candidateを拒否。output directoryは0700、fileは0600。`scripts/serve_odpt_v2_qa.py`はhost指定optionを持たず`127.0.0.1`に固定bindし、exact allowlist以外のpath・loopback以外のHostを拒否。CSP、no-store、nosniff、same-origin resource policyを返し、CORSは有効にしない。browser fetchはsame-origin、`credentials: omit`、`cache: no-store`、redirect拒否。
+- 起動手順: `python3 -B scripts/prepare_odpt_v2_qa.py --bundle <ODPT-1B-private-bundle> --service-date 2026-10-29`。出力後に表示される `python3 scripts/serve_odpt_v2_qa.py --directory <出力dir> --port 8765` を実行し、`http://127.0.0.1:8765/odpt_v2_qa.html`を開く。QA入力bundle例は `/private/tmp/dotchi-odpt-1b-audit-final/`、実際の隔離出力は `/private/tmp/dotchi-odpt-1c-qa/2026-10-29/site-final2/`。実snapshotは8駅×3日、10,068候補、468除外で準備PASS。配信siteは16ファイル、manifestなし。Hikawadai 2026-10-29 QA stateは`no_valid_arrival` UNKNOWN 4件として保持。server testでloopback HTTP 200を確認。CUAブラウザー起動は環境エラーで未完了。目的地切替、直通のみ/表示順、最早着、カウントダウン進行、24/25時台、日付跨ぎ、始発/終電境界、UNKNOWN終電抑止は手動ブラウザー確認項目として残す。
+- 回帰検証はNode 81件（v2 adapter 8件 + v1 adapter/profile/loader/virtual-clock/DOM QA 73件）、Python 42件（private prep/server 7 + ODPT-1B validator 21 + public builder 6 + artifact validator 8）の計123件PASS。実snapshot JS validatorでも8駅×3日・10,068候補のID検証がPASS。v1 public artifact builder/validatorのallowlistにQA filesは入らず、既存public runtime/v1 testに失敗なし。実ODPTの公開・自動公開は未承認。source freshness、applicationPeriod、ライセンス/credit/免責、再構成リスクは未解決。Actions、Cloudflare、Deploy、ODPT API、Commit/Push/Mergeは使用していない。
+
 ## 2026-10-29 — ODPT-1B public-display-v2非公開候補パイプライン
 
 - `scripts/odpt_public_v2.py`を追加。保存済みsnapshotから既存`ItineraryGenerator`を再利用し、ODPT-0 QA PASSと同一source fingerprintを前提に8駅×service date前日・当日・翌日の候補payloadを生成する。既存v1 projector、synthetic builder、runtime、release workflowには接続・変更していない。
@@ -741,3 +751,26 @@
 - 保存済み実snapshotを2026-10-28〜30で再検証。全体PASS、24 station-date、10,536生成行、ODPT unique_match 10,536、候補なし/期間外/未照合0。全8駅合計のseverityはINFO 681 code occurrences / 564 station-date itinerary instances、WARNING 0/0、FAIL 0。INFOのうち`destination_explicit_pass`は564/564。`destination_alighting_prohibited`、`destination_arrival_missing`、`direct_arrival_unavailable`はそれぞれ39 occurrences/39 instances。
 - 氷川台に限ると各日13行、3日39旅程インスタンスが同じ4 codeを併せ持つ。したがって同駅3日分はINFO 156 code occurrences/39 instancesであり、117を117旅程とは数えない。各行は副都心線route 9、direct alternativeなし、valid transfer candidateあり、primary transfer。各日氷川台のprimaryは直通287/乗換148。診断付き13行は`passThroughCount`相当の正常除外で、既存data insufficiency件数は0。レポートPASSはsource freshnessや公開許可を保証しない。ODPT source date 2026-03とGTFS feed version 20261008の適用関係は未解決のまま維持。
 - 合成severity test 2件を追加し、確認付き通過+成立乗換は複数INFO code/影響1旅程、通過根拠なし到着欠損・成立しない乗換・invalid timeはWARNINGとなることを検証。ODPT-0 test 15件成功。Python全体 `PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v` は189件成功（434.378秒）。Access/fetch mockは127.0.0.1 loopbackのみ。ODPT API、Cloudflare、Actions、Deploy/Rollback、公開artifact変更、commit/push/mergeなし。
+
+## 2026-10-29 — ODPT-1C UNKNOWN表示制御修正
+
+- `buildV2QaBoard()`で候補表示可否と運行・終電判定を分離。`routeCoverage=complete`かつ予定便数が正のrouteは、個別validatorを通った候補を表示する。駅・service date単位に`no_valid_arrival`またはその他UNKNOWNがあれば、路線別内訳がないため同日の両路線に対して終電を未確認とし、最終便バッジを付けない。既知候補の後でも運行終了とは表示しない。始発側も同様に未知除外がある日の断定を抑止する。`routeCoverage=unknown/insufficient`は該当routeのカードを引き続き抑止する。明示通過INFOだけでは終電未確認にしない。
+- UNKNOWNが含まれるservice dateの候補が現在の表示範囲にあれば、最早着マークを「表示候補内の最早着」とする。直通のみ・路線別・発車順は同じ比較範囲ラベルを使用。QA statusには検証済み候補の表示中であること、両路線の終電が未確認であること、UNKNOWN件数を表示。renderごとにstatus/coverage/card DOMを置換し、目的地ロード時には古いcards/warningsを消去する。
+- 合成テストを更新・追加。両route complete + UNKNOWNで両路線候補、終電抑止、終電後の未確認表示、最早着限定ラベルを確認。route unknown/insufficientは該当routeだけ抑止。明示通過INFOのみの終電動作、直通のみ/路線別モード、駅切替・日付変更時の状態更新を確認。`tests/odpt_v2_qa_adapter.test.mjs` 9件、DOM統合`tests/odpt_v2_qa_dom.test.mjs` 1件を含むNode全体 `node --test tests/*.test.mjs` 152件成功。v1 synthetic public builder/validator/release-managed builder Python testsはそれぞれ6/8/9件成功。合計175件成功。
+- ODPT-1B bundleからQA siteを新規隔離先`/private/tmp/dotchi-odpt-1c-qa/2026-10-29/site-unknown-fix2/`へ準備。8駅×3日、candidate JSON 10,068件、excluded 468件、QA配信16ファイル、private manifestはコピーせず、0700/0600権限。候補JSON・既存manifest・local_data原本は変更なし。新runtimeで8駅JSON全件のbytes/hash、strict schema/public IDを検証。2026-10-29 05:30 JSTに8駅合計118候補を表示し、氷川台/和光市は各15カード（有楽町線8、副都心線7）、各4件UNKNOWN、両routeの`terminalKnown=false`、最早着ラベル「表示候補内の最早着」を確認。異常系sourceアクセス、外部通信、ODPT API、Actions、Cloudflare、公開artifact、Deploy/Rollback、commit/push/mergeはなし。
+- 実ブラウザーでの更新後画面目視は未実施。再確認は`python3 scripts/serve_odpt_v2_qa.py --directory /private/tmp/dotchi-odpt-1c-qa/2026-10-29/site-unknown-fix2 --port 8765`を起動し、`http://127.0.0.1:8765/odpt_v2_qa.html`で氷川台/平和台/地下鉄赤塚/地下鉄成増/和光市の5駅、virtual 2026-10-29 05:30 JST、路線別/発車順/直通のみ、各service dateの最終候補発車時刻より後も終電未確認であること、千川への切替でUNKNOWN表示が消えることを確認する。実データ公開は未承認。source freshness・applicationPeriod・ライセンス・再構成リスクは引き続き未解決。
+
+## 2026-10-29 — ODPT-1C 仮想時計秒省略入力修正
+
+- 原因はQA entryのローカル日時parserが任意秒captureを`Number(undefined)`で`NaN`化し、minute-only値を拒否すること。拒否時は既存`virtualClock`を変更せず`tick()`もしないため、実時計と実時刻基準の候補表示が残る。実クリック時のブラウザーDOM valueは取得できていないが、この分岐で報告症状を再現できる。
+- `parseJstInput()`をv2 QA adapterのexport関数に統合し、秒省略形式と秒あり形式を受理。秒省略は変換前に0を補い、round-tripで暦日・時刻を検証してJST wall clockをUTC epochへ変換する。`2026-10-29T05:30`と`2026-10-29T05:30:00`はいずれも`2026-10-28T20:30:00Z`。不正入力では時計状態・候補を変えず、明確な形式エラーを表示し、tick後もエラー状態を保持。正常時は時計/候補/countdownが同一時刻を使い、実時間ボタンで仮想時計とエラーを解除。
+- Adapter/DOM testsでminute/second形式の同時刻・JST変換、無効暦日/時刻/形式拒否、右上時計の仮想時刻反映、カード候補の時間窓切替、countdownの1秒減少、不正入力後のstate維持、実時刻への復帰を検証。Node全体 `node --test tests/*.test.mjs` 153件成功。Python v1 synthetic回帰は`test_public_site_build.py` 6件、`test_public_artifact_validation.py` 8件、`test_release_managed_public_site.py` 9件、計23件成功。合計176件成功。
+- 8765番の旧server PID 20016が対象siteを配信中と確認して停止。`site-unknown-fix2`は厳密validatorで事前/事後検査し、`preview_odpt_v2_qa.mjs`と`odpt_v2_qa_adapter.mjs`のみをatomic replace、0700/0600権限を維持。manifestとcandidate JSONには触れていない。更新server PID 21296は固定`127.0.0.1:8765`、HTTP 200・no-store/CSP等の応答を確認。entry hash `5003c2cf5fed8815c40d9adbedb082f155aec5613256221cbee92fec4d3f3561`、adapter hash `fae18e77ae23d173a6f89a2cd70d1d16054d4075de07e9f2f214c21bac9ddb02`はいずれもsource、site、HTTP配信の一致を確認。Mac Chromeの最終目視はユーザーが行う。v1 runtime/public builder、synthetic artifact、Workflow、ODPT source、外部接続、commit/push/mergeは変更・実行していない。
+
+## 2026-10-29 — ODPT-1C 実ブラウザーQA完了
+
+- Mac Chromeでv2専用localhost QA画面の表示を確認し、8駅の目的地切替、路線別／発車順切替、直通のみfilter、仮想日時の変更と実時間への復帰を実施。右上時計・候補選択・countdownが連動し、countdownが進行することを確認。
+- UNKNOWNのある駅でも検証済み候補が表示され、UNKNOWN警告、始発・終電未確認、終電後の未確認状態を維持。最早着は「表示候補内」として限定表示し、氷川台では終電badgeが抑止されることを確認。目的地・日付切替で表示状態が更新されることも確認。
+- virtual 2026-10-29のservice dateに属する24時台列車を表示し、暦日を跨いでもservice dateが維持されることを確認。今回の保存済み候補に25時台の対象便はなく、25時台の実データQAは保留。
+- 自動テスト176件PASS（実行結果の報告に基づく）。3日bundle境界での候補表示と24時間分の完全性判定分離、source freshness・公開適用期間、ライセンス・クレジット・時刻表再構成リスクは未解決として維持。実データ公開・自動公開は未承認。
+- QA終了後、8765番をlistenする専用Python server PID 21296を確認して停止。停止後`lsof -nP -iTCP:8765 -sTCP:LISTEN`でlistener不在を確認した。QA siteとcandidate/source dataは変更していない。

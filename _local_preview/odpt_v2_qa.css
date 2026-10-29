@@ -1,0 +1,12 @@
+.qa-clock { display: grid; grid-template-columns: 1fr auto auto; gap: 5px; align-items: center; margin: 6px 0; }
+.qa-clock label { grid-column: 1 / -1; font-size: 10px; color: #59636c; font-weight: 700; }
+.qa-clock input { min-width: 0; height: 36px; border: 1px solid #d8dddf; border-radius: 7px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.qa-clock button { min-height: 36px; border: 1px solid #d8dddf; border-radius: 7px; background: white; color: #384958; padding: 4px 8px; font: inherit; font-size: 10px; cursor: pointer; }
+.train.route-6 { --line-color: #c1a026; }
+.train.route-9 { --line-color: #9C5E31; }
+#route-coverage { display: flex; flex-wrap: wrap; gap: 5px 10px; padding: 4px 2px; }
+.coverage-state { font-weight: 700; }
+.coverage-state[data-state="unknown"], .coverage-state[data-state="data_insufficient"] { color: #9b3f33; }
+.coverage-state[data-state="ended"] { color: #73551f; }
+.service-date-label { color: #737b84; font-size: 9px; }
+@media (max-width: 360px) { .qa-clock { grid-template-columns: 1fr 1fr; } .qa-clock input { grid-column: 1 / -1; } }

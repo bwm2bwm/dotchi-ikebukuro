@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f7f4">
+  <title>どっちに池袋 — ODPT v2 ローカルQA</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="preview.css">
+  <link rel="stylesheet" href="odpt_v2_qa.css">
+  <script type="module" src="preview_odpt_v2_qa.mjs"></script>
+</head>
+<body>
+  <main>
+    <header class="top"><div><h1 class="brand">どっちに池袋</h1></div><time id="clock" class="clock">--:--:--</time></header>
+    <div class="demo" role="note"><strong>実ODPT候補・ローカルQA専用</strong><br>公開未承認・適用期間未設定。この画面は127.0.0.1上の検証用です。</div>
+    <div class="qa-clock">
+      <label for="qa-datetime">仮想日時（JST）</label>
+      <input id="qa-datetime" type="datetime-local" step="1">
+      <button id="qa-clock-set" type="button">この日時で進行</button>
+      <button id="qa-clock-real" type="button">実時間に戻す</button>
+    </div>
+    <p id="qa-generated-at" class="foot">候補生成日時を読み込み中</p>
+    <button id="destination-trigger" class="selectbox destination-trigger" type="button"
+      aria-haspopup="dialog" aria-controls="destination-dialog">
+      <span id="route-display" class="route-display">池袋 → 氷川台</span>
+      <span class="hint">▼ 目的地を選択</span>
+    </button>
+    <div id="timetable-status" class="status" role="status" aria-live="polite">ローカル候補を検証しています…</div>
+    <div id="route-coverage" class="foot" aria-live="polite"></div>
+    <section>
+      <div class="controls">
+        <div class="toggle" role="group" aria-label="表示順">
+          <button id="mode-line" type="button" aria-pressed="false">路線別</button>
+          <button id="mode-departure" class="sel" type="button" aria-pressed="true">発車順</button>
+        </div>
+        <label class="filter"><input id="direct-only" type="checkbox"> 直通のみ表示</label>
+      </div>
+      <div id="board" aria-live="off"><p class="empty">読み込み中…</p></div>
+    </section>
+  </main>
+  <dialog id="destination-dialog" class="destination-dialog" aria-labelledby="destination-dialog-title">
+    <div class="destination-dialog-head">
+      <h2 id="destination-dialog-title">目的地を選択</h2>
+      <button id="destination-close" class="destination-close" type="button">閉じる</button>
+    </div>
+    <p class="destination-dialog-description">池袋からの停車順</p>
+    <ul id="destination-list" class="destination-list" aria-label="目的地一覧"></ul>
+  </dialog>
+  <div class="ad-dock"><aside class="ad-placeholder" aria-label="広告スペース（仮）">LOCAL QA</aside></div>
+</body>
+</html>
