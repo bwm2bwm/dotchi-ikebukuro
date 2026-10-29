@@ -700,3 +700,12 @@
 - RollbackはDeployment全体の切替であり、Aをcurrentに戻すとB世代JSONがcurrent aliasから取得できないB pin済みタブはfail closedし、更新を求める可能性がある。cacheからの一時取得は保証しない。Aのservice-date/feed/application期間がQA時点で有効かも別途確認が必要。旧タブ継続配信と実Rollbackを未検証のため、Rollbackは保留とし、通常の更新・QAで実施しない。
 - 次回の第3世代以降の更新時は、切替後に旧Aタブを対象とする継続配信QAを実施する。未読み込み駅のJSON取得、失敗時のfail-closed表示と更新後のcurrent世代への移行を確認し、Rollbackを行う場合は別途事前条件と復旧先を確認する。
 - 次候補はODPT実データ公開準備。実ODPTの自動公開は未承認であり、今回実施した処理はsynthetic dataに限定。ODPTアクセス、追加Actions実行、Cloudflare設定変更、Rollback、commit/push/mergeは行っていない。
+
+## 2026-10-29 — T12 legacy移行flagゲートとProduction fetch回帰テスト
+
+- `scripts/validate_release_build_inputs.py`で、`expected_previous_release_id`が与えられた状態で`allow_initial_legacy_migration=true`なら、publish/build-onlyを問わずbuild入力検証を失敗させる。通常release-managed更新（期待Aあり・legacy flag false）と初回legacy移行（期待Aなし・flag true）は維持。
+- `.github/workflows/synthetic-public-ci.yml`のB prevalidation Actions Summaryへ、dispatchの`service_date`、`publish_staging`、`allow_initial_legacy_migration`、`expected_previous_release_id`を入力値のまま追加。省略された文字入力は`empty`と表示し、解決後のservice-date anchorは別項目で記録する。初回legacy移行も通常更新もbuild-onlyも、同じSummaryで入力を監査できる。
+- CI #12の実dispatch値はリポジトリへ保存されていないため遡及確認不能。以後はSummaryに実行値を残す。flag trueかつ期待Aありの組合せは、snapshot fetchやEnvironment承認へ進む前のbuildで拒否する。
+- `test_release_managed_index_asset_redirect...`を現行の正規root `/` fetch仕様に修正。rootが308なら`request_path=/`を報告して拒否し、Location先や`/index.html`へ追従しないこと、応答body・Location・Cookieの内容をエラーへ漏らさないことを確認する。HTTP redirect禁止の実装は変更なし。
+- 関連テスト: `node --test tests/release_managed_workflow.test.mjs` 8件成功、`python3 -B -m unittest discover -s tests -p 'test_release_build_inputs.py' -v` 9件成功、`python3 -B -m unittest discover -s tests -p 'test_fetch_production_artifact.py' -v` 21件成功。
+- 変更はWorkflow、build input validator、Workflow/build/fetch tests、本書とproject stateのみ。runtime、fixture、public artifactは変更なし。Actions実行、Cloudflare接続、Deploy/Rollback、ODPTアクセス、commit/push/mergeなし。

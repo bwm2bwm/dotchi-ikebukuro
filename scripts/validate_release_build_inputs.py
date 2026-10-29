@@ -45,6 +45,8 @@ def resolve_build_inputs(*, service_date: str | None, expected_previous_release_
     expected = expected_previous_release_id or None
     if expected is not None and not RELEASE_ID_RE.fullmatch(expected):
         raise BuildInputError("expected previous releaseId is malformed")
+    if expected is not None and allow_initial_legacy_migration:
+        raise BuildInputError("legacy migration cannot be enabled when expected previous releaseId is supplied")
     if publish_staging:
         if not allow_initial_legacy_migration and expected is None:
             raise BuildInputError("expected previous releaseId is required for release-managed publishing")

@@ -99,6 +99,21 @@ test('build-only validation records the fixed date, A/B result, and validator be
   assert.doesNotMatch(validate, /secrets\.|fetch_production_artifact\.py/);
 });
 
+test('prevalidation Summary records all four dispatch inputs separately from the resolved service date', () => {
+  const validate = section('  validate:', '  release-and-deploy:');
+  for (const input of ['service_date', 'publish_staging', 'allow_initial_legacy_migration', 'expected_previous_release_id']) {
+    assert.match(validate, new RegExp(`DISPATCH_${input.toUpperCase()}: \\$\\{\\{ inputs\\.${input} \\}\\}`));
+    assert.match(validate, new RegExp(`dispatch ${input}:`));
+  }
+  assert.match(validate, /service-date anchor: `%s`/);
+});
+
+test('build input validator rejects expected A combined with initial legacy migration opt-in', async () => {
+  const validator = readFile(new URL('../scripts/validate_release_build_inputs.py', import.meta.url), 'utf8');
+  assert.match(await validator, /expected is not None and allow_initial_legacy_migration/);
+  assert.match(await validator, /legacy migration cannot be enabled when expected previous releaseId is supplied/);
+});
+
 test('Access and Cloudflare credentials are step-scoped and deploy targets only the existing staging project', () => {
   const release = section('  release-and-deploy:', null);
   const accessRefs = release.match(/secrets\.CF_ACCESS_CLIENT_(?:ID|SECRET)/g) ?? [];

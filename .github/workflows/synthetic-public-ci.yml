@@ -225,6 +225,10 @@ jobs:
 
       - name: Record B prevalidation summary
         env:
+          DISPATCH_SERVICE_DATE: ${{ inputs.service_date }}
+          DISPATCH_PUBLISH_STAGING: ${{ inputs.publish_staging }}
+          DISPATCH_ALLOW_INITIAL_LEGACY_MIGRATION: ${{ inputs.allow_initial_legacy_migration }}
+          DISPATCH_EXPECTED_PREVIOUS_RELEASE_ID: ${{ inputs.expected_previous_release_id }}
           SERVICE_DATE_ANCHOR: ${{ needs.build.outputs.service_date_anchor }}
           EXPECTED_PREVIOUS_RELEASE_ID: ${{ inputs.expected_previous_release_id }}
           BUILT_RELEASE_ID: ${{ needs.build.outputs.release_id }}
@@ -242,6 +246,10 @@ jobs:
           {
             echo "## Release-managed B prevalidation"
             echo
+            printf -- '- dispatch service_date: `%s`\n' "${DISPATCH_SERVICE_DATE:-empty}"
+            printf -- '- dispatch publish_staging: `%s`\n' "$DISPATCH_PUBLISH_STAGING"
+            printf -- '- dispatch allow_initial_legacy_migration: `%s`\n' "$DISPATCH_ALLOW_INITIAL_LEGACY_MIGRATION"
+            printf -- '- dispatch expected_previous_release_id: `%s`\n' "${DISPATCH_EXPECTED_PREVIOUS_RELEASE_ID:-empty}"
             printf -- '- service-date anchor: `%s`\n' "$SERVICE_DATE_ANCHOR"
             printf -- '- expected A releaseId: `%s`\n' "${EXPECTED_PREVIOUS_RELEASE_ID:-not supplied}"
             printf -- '- built B releaseId: `%s`\n' "$BUILT_RELEASE_ID"

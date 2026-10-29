@@ -43,13 +43,23 @@ class ReleaseBuildInputTests(unittest.TestCase):
             resolve_build_inputs(service_date="2026-10-30", expected_previous_release_id=None,
                 publish_staging=True, allow_initial_legacy_migration=False)
 
-    def test_initial_legacy_migration_is_explicit_and_expected_release_still_works_for_managed_site(self):
+    def test_initial_legacy_migration_is_explicit_and_has_no_expected_release(self):
         result = resolve_build_inputs(service_date="", expected_previous_release_id=None,
             publish_staging=True, allow_initial_legacy_migration=True)
         self.assertIsNone(result["expected_previous_release_id"])
-        managed_result = resolve_build_inputs(service_date="", expected_previous_release_id=RELEASE_A,
-            publish_staging=True, allow_initial_legacy_migration=True)
-        self.assertEqual(managed_result["expected_previous_release_id"], RELEASE_A)
+
+    def test_release_managed_publish_with_expected_release_and_legacy_flag_off_is_allowed(self):
+        result = resolve_build_inputs(service_date="2026-10-30",
+            expected_previous_release_id=RELEASE_A, publish_staging=True,
+            allow_initial_legacy_migration=False)
+        self.assertEqual(result["expected_previous_release_id"], RELEASE_A)
+
+    def test_expected_release_and_legacy_migration_flag_conflict_fails_closed_at_build_time(self):
+        for publish_staging in (False, True):
+            with self.subTest(publish_staging=publish_staging), self.assertRaises(BuildInputError):
+                resolve_build_inputs(service_date="2026-10-30",
+                    expected_previous_release_id=RELEASE_A, publish_staging=publish_staging,
+                    allow_initial_legacy_migration=True)
 
     def test_equal_release_ids_fail_and_different_ids_pass(self):
         with self.assertRaises(BuildInputError):

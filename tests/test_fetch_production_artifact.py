@@ -217,24 +217,24 @@ class FetchProductionArtifactTests(unittest.TestCase):
         self.assertIn("/", alias.request_paths)
         self.assertFalse((self.base / "bad-root-index").exists())
 
-    def test_release_managed_index_asset_redirect_reports_its_actual_path_and_fails_closed(self):
+    def test_release_managed_root_redirect_reports_its_actual_path_and_fails_closed_without_following(self):
         alias = self.alias()
-        alias.overrides["index.html"] = (308, "text/html", b"REDIRECT_BODY_SENTINEL", {
+        alias.overrides["/"] = (308, "text/html", b"REDIRECT_BODY_SENTINEL", {
             "Location": "https://redirect.invalid/?token=LOCATION_QUERY_SENTINEL",
             "Set-Cookie": "session=COOKIE_SENTINEL; Secure; HttpOnly",
         })
 
         with self.assertRaises(ArtifactFetchError) as caught:
-            self.fetch(alias, "redirected-index")
+            self.fetch(alias, "redirected-root")
 
         self.assertEqual(str(caught.exception),
-            "HTTP status 308 for request_path=/index.html")
+            "HTTP status 308 for request_path=/")
         for sentinel in ("REDIRECT_BODY_SENTINEL", "redirect.invalid", "LOCATION_QUERY_SENTINEL",
                          "COOKIE_SENTINEL", "session="):
             self.assertNotIn(sentinel, str(caught.exception))
-        self.assertIn("/index.html", alias.request_paths)
-        self.assertNotIn("/", alias.request_paths)
-        self.assertFalse((self.base / "redirected-index").exists())
+        self.assertEqual(alias.request_paths.count("/"), 1)
+        self.assertNotIn("/index.html", alias.request_paths)
+        self.assertFalse((self.base / "redirected-root").exists())
 
     def test_legacy_requires_explicit_initial_migration_and_passes_strict_validator(self):
         alias = self.alias(self.legacy_files)
