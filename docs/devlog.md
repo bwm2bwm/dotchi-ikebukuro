@@ -1,5 +1,16 @@
 # 開発ログ
 
+## 2026-10-29 — ODPT-1B public-display-v2非公開候補パイプライン
+
+- `scripts/odpt_public_v2.py`を追加。保存済みsnapshotから既存`ItineraryGenerator`を再利用し、ODPT-0 QA PASSと同一source fingerprintを前提に8駅×service date前日・当日・翌日の候補payloadを生成する。既存v1 projector、synthetic builder、runtime、release workflowには接続・変更していない。
+- v2 inner schemaは`schemaVersion=2` / `dataScope=public-display-v2`。表示・旅程選択に必要なroute、destination表示、type label、service seconds、primary/direct/transfer代替だけを許可する。source trip ID、ODPT URI/destination ID、照合status/reason、diagnostic、stop-pattern/source根拠、source date等はcandidate JSONから除外。`p2-` IDは公開journey情報のcanonical hashで決定し、source trip IDを参照しない。24時超service secondsを保持する。未知キー、ID/旅程重複、時刻順序、primaryとalternativeの不一致、乗換駅・route・60〜600秒範囲違反を拒否する。
+- `routeCoverage`はrouteごとにactive GTFS scheduled trip数と`dataState`を持つ。scheduled trip数は該当日routeのactive GTFS trip総数で、池袋発のgenerator rowsやpublic departures数とは別の母数。`complete`はschedule/origin結果カウントの整合、routeのdata不足0、ODPT照合済み、文脈別WARNINGなしを要求する。明示通過等の正常INFOは異常扱いしない。primary旅程を持たないrowsは表示candidateから除くが、ODPT-0がPASSした明示通過/候補なし状態だけを理由にroute coverageを不足へ変えない。schedule 0や計測欠損は`unknown`。bundleは全route stateが`complete`でなければ失敗する。
+- 公開candidateの`applicationPeriod`はnull固定。GTFS feed期間を公開鮮度期限として流用しない。service-date評価期間、source 7ファイルのSHA-256/bytes、ODPT-0 fingerprint/generation digest、generator fingerprint、品質集計、provenance、candidate JSON hash/bytesはprivate manifestに分離。保存sourceの取得日時は不明としてnull、filesystem mtimeは取得日時に使わない。生成日時はpayloadに含むが生成内容digestから除外する。出力先は新規path限定、repository/source tree/ symlink拒否、0700 directory/0600 files、stage作成とatomic renameで部分bundleを残さない。
+- 実snapshotを`--service-date 2026-10-29`で4回実行。ODPT-0 PASS、24 station-date、10,536 itinerary result、ODPT `unique_match` 10,536、candidate JSON 10,068件（primaryなし468件を非表示対象として除外）、primary direct 7,887 / transfer 2,181、route coverage 48件complete・insufficient 0・unknown 0。source fingerprintは`6e578d7b55f669e58dd3597dc151d9d0db7a6cbf7651d96f84036538c4ea430e`でODPT-0と一致。4実行のcandidate generation digestは`83edf7454a3916c41a1ce95c41e3f519b415e09e4875d489ec23a2a056e1c6e9`で一致。最終出力は`/private/tmp/dotchi-odpt-1b-candidate-final3/`。
+- Commit前レビューの3指摘を反映（2026-10-29）。bundle validatorはroot内をmanifest 1件と期待する8駅JSONだけに限定し、欠落・余剰・重複inode/hardlink・symlinkを拒否、manifestのSHA-256/bytesを照合する。生成中stageは完成先にatomic renameし、既存出力を拒否して失敗時に破棄する。公開IDの決定規則を共通関数に集約し、source IDを含めず、validatorが公開journey内容からIDを再計算して形式・一意性と一致を検査する。snapshotを4回再生成し、10,536 = 10,068 + 468、digest `83edf7454a3916c41a1ce95c41e3f519b415e09e4875d489ec23a2a056e1c6e9` の一致を確認。除外監査はprivate manifestに駅×service dateごと追加し、明示通過INFO 408件（要町・千川各68件/日）、理由未確定の`no_valid_arrival` UNKNOWN 60件（氷川台・平和台・地下鉄赤塚・地下鉄成増・和光市各4件/日）、WARNING 0件を記録。分類不能は理由`unknown`・分類UNKNOWNとして残し、候補JSONへは監査情報を含めない。
+- 合成回帰テストはODPT-1B 21件、ODPT-0 QA 15件、既存public profile/runtime Node test 44件が全て成功（計80件）。bundleの余剰/欠落/重複ハードリンク/symlink、IDと表示内容の改ざん・衝突、除外総数/理由集計不一致、UNKNOWN分類、部分生成破棄、source不変とdigest再現性を確認。
+- 残課題: ODPT source freshness/適用期間、取得日時、ライセンス・credit・免責、公開データからの元時刻表再構成可能性は未決。v2 runtime/UI互換性確認はODPT-1C。候補JSONは非公開であり、public application periodと公開承認は未設定。ODPT API、Actions、Cloudflare、公開artifact、Commit/Push/Mergeは使用していない。
+
 ## 2026-10-29 — 第2世代release-managed更新の承認前A/B検証
 
 - `.github/workflows/synthetic-public-ci.yml`へ任意の`service_date`と`expected_previous_release_id`入力を追加。省略service-dateはbuild開始時にJST当日へ解決し、従来の基準日挙動を保ったまま固定値をfixture生成器へ渡す。入力検証CLIが実在日付、`r1-` + 小文字hex 64桁、publish時の期待A必須条件を検査する。
