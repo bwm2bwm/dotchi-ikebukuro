@@ -1,8 +1,7 @@
 # T12 正式配信方式・ホスティング設計調査
 
 調査日: 2026-10-26 (JST)  
-状態: 設計調査のみ。実装・デプロイ・ODPT APIアクセスは未実施。  
-関連タスク: T11 利用条件確認は完了。T12の実装、T13、T15は未着手。
+状態: 調査文書。T12のsynthetic-only builder/validator、release-managed runtime、Cloudflare Pages staging workflowと複数回のstaging QAは実装・一部実環境確認済み。実ODPT配信・自動公開は未承認。詳細は [project_state.md](project_state.md) と本書の後段を参照。
 
 ## 結論
 
@@ -86,7 +85,9 @@ i-mobile公式FAQはmediaごとの審査を案内し、審査目安は2–3営�
 
 `ads.txt`は配信hostのrootで提供する。技術上、`github.io`/`pages.dev`でも静的text fileを置けるが、project subpathの場合はroot URLにならないこと、i-mobileのsite審査・登録URL条件、独自domainの必要性を申請前に確認する。独自domainはapp稼働の技術要件ではないが、ブランド安定、移転時のURL維持、ads.txt root管理に有用。
 
-## 段階的実装計画（未着手）
+## 段階的計画と現状
+
+以下は元の段階計画を履歴として保持する。T12の主要なsynthetic builder/validator、release-managed方式、staging workflowは後続実装で完了している。実ODPTへの適用や自動公開は未承認であり、過去の段階表は現行状態を示さない。
 
 概算は経験的な実装規模であり、データ取得・審査待ち時間は含まない。
 

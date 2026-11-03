@@ -141,10 +141,13 @@ QA serverの主listenerは明示されたプライベートLAN IPv4だけにbind
 - styles.css: レスポンシブ表示とカードのスタイル
 - app.js: 時計、候補表示、並び替え、直通フィルター
 - data.js: 架空の列車・接続データ
-- docs/product_spec.md: 確定済み製品仕様の正本
-- docs/ui_spec.md: 確定済みUI詳細仕様
-- docs/project_state.md: 最新の開発状況、未解決課題、次のタスク
-- docs/devlog.md: 過去の調査・実装・検証履歴
+- docs/project_state.md: 現在状態、完了機能、未解決事項、次作業
+- docs/product_spec.md: 合意済み製品要件の正本
+- docs/ui_spec.md: 合意済みUI詳細仕様の正本
+- docs/odpt_research.md: ODPT/GTFSの公式根拠、事務局回答、検証結果と未解決事項
+- docs/hosting_research.md: 配信方式の比較・採用理由・運用調査
+- docs/devlog.md: 時系列の調査・実装・検証履歴
+- docs/archive/: 完了した設計調査・過去の接続設計。現行仕様の正本ではない
 
 ## ドキュメントの更新ルール
 
@@ -157,4 +160,6 @@ QA serverの主listenerは明示されたプライベートLAN IPv4だけにbind
 
 ## 仕様・開発状況
 
-まず docs/product_spec.md と docs/ui_spec.md を仕様の正本として参照し、実装・未解決事項は docs/project_state.md、経緯は docs/devlog.md を参照してください。
+参照順序: 現在状態は `project_state.md`、合意済み要件は `product_spec.md` と `ui_spec.md`、ODPT/GTFS根拠は `odpt_research.md`、配信設計は `hosting_research.md`、経緯は `devlog.md`。archiveは過去の設計記録です。
+
+公式回答や根拠付きで確定した事項は、後日の調査で適用範囲が覆らない限り、過去の未確認状態へ戻しません。回答の適用範囲と残る未確認事項を分けて記録します。

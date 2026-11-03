@@ -1,5 +1,7 @@
 # 開発ログ
 
+> 本書は時系列の履歴です。各項目の「未確認」「未実施」は記録当時の状態であり、現在の判断は [project_state.md](project_state.md)、ODPTの現在の根拠は [odpt_research.md](odpt_research.md) を参照してください。
+
 ## 2026-10-29 — ODPT-1C public-display-v2ローカル画面QA
 
 - QA専用 `_local_preview/odpt_v2_qa.html`、`preview_odpt_v2_qa.mjs`、`odpt_v2_qa.css`、`odpt_v2_qa_adapter.mjs` を追加。public `public_index.html`、`preview_public.js`、`timetable_adapter.mjs`、builder、Workflowからimportせず、既存v1 profile受理条件とsynthetic経路は変更していない。
@@ -268,7 +270,7 @@
 ## 2026-10-22 — Ver.0.5 Step 2A Web UI接続設計
 
 - `app.js` / `data.js` / `index.html` / `styles.css` と製品・UI仕様を読み、現行の相対秒・仮所要分モデルとStep 1のservice-date付き旅程モデルの差を整理。
-- `docs/ver_0_5_step_2a_ui_integration.md` にUI項目対応、最小payload、日付・24時超・現在時刻処理、候補選択、欠損表示、local preview分離、Step 2Bの作業順を記録。
+- `docs/archive/ver_0_5_step_2a_ui_integration.md` にUI項目対応、最小payload、日付・24時超・現在時刻処理、候補選択、欠損表示、local preview分離、Step 2Bの作業順を記録（2026-11-03 archiveへ移動）。
 - `scripts/export_local_timetable_payload.py` を追加。必要なカードデータと内部metadataだけをJSON化し、repository内への書き出しを拒否する。外部APIやキーを参照しない。
 - payload exporterのインメモリ出力検証を追加。HTML/CSS/JavaScriptは変更せず、実payloadをrepositoryやpublicへ配置せず、コミットなし。
 - `python3 -B -m unittest discover -s tests -v` は計11件成功。exporterのrepository内出力拒否、repository外出力制約のCLI helpと `git diff --check` も確認。GTFS/ODPTのpayloadファイルは生成していない。
@@ -278,7 +280,7 @@
 - 独立ES module `scripts/timetable_adapter.mjs` を追加。payload schema検証、Asia/Tokyo service-second→epoch変換、未来24時間候補、前日／当日／翌日service day、重複排除、直通filter、路線別・発車順、最早着単一選択を実装。
 - カード項目にroute color、既知train typeの日本語表記、destination unknown、直通／乗換・待ち時間、arrival/departure epoch、番線unknown・接続非保証を変換。primary到着なしは推測せず除外理由を保持。
 - Node標準 `node:test` で12件実行。日付跨ぎ、feed境界、now前後、24時間窓、service day duplicate、direct/transfer、mode/filter、同着、欠損、不正payloadを確認。通常timezoneと `TZ=UTC` の両方で成功。
-- `docs/ver_0_5_step_2a_ui_integration.md` にadapter動作と返却形式を補足し、project stateを更新。`index.html` / `app.js` / `data.js` / `styles.css`、実payload、取得データを変更・生成せず、外部API・秘密情報に触れず、コミットなし。
+- 当時のStep 2A資料（現 [`archive/ver_0_5_step_2a_ui_integration.md`](archive/ver_0_5_step_2a_ui_integration.md)）にadapter動作と返却形式を補足し、project stateを更新。`index.html` / `app.js` / `data.js` / `styles.css`、実payload、取得データを変更・生成せず、外部API・秘密情報に触れず、コミットなし。
 
 ## 2026-10-22 — Ver.0.5 Step 2B-2 ローカル実ダイヤUI接続
 
@@ -644,7 +646,7 @@
 - `generate_synthetic_public_fixtures.py`、factory、workflowを読取調査。workflowは`--service-date`を省略、基準日は`datetime.now(ZoneInfo("Asia/Tokyo")).date()`。serviceDateは基準日の前日〜翌日、`generatedAt`と`feed.validFrom`は先頭serviceDateの00:00 JST。よって10/28実行時の10/27 `generatedAt`は仕様どおりで、runner UTC timezone起因ではない。synthetic `generatedAt`はbuild時刻ではなく対象期間先頭日を表す固定timestampである点を記録。
 - public loaderの固定相対JSON URL、2駅prepared-payload LRU、`cache: default`、runtime有効期間判定、独立validatorのcross-file検査範囲を確認。LRUに残るA payloadとdeployment後fetchのB payloadが同一runtimeで共存しうるが、今回その共存・表示差は未測定。validatorは各駅payload/serviceDate整合を検証する一方、HTML/JS/JSON間または駅JSON間のrelease一致を検証しない。ETag/304はURL単位で、世代transactionを保証しない。
 - A（共通release ID検知）、B（immutable release別JSON URL）、C（manifest pinning）を比較。中期推奨をmanifest + 世代別URL + payload ID/hash照合とし、UX fail-closed/reload/manual retry、旧世代保持、具体的なPhase 4-7/4-8作業を設計メモへ記録。
-- 更新: `docs/project_state.md`、本`docs/devlog.md`、`docs/t12_phase4_6b_release_consistency.md`。コード、builder、validator、fixture、workflow、public artifactは変更なし。Cloudflare/GitHub Actions/ODPTへ接続せず、テスト実行・commit/push/mergeなし。
+- 更新: `docs/project_state.md`、本`docs/devlog.md`、当時の[`archive/t12_phase4_6b_release_consistency.md`](archive/t12_phase4_6b_release_consistency.md)。コード、builder、validator、fixture、workflow、public artifactは変更なし。Cloudflare/GitHub Actions/ODPTへ接続せず、テスト実行・commit/push/mergeなし。
 
 ## 2026-10-28 — T12 Phase 4-7 世代整合性の詳細設計
 
@@ -652,17 +654,17 @@
 - 静的root manifest + content-derived releaseId + release envelope + `/releases/<releaseId>/`の8 station JSONを詳細化。SHA-256 descriptorはJCS・schema/runtime/builder contract・static asset hash・8 payload hashから作り、日時やrun IDだけで世代を識別しない。同一input/contractでは同じreleaseId・JSON bytes。inner public-display-v1 payload schemaは維持し、outer envelopeがreleaseIdを持つ。
 - Production aliasのmanifestが指す期限内ファイルを次のDirect Uploadへ引き継ぐ手順を定義。旧Deployment固有URL/CDN cache/GitHub Actionsの3日Artifactは永続sourceにしない。Access service tokenでcurrent aliasを取得、manifest/hash/bytes/内容を検査し、新Artifactへcopy。欠損・認証失敗・budget超過はdeploy停止。初回v1 migrationはflat 8 payload bytesを14日間だけ互換保持。
 - retainUntilをeffective validity end（applicationPeriod.endsAtとfeed.validThrough翌日00:00 JSTの早い方）+ 48h、最低7日・最大14日の組合せで、releaseがcurrent aliasを退く`retiredAt`を起点に定義。rollbackでreleaseがcurrentへ戻った場合は再retirement時に時計を再開。旧tab/session expiry、manifest ETag/304、release pin、fail-closed、reload、LRU key、始発/終電など既存判定の影響を記載。rollbackはPages deployment全体の戻しとして扱い、current alias内にないnew generationへpinしたtabはfail/reloadとなる。
-- Phase 4-8のfile単位作業、recursive file allowlist/count式（通常`10+8R`、legacy移行中`18+8R`）、CI retention assembly、各自動/実機test、staging→ODPT eligibilityの段階、Access token/retention/file budget等の決定事項を `docs/t12_phase4_7_release_design.md` に作成。Cloudflare公式Pages limits、Serving Pages cache/ETag、Pages rollback、Access service token資料を参照。
+- Phase 4-8のfile単位作業、recursive file allowlist/count式（通常`10+8R`、legacy移行中`18+8R`）、CI retention assembly、各自動/実機test、staging→ODPT eligibilityの段階、Access token/retention/file budget等の決定事項を当時の`docs/t12_phase4_7_release_design.md`（現[`archive/t12_phase4_7_release_design.md`](archive/t12_phase4_7_release_design.md)）に作成。Cloudflare公式Pages limits、Serving Pages cache/ETag、Pages rollback、Access service token資料を参照。
 - `docs/project_state.md` と本履歴を更新。変更は文書のみ。builder/validator/fixture/runtime/workflow/public artifact/Cloudflareを変更せず、GitHub Actions・ODPT API・テストを実行せず、commit/push/mergeなし。
 
 ## 2026-10-28 — T12 Phase 4-7 本番運用方針の設計反映
 
-- 合意済みの本番方針を [`docs/t12_phase4_7_release_design.md`](t12_phase4_7_release_design.md) に追記。synthetic staging CIは従来どおり手動起動・synthetic専用とし、将来のODPT日次確認/data-only auto-publish、手動承認付きapp release、緊急dispatchの責務を分けた。
+- 合意済みの本番方針を当時のrelease設計資料（現[`archive/t12_phase4_7_release_design.md`](archive/t12_phase4_7_release_design.md)）に追記。synthetic staging CIは従来どおり手動起動・synthetic専用とし、将来のODPT日次確認/data-only auto-publish、手動承認付きapp release、緊急dispatchの責務を分けた。
 - 自動公開gateを、source取得とschema確認、public payload digest/feed version変更またはsource根拠のあるvalidity extension、releaseId/manifest/hash、旧世代回収、size budget、approved app contract一致に整理。毎日のrunは確認であり、no-opならmanifest/`publishedAt`を変えず再deployしない。未承認のコード・契約変更をdata-only経路へ混ぜない。
 - transient API/network failureは有限retry（初期案3回、`Retry-After`尊重）後に停止し、失敗分類とrun summary/Actions通知を推奨。schedule欠落やActions停止は通常のrun failure通知で検知できないため、36時間heartbeat候補と期限警告を追記。72h/24h/expired警告値、遅延retry、通知先、GitHub concurrency queue対応は本番前に決定する未確定値。
 - 日次更新時も期限内旧generationを毎回Production aliasから再取得・hash検査してDirect Upload treeへcarry forward。旧Deployment固有URLや3日GitHub Artifactを保持元にしない。取得・検証・deploy失敗時は新uploadを止め、既存正常Deploymentを維持。デプロイ直前のcurrent release再確認と共通Production concurrency groupを提案し、GitHub既定のpending run置換をlossless queueと誤認しない注意を追加。
 - ODPT基本利用指針、GitHub schedule/notifications/concurrency/usage資料を設計文書から参照。Phase 4-8はsynthetic stagingの後にODPT shadow mode、publishing coordinator、plan/terms/monitoring確認、本番有効化へ分割した。
-- 更新対象は`docs/t12_phase4_7_release_design.md`、`docs/project_state.md`、本履歴のみ。コード・test・fixture・workflow・public artifact変更、Actions実行、Cloudflare deploy、ODPT APIアクセス、commit/push/mergeなし。
+- 更新対象は当時のrelease設計資料（現`docs/archive/t12_phase4_7_release_design.md`）、`docs/project_state.md`、本履歴のみ。コード・test・fixture・workflow・public artifact変更、Actions実行、Cloudflare deploy、ODPT APIアクセス、commit/push/mergeなし。
 
 ## 2026-10-28 — T12 Phase 4-8A releaseId・manifest・hash契約
 
@@ -786,3 +788,10 @@
 - 旧candidate JSON合計bytes 4,975,101、新candidate JSON 5,047,236（+72,135、+1.45%）。単回generator-only計測は600秒上限37.693秒 / 9,369 valid transfer pairs、3600秒上限38.774秒 / 50,772 valid transfer pairs（+2.9%）。候補Itineraryを全保持せずbestのみ保持する。public candidate bytes・ID・digestは同じ入力/日付で決定的、generatedAtはdigestに含めない。
 - 関連Python回帰138件PASS（ODPT itinerary/v2/snapshot/matcher、v1 public profile、synthetic fixture、release build/assembly/contract）、全Node `node --test tests/*.test.mjs` 154件PASS。生成先`/private/tmp/dotchi-odpt-1d-20261029-v2/`と`...-v2-repeat/`は非公開・Git管理外。source snapshotに変更なし。実データ公開・自動公開は未承認。次service date探索、source freshness、applicationPeriod、ライセンス/クレジット、時刻表再構成リスクは未解決。Actions/Cloudflare/Deploy/Rollback/Commit/Push/Mergeなし。
 - 2026-10-29、隔離site `/private/tmp/dotchi-odpt-1c-qa/2026-10-29/site-odpt-1d/` をMac Chromeで確認。氷川台で07:36有楽町線小手指行→小竹向原乗換→07:55着、10:38副都心線Fライナー小手指行→小竹向原乗換→10:55着、17:11副都心線石神井公園行→小竹向原乗換→17:32着、20:38副都心線所沢行→小竹向原乗換→20:56着を検証した。4本ともtransfer案内と到着時刻が正しく、direct扱いではなく、UNKNOWN警告は表示されなかった。10:38便は乗換待ち660秒（11分）、氷川台10:55着で、QA board modelとcandidate JSONの期待値にも一致。QA終了時にlsofで指定PID 26690が`127.0.0.1:8765` listenerであることを確認してTERM停止し、再確認でlistenerなし。隔離siteと候補bundleは削除・変更していない。実データ公開・自動公開は未承認。残課題（service date跨ぎ乗換探索、source freshness、適用期間、ライセンス/クレジット、再構成リスク）は維持。
+
+## 2026-11-03 — docs構成整理
+
+- `project_state.md`を現在の配信経路・完了機能・未解決事項・次作業の要約に整理。公開synthetic、Cloudflare staging、非公開ODPT v2 QAを分け、実ODPT公開未承認を維持した。
+- product/ui仕様に対象経路と「合意済み仕様」と「実装状態」の区別を明記。odpt_research冒頭に現在の確定事項・未解決事項、2026-10-26事務局回答の適用範囲、ODPT-2A/2B/2Cの根拠状況を追加。hosting_researchの古い未着手表示を現状に更新。
+- T12 release設計、4-6B整合性、Ver.0.5 Step 2A資料を`docs/archive/`へ移動。詳細履歴は保持し、現行状態はproject_stateへ誘導する。
+- READMEの文書一覧・参照順序・回答済み事項を履歴上の未確認状態へ戻さない運用を整理。コード、テスト、実データ、公開設定は変更していない。

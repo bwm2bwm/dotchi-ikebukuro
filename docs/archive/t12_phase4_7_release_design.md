@@ -591,6 +591,6 @@ release-managed fingerprintはroot `manifest.json`の**raw response bytesのSHA-
 
 ## 16. 根拠・作業境界
 
-設計根拠として`docs/t12_phase4_6b_release_consistency.md`、`docs/project_state.md`、`docs/devlog.md`、`scripts/build_public_site.py`、`scripts/validate_public_artifact.py`、`scripts/public_payload_profile.py`、`scripts/synthetic_public_fixture_factory.py`、`scripts/local_preview_payload_loader.mjs`、`_local_preview/preview_core.mjs`、`scripts/timetable_adapter.mjs`、`.github/workflows/synthetic-public-ci.yml`と関連testsを読んだ。
+設計根拠として当時の`docs/t12_phase4_6b_release_consistency.md`（現[`t12_phase4_6b_release_consistency.md`](t12_phase4_6b_release_consistency.md)）、`docs/project_state.md`、`docs/devlog.md`、`scripts/build_public_site.py`、`scripts/validate_public_artifact.py`、`scripts/public_payload_profile.py`、`scripts/synthetic_public_fixture_factory.py`、`scripts/local_preview_payload_loader.mjs`、`_local_preview/preview_core.mjs`、`scripts/timetable_adapter.mjs`、`.github/workflows/synthetic-public-ci.yml`と関連testsを読んだ。
 
 Phase 4-7はドキュメントのみ、4-8Aは契約module、4-8Bはbuilder/independent validator、4-8Cはexplicit runtime modeとlocal QAを追加した。builder defaultの17-file出力、legacy validator/runtime behavior、synthetic fixture contract、GitHub Actions workflow、existing staging/public deploymentは維持。Cloudflare deploy・Actions実行・ODPT API接続・old Production alias fetch・commit/push/mergeなし。
