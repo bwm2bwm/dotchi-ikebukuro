@@ -38,7 +38,7 @@ def source(source_id, *, mode="fetch", record_id=None, batch_id=None,
         "startedAt": None if legacy else (start or "2026-11-03T00:00:00Z"),
         "finishedAt": None if legacy else finish if finish is not None else "2026-11-03T00:00:01Z",
         "retrievedAt": None if legacy or outcome in {"failed", "interrupted"} else retrieved if retrieved is not None else "2026-11-03T00:00:01Z",
-        "outcome": "legacy-observed" if legacy else outcome,
+        "outcome": "observed" if legacy else outcome,
         "http": None if legacy else http or {"responses": [{"endpointId": contract.ORIGIN_IDS[source_id],
              "status": 200 if outcome == "succeeded" else 503,
              "contentType": "application/json" if not is_gtfs else "application/zip"}]},
@@ -46,7 +46,8 @@ def source(source_id, *, mode="fetch", record_id=None, batch_id=None,
         "artifact": artifact(source_id) if legacy or outcome == "succeeded" else None,
         "metadata": {"status": "parsed", "gtfs": {"feedVersion": "v", "validFrom": "2026-01-01",
              "validThrough": "2027-01-01"}, "odpt": None} if is_gtfs else
-             {"status": "parsed", "gtfs": None, "odpt": {"recordCount": 1, "dcDates": [], "issuedDates": []}},
+             {"status": "parsed", "gtfs": None, "odpt": {"recordCount": 1, "dcDates": [], "issuedDates": [],
+                  "dcDateMissingCount": 1, "issuedMissingCount": 1}},
         "unknownReasons": ["historical_acquisition_not_recorded"] if legacy else [],
     }
 

@@ -180,7 +180,7 @@ Phase 1A validatorで使う契約を次の通り確定した。Phase 0のレビ�
 
 すべての日時はUTC RFC 3339（`Z`または`+00:00`）で記録し、JSTは表示時の変換とする。過去snapshotで取得成功日時が記録されていなければ `retrievedAt=null` のままにし、filesystem mtimeや観測時刻から補完しない。Source記録にはschema version、record/source/origin識別子、source種別、mode、batch/attempt/retry参照、観測・開始・終了・取得日時、outcome、許可項目に限定したHTTP結果、固定error code、artifactの保存path/hash/byte数、GTFSまたはODPTのsource metadata、unknownReasonsを含める。キー、認証付きURL、header、応答本文は含めない。
 
-- `legacy-observation`: `observedAt`、artifact、`historical_acquisition_not_recorded` が必須。batch/attempt、取得開始・終了・成功日時、HTTP、errorはnull。outcomeは `legacy-observed`。
+- `legacy-observation`: `observedAt`、artifact、`historical_acquisition_not_recorded` が必須。batch/attempt、取得開始・終了・成功日時、HTTP、errorはnull。outcomeは `observed`。Phase 1Aの初版実装では別の値 `legacy-observed` を受理していたが、Phase 1Bで確定契約に合わせてvalidatorと合成fixtureを修正した。
 - `fetch/succeeded`: batchIdとattemptId、開始・終了・取得成功時刻、HTTP応答、artifactが必須。最終応答は2xx、errorはnull。
 - `fetch/failed`: 取得成功日時とartifactはnull、終了時刻・error codeが必須。
 - `fetch/interrupted`: 取得成功日時とartifactはnull、開始時刻とerror codeが必須。終了時刻はnull。
@@ -192,6 +192,18 @@ JSON objectは未知key・重複key・不正型・非標準数値定数を拒否
 applicationPeriodは期間根拠と公開承認が揃わない限りnull。運用停止期限は将来の独立項目とし、applicationPeriodの代替や公開資格として使わない。`end_at`は公開終了日であり、適用終了日へ読み替えない。期限切れ時はfail closed。rollbackでも期限・承認・source/hash・service date適合を再検証する。Phase 1では履歴の自動削除を実装せず、無期限保存も確定しない。
 
 契約例・実装validatorの固定error codeとPhase 1A完了条件は [`scripts/odpt_source_contract.py`](../scripts/odpt_source_contract.py) と `tests/test_odpt_source_contract.py` にある。後者はvalidatorの合成テストであり、実sourceをfixture化しない。
+
+### Phase 1B 保存済みsource inventory（2026-11-03）
+
+[`scripts/odpt_source_inventory.py`](../scripts/odpt_source_inventory.py) は、既存QAで使う固定7ファイルを読み取り、Source recordをメモリ上で生成してPhase 1A validatorに渡すローカルCLIである。既定入力先は既存 `odpt_snapshot_qa.py` の `DEFAULT_SNAPSHOT` から参照するため、絶対パスを固定していない。出力はPASS、件数、sourceId、保存bytesのbyte数・SHA-256に限定し、recordやsource本文の永続化・表示はしない。
+
+全recordは `mode=legacy-observation`、`outcome=observed`、UTCの今回の `observedAt` を持ち、取得成功日時・開始/終了日時・HTTP・batch/attempt参照はnullのまま。mtimeから取得日時は補わず、`unknownReasons` に `historical_acquisition_not_recorded` を記録する。artifactは `raw/<固定ファイル名>`、`representation=stored-file` とし、保存されていた元bytesそのものをhashする。今回のローカル観測日時は過去の取得日時を示さない。
+
+ODPT JSONはrecord件数、`dc:date` / `dct:issued` の文字列値集合、各キーの欠損件数を取得する。未出現またはnullは欠損、文字列以外は解析失敗とする。GTFS ZIPからfeed versionとfeed期間を読む。ZIPは展開せず必須7メンバーを要求し、追加entryは安全なフラットな`.txt`名に限定する。重複名・階層/危険entry・暗号化・link/directory・上限超過・CRCを含む不正ZIPを拒否する。ファイルは通常ファイルか確認して前後のfilesystem identityとサイズを照合し、record作成後に全sourceを再読してinventory中のhash/byte数不変も確認する。読取上限はsource 128 MiB、ZIPメンバー64 MiB、展開合計256 MiB、圧縮率1000倍で、これは実装上の安全制限であり提供元仕様ではない。
+
+合成fixtureのinventory・失敗系テストは [`tests/test_odpt_source_inventory.py`](../tests/test_odpt_source_inventory.py) にある。保存済み実sourceはfixtureに含めない。Phase 1Bは読み取りと一時的なメモリ内record生成だけで、inventory保存、Snapshot確定、atomic writer、差分エンジン、公開資格gateは未実装。
+
+保存済みsourceのローカルQAでは7件すべてを検出し、Source validator通過。GTFSはfeed_version `20261008`、feed期間 `2026-09-19`〜`2027-03-12`。ODPT件数はRailway 10、Station 186、TrainTimetable有楽町843・副都心993、StationTimetable有楽町92・副都心60。時刻表4 sourceの `dc:date` は `2026-03-16T09:00:00+09:00`、`dct:issued` は `2026-03-14`。Railway/Stationの `dct:issued` は全件欠損（10/10、186/186）で、`dc:date` は欠損なし。全sourceについてCLI実行前後のSHA-256とbyte数が一致した。これらは保存ファイルの現状観測値であり、取得日時・最新版・適用期間・実データ公開可否を確定しない。
 
 ### 推奨する全体フロー
 

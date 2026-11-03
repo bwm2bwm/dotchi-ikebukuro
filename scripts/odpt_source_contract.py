@@ -149,10 +149,14 @@ def _valid_metadata(value: Any, source_id: str) -> bool:
     if value["gtfs"] is not None or not isinstance(value["odpt"], dict):
         return False
     odpt = value["odpt"]
-    return (set(odpt) == {"recordCount", "dcDates", "issuedDates"}
+    return (set(odpt) == {"recordCount", "dcDates", "issuedDates", "dcDateMissingCount", "issuedMissingCount"}
             and type(odpt["recordCount"]) is int and odpt["recordCount"] >= 0
             and all(isinstance(odpt[key], list) and all(isinstance(item, str) for item in odpt[key])
-                    for key in ("dcDates", "issuedDates")))
+                    for key in ("dcDates", "issuedDates"))
+            and type(odpt["dcDateMissingCount"]) is int and odpt["dcDateMissingCount"] >= 0
+            and type(odpt["issuedMissingCount"]) is int and odpt["issuedMissingCount"] >= 0
+            and odpt["dcDateMissingCount"] <= odpt["recordCount"]
+            and odpt["issuedMissingCount"] <= odpt["recordCount"])
 
 
 def validate_source_record(record: Any) -> dict[str, Any]:
@@ -188,7 +192,7 @@ def validate_source_record(record: Any) -> dict[str, Any]:
     if record["mode"] == "legacy-observation":
         if (not _timestamp(record["observedAt"]) or any(record[k] is not None for k in
             ("batchId", "attemptId", "retryOfAttemptId", "startedAt", "finishedAt", "retrievedAt", "http", "errorCode"))
-                or record["outcome"] != "legacy-observed" or artifact is None
+                or record["outcome"] != "observed" or artifact is None
                 or "historical_acquisition_not_recorded" not in record["unknownReasons"]):
             _fail("legacy_observation_state_invalid")
         return record
@@ -299,7 +303,7 @@ def validate_snapshot(snapshot: Any, records: Iterable[Any]) -> dict[str, Any]:
         if not _uuid(record_id) or record_id not in by_record:
             _fail("snapshot_record_reference_missing")
         record = by_record[record_id]
-        if record["sourceId"] != source_id or record["outcome"] not in {"legacy-observed", "succeeded"}:
+        if record["sourceId"] != source_id or record["outcome"] not in {"observed", "succeeded"}:
             _fail("snapshot_record_reference_mismatch")
         if snapshot["mode"] == "legacy-observation":
             if record["mode"] != "legacy-observation":

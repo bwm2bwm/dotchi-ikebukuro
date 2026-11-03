@@ -809,3 +809,13 @@
 - `scripts/odpt_source_contract.py` に独立したin-memory validatorを追加。未知/重複キー、型/UUID/日時/hash/byte数、mode/outcome/null整合、固定source集合、record参照、fetch batch、retry親・順序、contentFingerprintを検査する。ファイルI/O・通信・既存経路への接続なし。
 - `tests/test_odpt_source_contract.py` に合成fixtureでlegacy、fetch成功/失敗/中断、時刻・識別子・hash/bytes、bool整数誤受理、未知/重複キー、欠落/余剰source、参照・batch/retry不整合、未知schema versionの検証を追加。
 - project_stateにPhase 1A完了とPhase 1B以降未実装を記録。検証はこの項の追加合成テストのみ。実データ、API、既存ODPT/v2/synthetic/release-managed経路、CI、公開設定は変更していない。
+
+## 2026-11-03 — ODPT-2G Phase 1B 保存済みsource inventory
+
+- 事前確認ではbranch `main`、HEAD `277b9da`（Phase 1A commit）、作業tree cleanを確認。Phase 1Aがcommit済みのためPhase 1Bを開始した。
+- `scripts/odpt_source_inventory.py` を追加。既存snapshot QAのsource directory既定値とPhase 1Aの固定7 source registryを再利用し、7件のlegacy-observation / `outcome=observed` recordをメモリ内で生成・validator検証する。SHA-256/byte数は元の保存bytesを対象とし、mtimeや今回の観測時刻を過去の取得日時へ流用しない。CLIはsourceId、byte数、hashと総件数だけを表示し、record/raw本文を保存しない。
+- ODPT JSONのrecordCount、`dc:date` / `dct:issued` の値集合と欠損件数、GTFS ZIPのfeed_version・feed期間を抽出。ZIPは展開せず読み、固定メンバー、重複・危険entry、暗号化・link・サイズ/圧縮率上限を検査する。通常ファイル性、読み取り前後のidentity/size、全7件の再読hashも確認する。安全上限は実装制限であり、公式データ仕様とは扱わない。
+- Phase 1A Source validatorのlegacy outcomeを確定契約どおり `observed` に修正し、ODPT metadataの欠損件数をschemaに追加。初版Phase 1Aと合意契約の `legacy-observed` / `observed` 不一致を解消した。
+- 合成fixtureのみのinventory testsを追加。正常7件/hash/metadata/validator合格、source欠落・読取失敗、JSON/ZIP破損、metadata欠損/型不正、危険・重複ZIP entry、symlink、読み取り中変更を検証する。実sourceはテストfixtureへ複製しない。Phase 1A 9件とPhase 1B 7件の合計16件がPASS。既存snapshot QA 15件とv2 validator/generator 25件も回帰PASS（計56件）。
+- 保存source QAは7件すべて検出しvalidator通過。GTFS `feed_version=20261008`、feed期間 `2026-09-19`〜`2027-03-12`。ODPT recordCountはRailway 10、Station 186、TrainTimetable有楽町843・副都心993、StationTimetable有楽町92・副都心60。時刻表4件は `dc:date=2026-03-16T09:00:00+09:00`、`dct:issued=2026-03-14`。Railway/Stationの `dct:issued` はそれぞれ10件/186件欠損、全7件のCLI前後hash・byte数一致。
+- 実source GTFS ZIPに標準的な任意テキストentryが含まれていたため、必要7ファイルに加えて安全なflat `.txt` entryを許容し、階層path/危険名・重複・暗号化・link・サイズ超過の拒否は維持した。source原本、取得/API、Snapshot永続化、差分、公開gate、既存v1/v2/synthetic/release-managed経路、CI、公開設定は変更しない。Phase 1C以降は未実装。Commit/Push/Mergeなし。
