@@ -172,6 +172,27 @@ T11は完了。正式host設定、i-mobile申請、実ダイヤ一般公開は�
 
 本節は運用設計の提案であり、取得・自動公開・鮮度閾値の承認ではない。実データ公開は引き続き未承認。既存のsynthetic公開経路は変更せず、release-managed契約を実データへ流用する場合は別途審査する。
 
+### Phase 0確定契約（ODPT-2G、2026-11-03）
+
+Phase 1A validatorで使う契約を次の通り確定した。Phase 0のレビュー対象はSource/Snapshot記録の構造と整合性であり、取得処理や公開資格を定義・承認するものではない。
+
+固定sourceIdは `metro.railway`、`metro.station`、`metro.train-timetable.yurakucho`、`metro.train-timetable.fukutoshin`、`metro.station-timetable.yurakucho`、`metro.station-timetable.fukutoshin`、`metro.gtfs`。source記録とsnapshot記録を分離し、snapshotは7 sourceIdを各1回参照する。取得バッチsnapshotは参照source記録がすべてfetch mode・同一batchの成功記録であることを要求する。legacy snapshotは7件すべてlegacy-observationであることを要求する。
+
+すべての日時はUTC RFC 3339（`Z`または`+00:00`）で記録し、JSTは表示時の変換とする。過去snapshotで取得成功日時が記録されていなければ `retrievedAt=null` のままにし、filesystem mtimeや観測時刻から補完しない。Source記録にはschema version、record/source/origin識別子、source種別、mode、batch/attempt/retry参照、観測・開始・終了・取得日時、outcome、許可項目に限定したHTTP結果、固定error code、artifactの保存path/hash/byte数、GTFSまたはODPTのsource metadata、unknownReasonsを含める。キー、認証付きURL、header、応答本文は含めない。
+
+- `legacy-observation`: `observedAt`、artifact、`historical_acquisition_not_recorded` が必須。batch/attempt、取得開始・終了・成功日時、HTTP、errorはnull。outcomeは `legacy-observed`。
+- `fetch/succeeded`: batchIdとattemptId、開始・終了・取得成功時刻、HTTP応答、artifactが必須。最終応答は2xx、errorはnull。
+- `fetch/failed`: 取得成功日時とartifactはnull、終了時刻・error codeが必須。
+- `fetch/interrupted`: 取得成功日時とartifactはnull、開始時刻とerror codeが必須。終了時刻はnull。
+
+リトライは新attemptIdを使い、同じsource/batchの直前失敗または中断attemptを参照する。試行記録は消去・上書きしない。同じbytesの再取得も新recordIdを持ち、snapshot contentFingerprintはsourceId順のsourceId・SHA-256・byte数から計算し、試行日時を含めない。hash/bytes一致は保存representationの一致を示すだけで、時刻表の意味的同一性を証明しない。
+
+JSON objectは未知key・重複key・不正型・非標準数値定数を拒否する。配列の順序を無視する意味比較は、対象フィールドを別途明示定義した比較profileだけで許可する。未定義の配列は順序差を保持する。改正境界で単一snapshotがservice dateの根拠を説明できない場合は初期公開候補を保留する。
+
+applicationPeriodは期間根拠と公開承認が揃わない限りnull。運用停止期限は将来の独立項目とし、applicationPeriodの代替や公開資格として使わない。`end_at`は公開終了日であり、適用終了日へ読み替えない。期限切れ時はfail closed。rollbackでも期限・承認・source/hash・service date適合を再検証する。Phase 1では履歴の自動削除を実装せず、無期限保存も確定しない。
+
+契約例・実装validatorの固定error codeとPhase 1A完了条件は [`scripts/odpt_source_contract.py`](../scripts/odpt_source_contract.py) と `tests/test_odpt_source_contract.py` にある。後者はvalidatorの合成テストであり、実sourceをfixture化しない。
+
 ### 推奨する全体フロー
 
 1. **更新確認:** ODPT開発者サイトNewsを更新通知の一次情報として確認する。News確認は更新の手掛かりであり、ファイル取得成功やsource内容の同一性を証明しない。通知後の静的データ更新条件は基本ライセンス/Developer Guidelineを確認する。

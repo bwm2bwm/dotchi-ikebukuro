@@ -802,3 +802,10 @@
 - ローカル保存済みsourceで始めるPhase 0–3、別途許可が必要なread-only取得、private staging、公開運用審査までのPhase 4–6を定義。鮮度閾値は根拠未確定のため設定していない。
 - `project_state.md`に設計済み・未実装の状態、次作業候補を反映。現行synthetic workflowをODPT用途へ転用せず、実ODPT公開・自動公開未承認を維持。
 - 文書のみ変更。ODPT/metadata API、取得・生成・公開、Cloudflare/GitHub Actions、source原本、コード/テストには触れていない。Commit/Push/Mergeなし。
+
+## 2026-11-03 — ODPT-2G Phase 0確定・Phase 1A validator
+
+- Phase 0契約を `odpt_research.md` に記録。固定7 sourceId、Source/Snapshot分離、legacy observationとfetch状態、UTC日時、厳密7件集合、retry参照、保存bytes fingerprint、取得履歴と公開承認の分離を確定。運用停止期限はapplicationPeriodと分離し、改正境界のservice date説明不足は公開保留、Phase 1では自動削除なしとした。
+- `scripts/odpt_source_contract.py` に独立したin-memory validatorを追加。未知/重複キー、型/UUID/日時/hash/byte数、mode/outcome/null整合、固定source集合、record参照、fetch batch、retry親・順序、contentFingerprintを検査する。ファイルI/O・通信・既存経路への接続なし。
+- `tests/test_odpt_source_contract.py` に合成fixtureでlegacy、fetch成功/失敗/中断、時刻・識別子・hash/bytes、bool整数誤受理、未知/重複キー、欠落/余剰source、参照・batch/retry不整合、未知schema versionの検証を追加。
+- project_stateにPhase 1A完了とPhase 1B以降未実装を記録。検証はこの項の追加合成テストのみ。実データ、API、既存ODPT/v2/synthetic/release-managed経路、CI、公開設定は変更していない。
