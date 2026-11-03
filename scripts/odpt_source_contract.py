@@ -40,7 +40,8 @@ SOURCE_FIELDS = frozenset({
 })
 SNAPSHOT_FIELDS = frozenset({
     "contract", "schemaVersion", "snapshotId", "createdAt", "mode", "batchId",
-    "selectedRecords", "contentFingerprint",
+    "selectedRecords", "contentFingerprint", "completeness", "acquisitionStatus",
+    "crossSourceConsistency",
 })
 HEX_256 = re.compile(r"[0-9a-f]{64}\Z")
 RFC3339_UTC = re.compile(
@@ -245,6 +246,16 @@ def loads_record(text: str) -> dict[str, Any]:
     return validate_source_record(value)
 
 
+def content_fingerprint(records: Iterable[Any]) -> str:
+    """Return the Phase 1A canonical fingerprint for selected source records."""
+    rows = [{"sourceId": row["sourceId"], "sha256": row["artifact"]["sha256"],
+             "sizeBytes": row["artifact"]["sizeBytes"]}
+            for row in sorted(records, key=lambda value: value["sourceId"])]
+    encoded = json.dumps(rows, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def validate_snapshot(snapshot: Any, records: Iterable[Any]) -> dict[str, Any]:
     """Validate a snapshot and all referenced records, including retries."""
     _exact_keys(snapshot, SNAPSHOT_FIELDS, "snapshot_fields_invalid")
@@ -256,10 +267,23 @@ def validate_snapshot(snapshot: Any, records: Iterable[Any]) -> dict[str, Any]:
         _fail("snapshot_identity_invalid")
     if not isinstance(snapshot["contentFingerprint"], str) or not HEX_256.fullmatch(snapshot["contentFingerprint"]):
         _fail("snapshot_fingerprint_invalid")
+    if not isinstance(snapshot["completeness"], str) or snapshot["completeness"] != "complete":
+        _fail("snapshot_completeness_invalid")
+    if (not isinstance(snapshot["acquisitionStatus"], str)
+            or snapshot["acquisitionStatus"] not in {"historical-unknown", "fetch-success"}):
+        _fail("snapshot_acquisition_status_invalid")
+    if (not isinstance(snapshot["crossSourceConsistency"], str)
+            or snapshot["crossSourceConsistency"] not in {"not-evaluated", "consistent", "inconsistent"}):
+        _fail("snapshot_cross_source_consistency_invalid")
     if not isinstance(snapshot["selectedRecords"], dict) or set(snapshot["selectedRecords"]) != SOURCE_IDS:
         _fail("snapshot_source_set_invalid")
     if not isinstance(snapshot["mode"], str) or snapshot["mode"] not in {"legacy-observation", "fetch"}:
         _fail("snapshot_mode_invalid")
+    if ((snapshot["mode"] == "legacy-observation" and snapshot["acquisitionStatus"] != "historical-unknown")
+            or (snapshot["mode"] == "fetch" and snapshot["acquisitionStatus"] != "fetch-success")):
+        _fail("snapshot_acquisition_status_invalid")
+    if snapshot["mode"] == "legacy-observation" and snapshot["crossSourceConsistency"] != "not-evaluated":
+        _fail("snapshot_cross_source_consistency_invalid")
     if snapshot["mode"] == "legacy-observation":
         if snapshot["batchId"] is not None:
             _fail("snapshot_batch_invalid")
@@ -311,12 +335,7 @@ def validate_snapshot(snapshot: Any, records: Iterable[Any]) -> dict[str, Any]:
         elif record["mode"] != "fetch" or record["batchId"] != snapshot["batchId"]:
             _fail("snapshot_batch_mismatch")
         selected.append(record)
-    fingerprint_rows = [{"sourceId": row["sourceId"], "sha256": row["artifact"]["sha256"],
-                         "sizeBytes": row["artifact"]["sizeBytes"]}
-                        for row in sorted(selected, key=lambda value: value["sourceId"])]
-    encoded = json.dumps(fingerprint_rows, ensure_ascii=False, sort_keys=True,
-                         separators=(",", ":"), allow_nan=False).encode("utf-8")
-    if hashlib.sha256(encoded).hexdigest() != snapshot["contentFingerprint"]:
+    if content_fingerprint(selected) != snapshot["contentFingerprint"]:
         _fail("snapshot_fingerprint_mismatch")
     selected_times = [r["observedAt"] if snapshot["mode"] == "legacy-observation" else r["retrievedAt"] for r in selected]
     if any(value is None for value in selected_times):

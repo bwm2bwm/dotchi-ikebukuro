@@ -201,9 +201,21 @@ applicationPeriodは期間根拠と公開承認が揃わない限りnull。運�
 
 ODPT JSONはrecord件数、`dc:date` / `dct:issued` の文字列値集合、各キーの欠損件数を取得する。未出現またはnullは欠損、文字列以外は解析失敗とする。GTFS ZIPからfeed versionとfeed期間を読む。ZIPは展開せず必須7メンバーを要求し、追加entryは安全なフラットな`.txt`名に限定する。重複名・階層/危険entry・暗号化・link/directory・上限超過・CRCを含む不正ZIPを拒否する。ファイルは通常ファイルか確認して前後のfilesystem identityとサイズを照合し、record作成後に全sourceを再読してinventory中のhash/byte数不変も確認する。読取上限はsource 128 MiB、ZIPメンバー64 MiB、展開合計256 MiB、圧縮率1000倍で、これは実装上の安全制限であり提供元仕様ではない。
 
-合成fixtureのinventory・失敗系テストは [`tests/test_odpt_source_inventory.py`](../tests/test_odpt_source_inventory.py) にある。保存済み実sourceはfixtureに含めない。Phase 1Bは読み取りと一時的なメモリ内record生成だけで、inventory保存、Snapshot確定、atomic writer、差分エンジン、公開資格gateは未実装。
+合成fixtureのinventory・失敗系テストは [`tests/test_odpt_source_inventory.py`](../tests/test_odpt_source_inventory.py) にある。保存済み実sourceはfixtureに含めない。Phase 1B単体の範囲は読み取りとメモリ内record生成であり、次節のPhase 1Cがそのrecordを永続化する。差分エンジン・公開資格gateは未実装。
 
 保存済みsourceのローカルQAでは7件すべてを検出し、Source validator通過。GTFSはfeed_version `20261008`、feed期間 `2026-09-19`〜`2027-03-12`。ODPT件数はRailway 10、Station 186、TrainTimetable有楽町843・副都心993、StationTimetable有楽町92・副都心60。時刻表4 sourceの `dc:date` は `2026-03-16T09:00:00+09:00`、`dct:issued` は `2026-03-14`。Railway/Stationの `dct:issued` は全件欠損（10/10、186/186）で、`dc:date` は欠損なし。全sourceについてCLI実行前後のSHA-256とbyte数が一致した。これらは保存ファイルの現状観測値であり、取得日時・最新版・適用期間・実データ公開可否を確定しない。
+
+### Phase 1C Source/Snapshot記録の非公開保存（2026-11-03）
+
+[`scripts/odpt_source_store.py`](../scripts/odpt_source_store.py) はPhase 1B recordからSnapshot recordを作り、明示指定された新規・絶対pathへmetadataだけを保存する。保存先はrepository、symlink経路、既知の公開風path、preview/QA出力先、既存destinationを拒否する。新規storeと `sources/` は0700、JSON recordは0600。store layoutは `sources/<sourceId>.json` 7件と `snapshot.json` 1件で、raw sourceは複製しない。
+
+SnapshotはPhase 1Aの同じcanonicalization（sourceId・SHA-256・byte数をsourceId順にJSON canonical encodeしてSHA-256）を使う。追加状態は `completeness=complete`、`acquisitionStatus=historical-unknown`、`crossSourceConsistency=not-evaluated`。completeは固定7 sourceのrecord参照が揃った意味に限り、取得成功・同一ダイヤ・現行有効性・公開可能性を意味しない。Snapshot保存は公開承認ではない。
+
+各JSONは一時fileに排他的作成し、0600でwrite・file fsync後にatomic renameし、directory fsyncする。全Source記録が確定した最後に `snapshot.json` をrenameし、これを完成storeのcommit markerとする。通常の失敗では今回新規作成したstoreだけを後片付けする。異常終了で残ったstoreにsnapshot markerがなければverifyは `store_incomplete_snapshot` で拒否し、既存pathへの再試行・上書きはしない。既存pathとの衝突時は別の新規pathを指定する。完全なrecord storeを再確認してからcleanupする。
+
+CLIは既存 [`scripts/odpt_source_inventory.py`](../scripts/odpt_source_inventory.py) に `inspect`（既定・read-only）、`persist --store <absolute-new-path>`、`verify --store <path>` を追加した。verifyはrecord/Snapshot validator結果とsource bytes参照照合を別々に出す。参照dirがない場合は `unavailable`、source file欠落は `missing`、byte不一致・不正・変更中は `mismatch`。record検証の履歴はこれらと区別して保持される。
+
+合成テストは [`tests/test_odpt_source_store.py`](../tests/test_odpt_source_store.py)。保存・再読込、別snapshot IDで同一fingerprint、元bytes照合、参照欠落/変更、record参照/fingerprint破損、JSON重複key/未知key、途中失敗・write失敗時のatomic性、既存path・symlink・traversal・不正権限を検証する（13件）。保存済みsourceでの実QAではユーザーLibrary配下の明示path `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c` にrecord 8件だけを保存し、別CLIプロセスの再verifyでSnapshot validator PASS、source bytes 7/7 match。前後hash/byte数も7/7一致した。
 
 ### 推奨する全体フロー
 

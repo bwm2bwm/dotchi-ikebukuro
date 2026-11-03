@@ -4,7 +4,7 @@
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
-ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validatorとPhase 1Bの保存済み7 source向けread-only inventory CLIを実装済み。Phase 1Bはsource bytesのhash/byte数とmetadataをメモリ内で記録し、legacy-observation Source recordを検証して要約のみ表示する。取得履歴の永続化、Snapshot、差分・公開資格gateは未実装。詳細と制限は `odpt_research.md` のODPT-2G節とdevlogを参照。
+ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validator、Phase 1B read-only inventory、Phase 1Cの非公開Source/Snapshot記録storeを実装済み。保存先は明示指定を必須とし、raw sourceは複製しない。Snapshotは7件の存在・hash集合が揃うことを示すだけで、取得履歴は不明、source間のダイヤ整合は未評価。差分・公開資格gateは未実装。詳細と制限は `odpt_research.md` のODPT-2G節とdevlogを参照。
 
 ## 現在の配信・QA経路
 
@@ -26,7 +26,7 @@ ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validatorとPhase
 - 保存sourceの取得成功日時、最新性、ODPTとGTFSの同一ダイヤ版性。
 - 実データの承認済み `applicationPeriod` と、GTFS feed期間との整合規則。
 - ODPT Newsの確認頻度と担当運用、東京メトロGTFSへの `date=current/next/latest` 適用可否。
-- 7 sourceの新規取得履歴生成・差分検証・candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。Phase 1Bは保存済みsourceの観測に限り、取得成功日時を確定しない。
+- 7 sourceの新規取得履歴生成・差分検証・candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
 - 公開payloadの再構成リスク、表示・クレジット条件の実データ公開適用確認。
 - release-managedのrollback実地確認、旧タブ・cache境界QA。
 - 運行日境界を跨ぐ乗換探索は未実装。
@@ -35,8 +35,8 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. Phase 1Cとして、レビュー後にSource/Snapshot recordの非公開・Git管理外への永続化と安全な書込を設計・実装する。
-2. 差分検証とapplicationPeriod根拠の作業は1C以降で分離して設計する。
-4. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
+1. Phase 1D候補として、保存済みSnapshot間の差分検証を別途設計・レビューする。
+2. Source取得履歴とapplicationPeriod根拠の検証を、差分処理・公開判断から分離して設計する。
+3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
 
 この文書は状態の要約であり、履歴の数値や手順を重複管理しない。

@@ -1,5 +1,4 @@
 import copy
-import hashlib
 import json
 import unittest
 import uuid
@@ -53,17 +52,16 @@ def source(source_id, *, mode="fetch", record_id=None, batch_id=None,
 
 
 def fingerprint(records):
-    rows = [{"sourceId": r["sourceId"], "sha256": r["artifact"]["sha256"],
-             "sizeBytes": r["artifact"]["sizeBytes"]} for r in sorted(records, key=lambda x: x["sourceId"])]
-    body = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(body).hexdigest()
+    return contract.content_fingerprint(records)
 
 
 def snapshot(records, mode="legacy-observation", batch=None):
     return {"contract": "odpt-source-snapshot", "schemaVersion": 1, "snapshotId": uid(),
         "createdAt": "2026-11-03T00:00:02Z", "mode": mode, "batchId": batch,
         "selectedRecords": {r["sourceId"]: r["recordId"] for r in records},
-        "contentFingerprint": fingerprint(records)}
+        "contentFingerprint": fingerprint(records), "completeness": "complete",
+        "acquisitionStatus": "historical-unknown" if mode == "legacy-observation" else "fetch-success",
+        "crossSourceConsistency": "not-evaluated"}
 
 
 class SourceRecordTests(unittest.TestCase):
@@ -126,6 +124,22 @@ class SnapshotTests(unittest.TestCase):
         unsupported["schemaVersion"] = 99
         self.assertCode("snapshot_schema_version_unsupported",
                         lambda: contract.validate_snapshot(unsupported, self.rows))
+
+    def test_snapshot_state_fields_are_strict_and_mode_consistent(self):
+        cases = [
+            ("snapshot_completeness_invalid", "completeness", True),
+            ("snapshot_acquisition_status_invalid", "acquisitionStatus", []),
+            ("snapshot_cross_source_consistency_invalid", "crossSourceConsistency", "unknown"),
+            ("snapshot_cross_source_consistency_invalid", "crossSourceConsistency", "consistent"),
+        ]
+        for code, key, value in cases:
+            changed = copy.deepcopy(self.snapshot)
+            changed[key] = value
+            self.assertCode(code, lambda changed=changed: contract.validate_snapshot(changed, self.rows))
+        changed = copy.deepcopy(self.snapshot)
+        changed["mode"] = "fetch"
+        self.assertCode("snapshot_acquisition_status_invalid",
+                        lambda: contract.validate_snapshot(changed, self.rows))
 
     def test_source_set_missing_extra_duplicate_and_bad_reference(self):
         snap = copy.deepcopy(self.snapshot)
