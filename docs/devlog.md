@@ -795,3 +795,10 @@
 - product/ui仕様に対象経路と「合意済み仕様」と「実装状態」の区別を明記。odpt_research冒頭に現在の確定事項・未解決事項、2026-10-26事務局回答の適用範囲、ODPT-2A/2B/2Cの根拠状況を追加。hosting_researchの古い未着手表示を現状に更新。
 - T12 release設計、4-6B整合性、Ver.0.5 Step 2A資料を`docs/archive/`へ移動。詳細履歴は保持し、現行状態はproject_stateへ誘導する。
 - READMEの文書一覧・参照順序・回答済み事項を履歴上の未確認状態へ戻さない運用を整理。コード、テスト、実データ、公開設定は変更していない。
+
+## 2026-11-03 — ODPT-2F 実データ更新・鮮度管理方式設計
+
+- ODPT Newsを更新通知の一次情報とする案、更新確認頻度候補、7 sourceごとの取得成功時刻/source/hash/bytes/metadata履歴、raw/candidate/public分離、GTFS/ODPT差分・routeCoverage比較、改正前candidate、期間根拠、applicationPeriod null/fail-closed、期限切れ/rollback保護、人間承認境界を `docs/odpt_research.md` に提案として記録。
+- ローカル保存済みsourceで始めるPhase 0–3、別途許可が必要なread-only取得、private staging、公開運用審査までのPhase 4–6を定義。鮮度閾値は根拠未確定のため設定していない。
+- `project_state.md`に設計済み・未実装の状態、次作業候補を反映。現行synthetic workflowをODPT用途へ転用せず、実ODPT公開・自動公開未承認を維持。
+- 文書のみ変更。ODPT/metadata API、取得・生成・公開、Cloudflare/GitHub Actions、source原本、コード/テストには触れていない。Commit/Push/Mergeなし。

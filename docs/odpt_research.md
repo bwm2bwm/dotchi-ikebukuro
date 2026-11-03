@@ -19,6 +19,7 @@
 - API補足仕様の当該東京メトロデータへの適用範囲。ファイル取得の説明から通常ODPT JSON APIへの適用を推定しない。
 - 会員ポータルのメタデータAPIが本プロジェクトの対象データ・契約で利用できるか。利用可能性は未確認。
 - 公開payloadが元時刻表の大部分を復元できないこと、取得鮮度・差分・版整合を検証する公開ゲート。
+- ODPT JSON/GTFSの更新確認・取得履歴・差分判定を用いた運用設計。初期案と段階計画は本書「ODPT-2F 更新・鮮度管理設計」を参照。
 
 ### 調査根拠（確認日・範囲）
 
@@ -31,7 +32,14 @@
 | [開発者サイト News](https://developer.odpt.org/news) | 2026-11-03 | 事務局回答で更新通知の確認先として案内。通知の即時性や個別購読機能は未確認 |
 | ODPT事務局正式回答（ユーザー共有記録） | 2026-10-26 | 説明した加工時刻表・保存/cache・広告/任意支援付き無料公開に適用。回答原文・個別条件の再取得なし |
 
-ODPT-2A/2B/2Cの結果は本書後半の各調査節およびdevlogを参照。過去の章にある「未取得」「未確認」は当時の状態を示す履歴であり、上記の現在の確定事項を取り消すものではない。
+ODPT-2A〜2Fの結果は本書後半の各調査節およびdevlogを参照。過去の章にある「未取得」「未確認」は当時の状態を示す履歴であり、上記の現在の確定事項を取り消すものではない。
+
+## ODPT-2E 会員ポータルメタデータAPI限定実検証（2026-11-03、ユーザー共有記録）
+
+- Chromeで認証なしにmetadata APIを確認した結果として、ユーザーから共有された記録では `organization=tokyometro` は空配列、`format=gtfs` には結果があるものの「東京メトロ」「Tokyo Metro」は見つからなかった。
+- この記録はユーザー実施結果の共有であり、Codexは実APIへ接続して再現していない。空結果や名称検索不一致だけから、東京メトロが公式に対象外とは断定しない。
+- よって現時点でこのAPIを東京メトロの更新管理に採用しない。従来型ODPT JSON API・GTFS file APIとは別の会員ポータルmetadata APIとして扱う。
+- `start_at`は適用開始日候補、`end_at`は公開終了日、`uploaded_at`は提供側アップロード日時。アプリ側の取得成功日時・ダイヤの適用終了日と混同しない。詳細な更新方式案はODPT-2F節。
 
 調査日: 2026-10-22（JST）  
 状態: 取得済みODPT JSON・GTFSをローカル解析済み。最新の検証結果は本書末尾の「Phase 3 実データ検証」を参照。
@@ -159,6 +167,78 @@ find local_data/odpt -maxdepth 1 -type f -print
 回答は今回相談した時刻表データと想定利用方法に関するものとして扱う。すべてのODPTデータ、無制限・長期の保存、元データや大部分を再構成できる形式の再配布、API keyの公開などへの包括的許可とは解釈しない。基本ライセンスとガイドライン、個別データ条件が引き続き適用される。基本ライセンスは条件を守った営利・非営利の公開deliverableを認める一方、元データや全体・大部分を復元できる再利用可能な形式の再配布等を制限する。開発者ガイドラインのstatic data取得日時表示、更新通知後1週間以内の更新、データ提供元・正確性免責・問い合わせ先表示も公開設計に反映する。
 
 T11は完了。正式host設定、i-mobile申請、実ダイヤ一般公開は本回答だけでは実施していない。T12のhosting比較・推奨と公開前手順は [`hosting_research.md`](hosting_research.md) に分離した。
+
+## ODPT-2F 更新・鮮度管理設計（2026-11-03、提案・未実装）
+
+本節は運用設計の提案であり、取得・自動公開・鮮度閾値の承認ではない。実データ公開は引き続き未承認。既存のsynthetic公開経路は変更せず、release-managed契約を実データへ流用する場合は別途審査する。
+
+### 推奨する全体フロー
+
+1. **更新確認:** ODPT開発者サイトNewsを更新通知の一次情報として確認する。News確認は更新の手掛かりであり、ファイル取得成功やsource内容の同一性を証明しない。通知後の静的データ更新条件は基本ライセンス/Developer Guidelineを確認する。
+2. **取得:** News告知または運用上の定期確認で更新候補が見つかったら、GTFS ZIPとODPT JSON 6件を隔離したstaging領域へ取得する。7件全ての取得が成功してからsnapshotとして確定し、取得成功日時を個別に記録する。一部成功を現行snapshotに混ぜない。
+3. **記録:** sourceごとにsource key、取得元dataset/endpoint、取得成功時刻（UTCと表示用JST）、HTTP結果、SHA-256、byte数、取得時に確認できたsource metadataを記録する。秘密キー、認証付きURL、レスポンス本文、生sourceはpublic artifact/Actions logに含めない。
+4. **検証・差分:** 旧snapshotと新snapshotを比較し、構造・期間・日付・便・駅順・時刻・ODPT照合・v2候補品質を検証する。
+5. **candidate:** 全gate成功時だけ非公開candidateを作り、candidate manifestにsource fingerprint、generator fingerprint、取得日時参照、差分要約、適用期間根拠を記録する。source本文やprivate metadata manifestを公開bundleに含めない。
+6. **承認・公開:** 公開承認者が対象service date、期間根拠、差分、品質、ライセンス表示、release ID/hash/bytesを確認する。承認前は非公開。release-managed方式は世代整合とrollbackに再利用できるが、source適用期間・公開資格の検証を代替しない。
+
+### 確認頻度の選択肢
+
+| 方式 | 利点 | 制約 |
+|---|---|---|
+| ODPT Newsを手動で定期確認 | 固定費・実装が最小。現時点の一次通知先と合う | 見落とし・確認間隔に応じた遅延がある。未確認期間を鮮度保証にできない |
+| News確認を担当者の運用タスク化し、更新時だけ取得 | 省運用を保ちつつ、変更のない回の取得を避けられる | 担当・頻度を決める必要がある。頻度の根拠は提供頻度や更新条件の確認後に定める |
+| 定期的な公式ページ確認を自動化 | 見落としを減らし、通知の差分候補を作れる | Newsページの安定した機械可読形式・更新検知方法を未確認。通知がないことはsource不変の証明ではない |
+| 定期的に7 sourceを全取得しhash比較 | upstream metadataがなくても実ファイル差分を検知 | API利用条件・取得頻度、認証、負荷、保管運用の確認が必要。現状の自動化には未接続 |
+
+**初期推奨:** Newsを一次情報として担当者が確認し、更新通知後にまとめて7 sourceを取得・検証する。提供元の更新実態と運用負荷を計測するまで、数値の鮮度期限や確認間隔は決めない。定期ページ確認の自動化は、公式の安定した更新検知手段を確認後に追加判断する。
+
+### 差分検証と判定段階
+
+- **変更なし:** 7 sourceのhash不変。取得成功日時は今回の取得時刻として記録するが、sourceが最新・適用中と断定しない。sourceを再取得していない場合は取得時刻を更新しない。
+- **想定内差分:** 版/期間の変更が説明可能で、calendarとservice dates、駅・時刻表構造、ODPT対応、品質gateがすべて通る。candidateは作成可能だが公開は人間承認後。
+- **要確認差分:** 便数・時刻・停車・種別・行先・照合率・routeCoverageに説明のない差分、期間境界の変更、ODPTとGTFSの版不一致。candidateは隔離し承認保留。
+- **検証失敗:** 必須source欠落、HTTP/parse/schema失敗、未知形式、service date欠落、曖昧・矛盾した対応の増加、validator/QA失敗。candidateを採用せず公開停止。
+
+検査対象には、GTFS `feed_version`、`feed_start_date/end_date`、calendar/calendar_datesの差分、ODPT 6 JSONのレコード件数と識別子集合、便の発着・停車駅順・種別・行先、GTFS–ODPT一意照合率/未照合/曖昧/時刻不一致、8駅×service date候補件数・除外内訳・routeCoverageを含める。差分閾値は実更新サンプルを集めるまで定数化せず、重大な変化は原則要確認とする。
+
+### ダイヤ改正・service date・release
+
+- 改正前に次期sourceが正式配布された場合は、公式改正告知とsource内期間/calendarを照合して非公開candidateを作成する。GTFS期間や `date=next`相当の選択だけを改正日の証明にしない。
+- 適用開始日は事業者の公式告知、対象datasetの明示metadataなど根拠を保存し、根拠URL/資料名・確認日時・対象路線・対象source・解釈をmanifestに記録する。
+- 改正日当日は、新sourceの取得・7 source間整合・service date検証・candidate検証が成功し、承認済み開始時刻に達したことを確認して新releaseを有効化する。service dateは暦日と別フィールドで保持し、GTFS 24時超時刻や翌日暦時刻へ変換してもservice date identityを維持する。
+- 現行v2 transfer探索は同じservice date内に限定され、次service dateへの接続探索は未対応。改正日の夜間service dateで境界を跨ぐ接続を網羅したと扱わず、必要なら候補停止または明示的な制限表示を行う。
+- release-managed manifestは1世代をpinする既存方式を再利用し、駅間・asset間の新旧混在を防ぐ。旧世代の保持・rollbackでは、expired/未承認のデータを復活させない検証を追加する。
+
+### applicationPeriodと期限切れ
+
+- GTFS feed期間はfeedが記述するサービス日範囲。公開 `applicationPeriod` はアプリがそのreleaseを有効データとして扱う期間。別概念として保持する。
+- ODPT JSONとGTFS双方が同一対象期間を記述する根拠を確認する。ODPTに明示期間がない場合は、公式告知等で補えるか確認し、根拠が不十分なら `applicationPeriod=null` を維持する。
+- 根拠はcandidate private manifestにsource別に保存し、public manifestには承認済み期間と必要な根拠識別子/説明だけを反映する。`end_at`（公開終了日）を適用終了日として流用しない。
+- `applicationPeriod`未設定、承認なし、現在時刻が期限外、source期間矛盾、期間根拠の参照切れがあれば公開・表示判定をfail closedにする。期限切れでは旧releaseをcurrentとして案内せず、データ利用不可/更新待ちを示す。
+- rollback先releaseの適用期間が現在有効であること、source/hashと承認状態が依然有効であることを検証する。期限切れ・取消済み承認のreleaseはrollback候補から除外する。緊急時もデータを有効と誤表示するrollbackは行わない。
+
+### 自動化・人間承認の境界
+
+- **A 更新確認・差分検出:** 初期はNewsの確認記録を人が作成。安定した公式検知手段が確認できたら通知/差分候補だけ自動化。
+- **B 取得・candidate生成・検証:** 認証情報を取得jobだけに与え、隔離staging、取得時刻/source hash、再現可能なgenerator/validator、失敗時のatomic discardを自動化候補にする。
+- **C 公開承認:** 初期は毎回人間が対象期間根拠、差分・品質、表示義務、candidate/release hashを確認して承認。runtime/schema/validator、取得先、credentials、期間ポリシー変更はデータ承認と別のコードレビューが必要。
+- **D 自動公開への移行:** 公式取得・通知仕様、適用期間根拠、複数回の差分実績、検証閾値、期限切れ表示、rollback制御、通知責任者、secret権限、staging証跡、停止手順が承認され、運用実績を確認した後に別途判断する。今回の提案では有効化しない。
+
+既存 `.github/workflows/synthetic-public-ci.yml` はworkflow_dispatchのみのsynthetic専用であり、ODPT更新用途に転用しない。実データ更新workflowを追加する場合も既存synthetic経路から分離し、stagingでの承認付き検証を経る。Cloudflare Workers等は、静的candidate/build/deployで要件を満たす限り追加しない。
+
+### 段階的な実装計画（提案）
+
+| Phase | 目的・変更対象 | 完了条件 | テスト方法 | 外部アクセス・公開承認 |
+|---|---|---|---|---|
+| 0 設計契約 | source ID、manifest項目、差分分類、期間根拠、停止/期限切れ状態を仕様化。文書のみ | 7 sourceの責務・unknown時の扱い・承認境界をレビュー可能 | 例示manifestと状態遷移の机上レビュー | 外部アクセスなし。公開承認なし |
+| 1 ローカル履歴 | 保存済みsourceをread-onlyでfingerprintし、非公開manifestへ取得時刻unknownを含め記録 | 既存sourceと出力先分離、欠損/mtime誤用を拒否 | fixture・保存済みsnapshotでhash/bytes/metadataと原本不変を検証 | 外部アクセスなし。公開承認なし |
+| 2 差分エンジン | 旧版/新版fixtureのGTFS/ODPT差分と判定分類 | no-change/expected/review/fail各ケースを説明可能 | 合成fixture、source不整合・欠落・schema変更の異常系 | 外部アクセスなし。公開承認なし |
+| 3 candidate gate | v2 generator/validatorへsource manifest、period evidence、候補・除外・routeCoverage比較を接続 | applicationPeriod根拠なし・矛盾時にcandidateを公開用へ昇格しない | 保存済みsourceと模擬更新で再現digest、fail closed、8駅×日付網羅 | 外部アクセスなし。公開承認なし |
+| 4 read-only取得試行 | 取得コードを隔離stagingへ安全に実行し、sourceだけ更新候補化 | 7件全取得・取得日時/hash保存、部分取得を現行snapshot扱いしない | 無通信mock、HTTP失敗、TLS、redirect、空/異常schema、秘密出力検査 | ODPT/GTFS取得アクセスが必要。公開承認なし。別途明示許可が必要 |
+| 5 CI candidate / private staging | 専用workflow、最小secret scope、artifact検証、private/stagingでcandidate QA | artifact一致、source/candidate分離、承認前公開不可、失敗時現行維持 | workflow静的検証、synthetic regression、staging QA | GitHub/Cloudflare操作を別途許可・承認。実データ一般公開なし |
+| 6 公開運用審査 | 経験データ・適用期間・license表示・停止/rollback・通知手順を審査 | 運用責任・閾値・公開内容・復旧策を明示承認 | drill/期限切れ/rollback演習、レビュー記録 | 明示的な公開承認が必要。自動公開はさらに別承認 |
+
+この計画は着手承認ではない。まずPhase 0の設計レビューと、提供元仕様の未確認点整理を行う。
 
 ## 次の実装ステップ案（未着手）
 
