@@ -828,3 +828,12 @@
 - `tests/test_odpt_source_store.py` に合成fixtureと失敗注入を追加。contract 10、inventory 7、store 13、既存snapshot QA 15、v2 25、計70件PASS。失敗途中のcleanup、write failure、no snapshot marker、existing path/symlink/traversal/permission、JSON破損・重複/未知key、参照/fingerprint tampering、元source一致/変更/欠落を確認。
 - 実source QA用のexplicit store `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c` を事前確認し、sandboxの許可範囲で作成できなかったため、sandbox外書込みの実行承認後にpersist/verifyを実施。record validator PASS、7/7 source bytes match、SHA-256/byte数は前後一致。storeにはmetadata record 8件だけがありraw sourceは複製していない。Snapshotは完全な7件参照の成立だけを表し、取得履歴はhistorical-unknown、source間整合はnot-evaluated。最新/現行有効/公開可能の判定や承認ではない。
 - `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。API/通信、取得、raw source変更、差分/publication gate、applicationPeriod/publicationApproved、v1/v2/release-managed経路、CI、Cloudflare/Deployは未変更。Commit/Push/Mergeなし。
+
+## 2026-11-03 — ODPT-2G Phase 1D ODPT-0互換確認
+
+- 開始時branch `main`、HEAD `c05d605`、作業tree cleanを確認。`scripts/odpt_source_compat.py`を追加し、CLIへread-only `compare-legacy --store ... [--source-dir ...]`を追加。Phase 1C store validatorとODPT-0既存`_inventory()` / `_fingerprint()`を利用し、固定sourceId↔filename、7件集合、hash、byte数、現物bytesを照合する。既存ODPT-0結果・store・原本への書込みなし。
+- 新contentFingerprintはPhase 1A canonicalizer、ODPT-0 fingerprintは既存entry list canonicalizationで独立検証。比較CLIは両値の同一性を要求しない。ODPT-0 fingerprintの永続report baselineは見つからなかったため、定義に基づく再計算PASSと過去devlog記録との一致を区別して報告する。
+- metadata比較は共有項目（ODPT recordCount/date sets、GTFS feed version/period）と射影差を分離。ODPT日付のstring化規則、ODPT-0に欠損件数がない点、GTFS requiredMemberCountが旧metadataのみである点をschema/extraction差として分類し、共有値不一致を別途出す。
+- 合成テスト8件を追加。contract 10、inventory 7、store 13、compatibility 8、snapshot QA 15、v2 25、itinerary 28、train matcher 13、計119件PASS。source/store path/ID/hash/size/fingerprint/metadata破損、参照変更/欠落、symlink/traversal/incomplete storeを検証。
+- 実source compare-legacy PASS。7 source ID/file/hash/byte数一致、source bytes 7/7 match。新fingerprint `9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d`、ODPT-0 fingerprint `6e578d7b55f669e58dd3597dc151d9d0db7a6cbf7651d96f84036538c4ea430e`（別方式のため不一致）。共有metadata mismatch 0、射影/抽出差7。取得状態`historical-unknown`、cross-source consistency`not-evaluated`、公開承認は付与せず。実行前後で7 source原本とSnapshot store 8 JSONのhash/byte数が一致。
+- `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。`scripts/odpt_snapshot_qa.py`、取得コード、v2、synthetic/release-managed、CI、Cloudflare、applicationPeriod/publicationApprovedは未変更。Commit/Push/Mergeなし。

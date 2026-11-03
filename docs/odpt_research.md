@@ -217,6 +217,18 @@ CLIは既存 [`scripts/odpt_source_inventory.py`](../scripts/odpt_source_invento
 
 合成テストは [`tests/test_odpt_source_store.py`](../tests/test_odpt_source_store.py)。保存・再読込、別snapshot IDで同一fingerprint、元bytes照合、参照欠落/変更、record参照/fingerprint破損、JSON重複key/未知key、途中失敗・write失敗時のatomic性、既存path・symlink・traversal・不正権限を検証する（13件）。保存済みsourceでの実QAではユーザーLibrary配下の明示path `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c` にrecord 8件だけを保存し、別CLIプロセスの再verifyでSnapshot validator PASS、source bytes 7/7 match。前後hash/byte数も7/7一致した。
 
+### Phase 1D ODPT-0 Snapshot QA互換確認（2026-11-03）
+
+[`scripts/odpt_source_compat.py`](../scripts/odpt_source_compat.py) とinventory CLIの `compare-legacy --store <absolute-path> [--source-dir ...]` を追加した。store/Source/SnapshotはPhase 1C/1A validatorで読み取り検証し、ODPT-0の既存 `odpt_snapshot_qa._inventory()` と `_fingerprint()` をそのまま呼んで独立再計算する。既存QAファイルやsource inventoryへの変換書込・上書きはしない。
+
+照合は固定7 sourceIdと既存7 filenameの完全一致を要求し、各Source artifactのfilename対応・SHA-256・byte数をODPT-0 entriesと照合する。Sourceのpath mapping、重複/欠落/余剰、hash/byte数差は固定error codeで停止する。新Snapshot fingerprintはPhase 1A `content_fingerprint`、ODPT-0 fingerprintは既存のfilename順entry list canonical JSONという各既存定義で独立検証する。fingerprint文字列同士の一致は要求せず、対応ID/fileとhash/byte数で互換性を確認する。
+
+metadata比較ではODPT recordCountと`dc:date`/`dct:issued`値集合、GTFS feedVersion/期間の共有値を比較する。ODPT-0はnon-null日付値をstring化し、新Source metadataはstring以外を解析拒否する。またODPT-0には日付欠損件数がなく、新metadataにはある。GTFSでは`requiredMemberCount`がODPT-0のみの派生field。これらは抽出項目/規則差として報告し、共有値不一致とは分ける。実source比較では共有値の不一致0件、schema/extraction差7件（GTFS legacy-only field 1、ODPT new-only missing count 6）。metadata statusは`compatible-with-extraction-differences`。
+
+実source QAはPhase 1C store `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c`を指定し、同じ保存済み7 sourceに対して実行。新Snapshot fingerprint `9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d`とODPT-0 fingerprint `6e578d7b55f669e58dd3597dc151d9d0db7a6cbf7651d96f84036538c4ea430e`は独立検証PASS、値は異なる（方式差）。ODPT-0値は過去devlog記録値と一致するが、既定・記録上のQA JSON reportが存在しないためreport fileとの直接比較はしていない。inventory一致PASS、現物bytes 7/7 match。取得状態は`historical-unknown`、source間整合は`not-evaluated`、公開statusはこの比較では未評価・承認付与なし。実行前後でsource 7件とstore JSON 8件のhash/byte数が一致。
+
+合成fixtureは [`tests/test_odpt_source_compat.py`](../tests/test_odpt_source_compat.py)。一致/metadata射影差、inventory欠落/余剰/重複/誤mapping、hash/byte数不一致、Snapshot fingerprint不正、metadata型不正、source変更/欠落、symlink/traversal/不完全store、ODPT-0 fingerprint出力不正を検証する（8件）。互換確認はread-onlyで、ダイヤ最新版・同一ダイヤ・公開可能性の判定を行わない。
+
 ### 推奨する全体フロー
 
 1. **更新確認:** ODPT開発者サイトNewsを更新通知の一次情報として確認する。News確認は更新の手掛かりであり、ファイル取得成功やsource内容の同一性を証明しない。通知後の静的データ更新条件は基本ライセンス/Developer Guidelineを確認する。

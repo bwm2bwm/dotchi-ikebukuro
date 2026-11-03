@@ -351,8 +351,8 @@ def _verify_source_bytes(records: list[dict[str, Any]], source_dir: Path | None)
     return {"status": status, "matched": matched, "missing": missing, "mismatched": mismatched}
 
 
-def verify_store(store_path: Path, source_dir: Path | None = None) -> dict[str, Any]:
-    """Validate a persisted snapshot and optionally compare all referenced bytes."""
+def load_store_contract(store_path: Path) -> dict[str, Any]:
+    """Read and validate a completed store without checking external raw sources."""
     root = _safe_existing_store_path(store_path)
     try:
         root_entries = {entry.name for entry in root.iterdir()}
@@ -410,6 +410,14 @@ def verify_store(store_path: Path, source_dir: Path | None = None) -> dict[str, 
         validate_snapshot(snapshot, records)
     except ContractError as exc:
         _fail(f"store_snapshot_{exc.code}")
+    return {"snapshot": snapshot, "records": records}
+
+
+def verify_store(store_path: Path, source_dir: Path | None = None) -> dict[str, Any]:
+    """Validate a persisted snapshot and optionally compare all referenced bytes."""
+    loaded = load_store_contract(store_path)
+    snapshot = loaded["snapshot"]
+    records = loaded["records"]
     source_result = _verify_source_bytes(records, source_dir)
     return {"recordStatus": "PASS", "snapshotId": snapshot["snapshotId"],
             "contentFingerprint": snapshot["contentFingerprint"],

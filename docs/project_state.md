@@ -4,7 +4,7 @@
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
-ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validator、Phase 1B read-only inventory、Phase 1Cの非公開Source/Snapshot記録storeを実装済み。保存先は明示指定を必須とし、raw sourceは複製しない。Snapshotは7件の存在・hash集合が揃うことを示すだけで、取得履歴は不明、source間のダイヤ整合は未評価。差分・公開資格gateは未実装。詳細と制限は `odpt_research.md` のODPT-2G節とdevlogを参照。
+ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validator、Phase 1B read-only inventory、Phase 1Cの非公開履歴store、Phase 1DのODPT-0 read-only互換確認を実装済み。Phase 1Dでは固定7 sourceのID/file/hash/byte数を照合し、新旧fingerprintを個別に再計算する。取得履歴は不明、source間のダイヤ整合は未評価。差分エンジン・公開資格gateは未実装。詳細と制限は `odpt_research.md` のODPT-2G節とdevlogを参照。
 
 ## 現在の配信・QA経路
 
@@ -35,7 +35,7 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. Phase 1D候補として、保存済みSnapshot間の差分検証を別途設計・レビューする。
+1. 保存済みSnapshot間の差分検証を互換確認と分離して設計・レビューする。
 2. Source取得履歴とapplicationPeriod根拠の検証を、差分処理・公開判断から分離して設計する。
 3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
 

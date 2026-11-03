@@ -252,14 +252,14 @@ def generate_inventory(source_dir: Path, observed_at: str | None = None,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", choices=("inspect", "persist", "verify"), default="inspect")
+    parser.add_argument("command", nargs="?", choices=("inspect", "persist", "verify", "compare-legacy"), default="inspect")
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SNAPSHOT)
     parser.add_argument("--store", type=Path)
     args = parser.parse_args(argv)
     if args.command != "inspect" and args.store is None:
         parser.error(f"--store is required for {args.command}")
     if args.command == "inspect" and args.store is not None:
-        parser.error("--store is only valid for persist or verify")
+        parser.error("--store is only valid for persist, verify, or compare-legacy")
 
     if args.command == "inspect":
         try:
@@ -273,22 +273,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        from odpt_source_store import StoreError
+        from odpt_source_compat import CompatibilityError
         if args.command == "persist":
-            from odpt_source_store import StoreError, persist_snapshot
+            from odpt_source_store import persist_snapshot
             result = persist_snapshot(args.store, args.source_dir)
             verified = result["verification"]
             print(f"persist=PASS source_count={result['sourceCount']} snapshot_id={verified['snapshotId']} "
                   f"record_validation={verified['recordStatus']} source_bytes={verified['sourceBytesStatus']} "
                   f"content_fingerprint={verified['contentFingerprint']}")
             return 0
-        from odpt_source_store import StoreError, verify_store
-        result = verify_store(args.store, args.source_dir)
-        print(f"verify_records={result['recordStatus']} snapshot_id={result['snapshotId']} "
-              f"source_bytes={result['sourceBytesStatus']} matched={result['sourceBytes']['matched']} "
-              f"missing={result['sourceBytes']['missing']} mismatched={result['sourceBytes']['mismatched']} "
-              f"content_fingerprint={result['contentFingerprint']}")
-        return 0 if result["sourceBytesStatus"] == "match" else 2
-    except (InventoryError, StoreError) as exc:
+        if args.command == "verify":
+            from odpt_source_store import verify_store
+            result = verify_store(args.store, args.source_dir)
+            print(f"verify_records={result['recordStatus']} snapshot_id={result['snapshotId']} "
+                  f"source_bytes={result['sourceBytesStatus']} matched={result['sourceBytes']['matched']} "
+                  f"missing={result['sourceBytes']['missing']} mismatched={result['sourceBytes']['mismatched']} "
+                  f"content_fingerprint={result['contentFingerprint']}")
+            return 0 if result["sourceBytesStatus"] == "match" else 2
+        from odpt_source_compat import compare_legacy
+        result = compare_legacy(args.store, args.source_dir)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0 if result["status"] == "PASS" else 2
+    except (InventoryError, StoreError, CompatibilityError) as exc:
         operation = "persist" if args.command == "persist" else "verify"
         print(f"{operation}=FAIL error={exc.code}")
         return 1
