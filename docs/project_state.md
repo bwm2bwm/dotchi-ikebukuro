@@ -12,6 +12,8 @@ Phase 2C-2aの品質比較入力基盤を追加。Phase 2C-1採用契約をresea
 
 Phase 2C-2b-1で単一Snapshotのgenerator/v2基本metrics収集を追加。初期3日×8駅×2出発路線の48セルで生成行G・表示候補C・実測除外E、primary直通/乗換、除外理由、generatorが保持するalternative/接続組数をメモリ内に返す。既存入力検証と原本7件/store8件の開始・終了照合を利用し、collector自身もengine依存へ追加（現在16ファイル）。collectionStatusはpartialで、品質PASS・公開資格を表さない。matcher・UNKNOWN/WARNING・routeCoverage詳細、品質差分・表示モデルは後続。既存v2 gateと実データ公開未承認は維持。
 
+Phase 2C-2b-2で単一Snapshotの詳細metricsを追加。collector専用の観測派生クラスでraw matcher状態を取得し、generator集約状態、primary/最良乗換alternativeの第1・第2区間、延べ参照/セル内一意対象、照合率の分子/分母を分離する。診断code・v2除外・validator error・routeCoverage・種別/行先の根拠を収集する。既存generator/matcher/v2 gateと表示ラベルは未変更。品質engine依存は17ファイル。全体collectionStatusはpartialを維持し、旧新品質差分・画面モデル・公開資格は未評価。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。

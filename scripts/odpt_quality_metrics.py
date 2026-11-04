@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private, read-only single-Snapshot generator/v2 basic metrics (in memory only)."""
+"""Private, read-only single-Snapshot generator/v2 quality metrics (in memory only)."""
 from __future__ import annotations
 
 import argparse
@@ -17,10 +17,13 @@ from pathlib import Path
 if __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from . import odpt_quality_input as quality
+    from . import odpt_quality_details as details
 else:
     import odpt_quality_input as quality
+    import odpt_quality_details as details
 import odpt_public_v2 as v2
-from odpt_itinerary import FeedDateError, ItineraryGenerator
+from odpt_itinerary import FeedDateError
+ItineraryGenerator = details.ObservingGenerator
 
 METRIC_UNITS = {
     'G': 'generated-rows', 'C': 'candidate-rows', 'E': 'excluded-rows',
@@ -30,16 +33,18 @@ METRIC_UNITS = {
     'validTransferPairCount': 'transfer-pairs',
 }
 NOT_EVALUATED = [
-    'matcher-details', 'unknown-warning-details', 'route-coverage-details',
     'display-model', 'browser-runtime', 'quality-diff', 'freshness',
     'application-period', 'publication-eligibility', 'cross-source-consistency',
     'phase2b-opaque-and-auxiliary-semantics',
+    'validator-errors-beyond-first-per-probe', 'all-transfer-pair-leg-quality',
+    'cross-cell-unique-train-population',
 ]
 
 
 def _metric(metric_id, dimensions, value=None, availability='known', reasons=(), evidence=()):
     return {'metricId': metric_id, 'dimensions': dict(dimensions), 'availability': availability,
             'value': value if availability == 'known' else None, 'unit': METRIC_UNITS[metric_id],
+            'numerator': None, 'denominator': None,
             'reasonCodes': sorted(set(reasons)), 'evidenceRefs': list(evidence)}
 
 
@@ -149,9 +154,9 @@ def collect_metrics(store, source_dir, *, context=None, engine=None, root=qualit
     report = {'contract': 'odpt-itinerary-quality-collection', 'schemaVersion': 1,
               'profile': dict(quality.PROFILE), 'snapshotId': None, 'contentFingerprint': None,
               'evaluationContext': None, 'contextFingerprint': None, 'engineFingerprint': None,
-              'metrics': [], 'checks': {'consistency': []}, 'findings': [],
+              'metrics': [], 'checks': {'consistency': [], 'detailedConsistency': []}, 'findings': [],
               'notEvaluated': list(NOT_EVALUATED), 'collectionStatus': 'failed',
-              'basicMetricsStatus': 'failed', 'reasonCodes': []}
+              'basicMetricsStatus': 'failed', 'detailedMetricsStatus': 'failed', 'reasonCodes': []}
     before = None
     try:
         engine = copy.deepcopy(engine) if engine is not None else quality.build_engine(root)
@@ -201,6 +206,16 @@ def collect_metrics(store, source_dir, *, context=None, engine=None, root=qualit
                                 if availability == 'known' else _empty_cell(dims, availability, reason))
                         report['metrics'].extend(cell)
                         report['checks']['consistency'].extend(_consistency(cell))
+                        if availability == 'known':
+                            try:
+                                detail_metrics = details.measure_cell(
+                                    [r for r in rows if str(r.route_id) == route], rows, dims, generator, date.fromisoformat(day))
+                            except Exception:
+                                detail_metrics = details.empty_cell(dims, 'failed', 'detail_collection_failed')
+                        else:
+                            detail_metrics = details.empty_cell(dims, availability, reason)
+                        report['metrics'].extend(detail_metrics)
+                        report['checks']['detailedConsistency'].extend(details.checks(cell + detail_metrics))
                 # Release a station's parsed feed before constructing the next one.
                 del generator
             end = validate()
@@ -225,17 +240,25 @@ def collect_metrics(store, source_dir, *, context=None, engine=None, root=qualit
         report['collectionStatus'] = 'failed'
         # Values from a changed input/engine cannot be confirmed as Snapshot metrics.
         for metric in report['metrics']:
-            metric.update(availability='failed', value=None,
+            metric.update(availability='failed', value=None, numerator=None, denominator=None,
                           reasonCodes=sorted(set(metric['reasonCodes'] + report['reasonCodes'])))
-        for check in report['checks']['consistency']:
+        for check in report['checks']['consistency'] + report['checks']['detailedConsistency']:
             check['status'] = 'not-evaluated'
     report['metrics'].sort(key=lambda m: tuple(m['dimensions'][k] for k in ('serviceDate', 'stationId', 'routeId')) + (m['metricId'],))
     report['checks']['consistency'].sort(key=lambda c: tuple(c['dimensions'][k] for k in ('serviceDate', 'stationId', 'routeId')) + (c['checkId'],))
-    report['findings'] = [copy.deepcopy(c) for c in report['checks']['consistency'] if c['status'] == 'FAIL']
+    report['checks']['detailedConsistency'].sort(key=lambda c: tuple(c['dimensions'][k] for k in ('serviceDate', 'stationId', 'routeId')) + (c['checkId'],))
+    report['findings'] = [copy.deepcopy(c) for c in report['checks']['consistency'] + report['checks']['detailedConsistency'] if c['status'] == 'FAIL']
     report['findings'].extend({'code': code} for code in sorted(set(report['reasonCodes'])))
     if report['collectionStatus'] != 'failed':
-        report['basicMetricsStatus'] = ('collected' if not report['findings'] and
-            all(m['availability'] == 'known' for m in report['metrics']) else 'partial')
+        report['basicMetricsStatus'] = ('collected' if not any(c['status'] == 'FAIL' for c in report['checks']['consistency']) and
+            all(m['availability'] == 'known' for m in report['metrics'] if m['metricId'] in METRIC_UNITS) else 'partial')
+        report['detailedMetricsStatus'] = ('collected' if not any(c['status'] == 'FAIL' for c in report['checks']['detailedConsistency']) and
+            all(m['availability'] == 'known' for m in report['metrics'] if m['metricId'] in details.UNITS) else 'partial')
+    for m in report['metrics']:
+        if m['availability'] != 'known' or not m['metricId'].startswith('diagnostics.v2Validator'): continue
+        for code, counts in m['value']['codes'].items():
+            report['findings'].append({'code': code, 'system': m['metricId'], 'dimensions': m['dimensions'],
+                                       'occurrences': counts['occurrences']})
     report['reasonCodes'] = sorted(set(report['reasonCodes']))
     return report
 
@@ -249,11 +272,53 @@ def summarize(report):
                         if name == 'exclusionReasonCounts' else sum(values)) if values else None
     cells = collections.defaultdict(list)
     for metric in report['metrics']:
+        if metric['metricId'] not in METRIC_UNITS: continue
         dims = metric['dimensions']
         cells[tuple(dims[k] for k in ('serviceDate', 'stationId', 'routeId'))].append(metric)
     return {'rowInstanceTotals': totals, 'knownCellCounts': known_cells, 'cellCount': len(cells),
             'unevaluableCellCount': sum(any(m['availability'] != 'known' for m in cell) for cell in cells.values()),
             'consistency': dict(sorted(collections.Counter(c['status'] for c in report['checks']['consistency']).items()))}
+
+
+def summarize_details(report):
+    """Only descriptive sums; rates are recomputed from known numerators/denominators.
+
+    Unique counts remain per-cell and are never represented as Snapshot-wide unique trains.
+    """
+    summary = {}
+    for name in sorted(details.UNITS):
+        entries = [m for m in report['metrics'] if m['metricId'] == name]
+        known = [m for m in entries if m['availability'] == 'known']
+        values = [m['value'] for m in known]
+        value = None
+        if name.endswith('Rate') and known:
+            numerator = sum(m['numerator'] for m in known)
+            denominator = sum(m['denominator'] for m in known)
+            value = {'numerator': numerator, 'denominator': denominator,
+                     'rate': numerator / denominator if denominator else None}
+        elif name.startswith('diagnostics.') and known:
+            codes = sorted({code for v in values for code in v['codes']})
+            value = {'codeOccurrences': sum(v['codeOccurrences'] for v in values),
+                     'affectedRowCount': sum(v['affectedRowCount'] for v in values),
+                     'affectedGeneratedRowCount': (sum(v['affectedGeneratedRowCount'] for v in values)
+                         if all(v['affectedGeneratedRowCount'] is not None for v in values) else None),
+                     'codes': {code: {'occurrences': sum(v['codes'].get(code, {}).get('occurrences', 0) for v in values),
+                         'affectedRowCount': sum(v['codes'].get(code, {}).get('affectedRowCount', 0) for v in values),
+                         'affectedGeneratedRowCount': (sum(v['codes'].get(code, {}).get('affectedGeneratedRowCount', 0) for v in values)
+                            if all(v['codes'].get(code, {}).get('affectedGeneratedRowCount', 0) is not None for v in values) else None)} for code in codes}}
+        elif name == 'routeCoverage' and known:
+            value = {'dataStates': dict(sorted(collections.Counter(v['dataState'] for v in values).items())),
+                     'classifications': dict(sorted(collections.Counter(v['coverageClassification'] for v in values).items()))}
+        elif name == 'routeCoverage.v2DataState' and known:
+            value = dict(sorted(collections.Counter(values).items()))
+        elif known and isinstance(values[0], dict):
+            keys = sorted({k for v in values for k in v})
+            value = {k: sum(v.get(k, 0) for v in values) for k in keys}
+        elif known:
+            value = sum(values)
+        summary[name] = {'knownCellCount': len(known), 'unavailableOrPartialCellCount': len(entries) - len(known),
+                         'value': value}
+    return summary
 
 
 def main(argv=None):
@@ -269,14 +334,17 @@ def main(argv=None):
         print('service_dates=' + ','.join(context['serviceDates']))
         print('origin=Ikebukuro stations=' + ','.join(context['stationIds']) + ' routes=' + ','.join(context['routeIds']))
     print('summary=' + json.dumps(summarize(report), sort_keys=True))
+    print('detailed_summary_cell_scoped=' + json.dumps(summarize_details(report), sort_keys=True))
+    print('detail_checks=' + json.dumps(dict(sorted(collections.Counter(c['status'] for c in report['checks']['detailedConsistency']).items()))))
     print('not_evaluated=' + ','.join(report['notEvaluated']))
-    print('collection_status=' + report['collectionStatus'] + ' basic_metrics_status=' + report['basicMetricsStatus'])
+    print('collection_status=' + report['collectionStatus'] + ' basic_metrics_status=' + report['basicMetricsStatus']
+          + ' detailed_metrics_status=' + report['detailedMetricsStatus'])
     print('input_immutability=' + report['checks'].get('inputImmutability', {}).get('status', 'not-confirmed'))
     print('reasons=' + (','.join(report['reasonCodes']) or 'none'))
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     print(f'elapsed_seconds={time.perf_counter() - started:.3f} peak_rss_bytes={rss if sys.platform == "darwin" else rss * 1024}')
     if report['collectionStatus'] != 'failed':
-        return 0 if report['basicMetricsStatus'] == 'collected' else 2
+        return 0 if report['basicMetricsStatus'] == 'collected' and report['detailedMetricsStatus'] == 'collected' else 2
     statuses = [report['checks'][k]['comparisonReadiness'] for k in ('inputStart', 'inputEnd') if k in report['checks']]
     statuses.append(report.get('failureCategory'))
     if 'invalid' in statuses: return 3

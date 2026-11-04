@@ -1165,3 +1165,41 @@ CLI: `python3 -B scripts/odpt_quality_metrics.py --store <absolute-store> --sour
 実source非公開QAは既存Phase 1C store（snapshotId `33af11c1-60f6-47fd-993a-94aa8b469cb1`、contentFingerprint `9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d`）と対応原本7件を利用。全48セル・432 metricsがknown、評価不能0、findings0。延べG=10,536、C=10,128、E=408、primary直通7,887/乗換2,241。補助指標はdirect alternative行7,887、best transfer行6,570、有効接続組50,772。除外理由はexplicit_pass_info=408、他5理由は各known/0（要町・千川の副都心線で各204、3日合計）。各日16セルのG=3,512/C=3,376/E=136、直通2,629/乗換747。出発route6の3日・8駅合計はG=5,256/C=5,256/E=0、route9はG=5,280/C=4,872/E=408。これらは延べ行であり独立列車数ではない。
 
 G=C+E、C=直通+乗換、E=理由合計をそれぞれ48セル、合計144 checksでPASS。開始・終了のcontext identical、engine/env、Source/Snapshot契約・hash/bytesともPASS。collectionStatus=partial/basicMetricsStatus=collected、CLI終了0。レポートはメモリ内のみ。最終実行は46.558秒（独立した外側の前後inventory照合も含む）、process peak RSS363,638,784 bytes（約346.8 MiB、macOS）。原本7件/store8件の全15ファイルについて、collector内と独立照合の両方でSHA-256・byte数・identity前後一致。最終engineFingerprintは `ac072b0989e44e6ced288a0a05cbddaad9068b3e8f3108941fc7ba736e71d101`、contextFingerprintは `310f7ccd8e8ff892dbfffba5a03055fc5bd12cd5ace77bd8c5972ab3626c5735`。品質PASS・鮮度・公開資格の判定は行わない。
+
+### Phase 2C-2b-2 単一Snapshotの詳細品質metrics（2026-11-04）
+
+`odpt_quality_metrics.py` を拡張し、非公開 `odpt_quality_details.py` を追加。profile/contract/schemaVersionは前工程を維持し、generator生成行とv2射影候補の2段階だけを計測する。基本9指標・48セル・G/C/E実測と144算術checksは維持。各metricにnullable numerator/denominatorを追加する。追加98指標と基本9指標で107/cell、48セルなら5,136 entries。serviceDate・stationId・routeId・metricId順。全体はpartial/failedだけで、基本/詳細のcollectedは収集成立を表し品質PASSとはしない。Phase 2Bの意味比較状態とは独立。
+
+**raw matcherと区間母集団:** collectorだけが使うObservingGeneratorは既存generatorの派生クラス。既存_enrichへ渡すmatcherをread-only proxyで包み、実matchを同じ引数で1回呼び、同じMatchResultを返してstatusだけを観測する。通常のItineraryGeneratorには観測処理を追加せず、判定・戻り値・公開DTO・payload・公開fingerprint/gateを変更しない。generator/matcher本体も未変更。matcherのnative statusはconfirmed/ambiguous/unmatched/unavailable/candidate_unconfirmed。profileのrawStatusCountsではnative confirmedだけをunique_matchという名称へ対応付け、nativeRawStatusCountsも別に保持する。candidate_unconfirmed→generator unmatchedの集約は既存_enrichの実結果から独立に記録する。matcherが呼ばれていない場合はraw unavailableと推測せず、raw指標自体をunavailable/null、理由raw_match_not_observedとする。実際に返ったunavailableはknownなraw状態である。
+
+母集団はgenerated.firstLeg（G全行の出発trip）、primary.firstLeg/secondLeg（射影できたprimary）、bestTransferAlternative.firstLeg/secondLeg（Gに保持された最良乗換alternative）。primary第1区間は直通も含み、第2区間は乗換のみ。alternativeとprimaryを合算しない。全有効接続組の各leg品質は未評価で、前工程のvalidTransferPairCountをその代用にしない。照合を再実行して状態を推定しない。
+
+各母集団にreferences/uniqueを設け、matcher.<population>.<counting>.<field>というmetricIdを使う。fieldはtargetCount、rawObservedTargetCount、rawStatusCounts、nativeRawStatusCounts、observedRawStatusCounts、aggregatedStatusCounts、rawMatchRate、aggregatedMatchRate。uniqueは同一Snapshot・セル内のserviceDate+routeId+GTFS tripIdで重複を除く。第2区間を複数親行が参照すればreferencesには各参照、uniqueには1対象を数える。tripIdの世代間安定性は仮定しない。異なるセルのunique件数の和はセル別一意数の延べ合計であり、Snapshot全体の独立列車数ではない。
+
+照合率はunique_match対象数/全照合対象数で、ambiguous/unmatched/unavailable/candidate_unconfirmedも分母に含む。全raw根拠が揃わない率はunavailable/nullとし、rawObservedTargetCountとobservedRawStatusCountsに確認できた観測分を保持する。分母0はnumerator=0/denominator=0/value=null、reasonCodes=[zero_denominator]。評価可能な対象件数0や状態件数0はknown/0。leg根拠がない場合はunavailable/nullで推定しない。
+
+**診断の別体系:** diagnostics.itinerary.INFO/WARNING、diagnostics.generatorMatchStates、diagnostics.v2Exclusions.INFO/WARNING/UNKNOWN、diagnostics.v2ValidatorRows/Cellを個別保持する。itineraryは既存_classify_diagnosticsの分類を使い、元data_qualityのcode出現を数える。繰り返しcodeのoccurrencesとcodeを持つ生成行数を区別し、1行の複数codeもaffectedGeneratedRowCountでは1行とする。各codeに発生数・影響行数・対象セル・availability/reasonCodesを記録する。v2除外は既存_exclusion_detailの排他的分類を使い、UNKNOWNとWARNINGを合算しない。generator照合状態をQA warningへ読み替えない。
+
+既存validate_v2_payloadを、固定時刻のメモリ内診断envelope（実routeCoverage、射影行、既存public ID）で呼ぶ。公開bundle gateは呼ばない。Rowsは候補1行ごとのprobe、Cellはセル内候補全体のprobeで、validatorは各probeで最初のerrorを返す。両probe件数を合算せず、最初のerror以降は未評価と明記。位置indexだけを除いた安定codeを保持し、本文・IDを出力しない。Cell errorから影響生成行を特定できない場合はその行数をnull/unavailableとし、セル数やprobe数で代用しない。validator errorはfindingにも記録するが、既知のエラー収集を品質PASSや公開資格へ変換しない。
+
+**routeCoverage:** 既存_route_stateのdataStateをそのままrouteCoverage.v2DataStateへ記録する。routeCoverageにはrouteId/dataState/実scheduledTripCount/originEvidence（originTripCount/dataInsufficientCount/transferDataInsufficientCount）/coverageClassificationを保持する。scheduledTripCountはactiveな路線全GTFS tripでGではない。元metadataが欠けた場合、v2内部の0 fallbackを実測scheduled=0として扱わず、routeCoverageはunavailable/null、v2状態はunknownのままにする。期間外はout-of-range。feed内で既存active_service_idsが空ならno-active-service、active serviceはあるが当該route scheduleが0ならno-scheduled-route-service、scheduled>0で対象方面の生成行なしならno-origin-direction-candidates。これらは保存calendar上の状態であり実運休保証ではない。data不足/行数不一致/QA warning/集約照合未解決を既存根拠から列挙し、data-insufficientへ分類する。根拠不足を正常運休へ補完しない。
+
+**種別・行先:** 射影候補に対しtype_resolutionを再利用する。odpt_confirmed/official_route_ruleでMetro train_typeとラベルが確定した行をtrainTypeConfirmedCount、gtfs_stop_patternをtrainTypeAuxiliaryCount、それ以外の未確定をtrainTypeUnknownCountとして分ける。service brandだけのFライナー等はMetro種別不明へ含め、serviceBrandOnlyCountも別記。typeResolutionSourceCountsを保持する。行先は既存headsignが空/欠損ならdestinationMissingCount、nonblankかつunique_matchで既存ODPT destination根拠もあればdestinationConfirmedCount、それ以外のnonblankをdestinationUnknownCountとする。単に文字列があることを照合確定とはしない。出力ラベルは一切変えない。根拠field欠落は当該品質指標をunavailable/nullにする。
+
+**整合・部分評価・CLI:** 基本checksと別に、種別/行先3分類の和=C、raw/native/集約状態数=対象数、観測数と状態数、一意数≤延べ数、率の分子分母を検査する（77 checks/cell）。不一致は補正せずfinding。局所的な指標欠損でも他の既知値を保持し、基本と詳細の収集statusを分離する。原本/store/engineの全体binding不正・変更時は全metricsをfailed/nullにし分子分母も確定しない。engine依存へdetailsを追加し現在17ファイル。CLI引数は--store/--source-dirを維持し、基本集計・詳細指標のknownセル数と評価不能数、加重分子/分母による率、各別体系、coverage/種別/行先、checksと状態を表示する。率の単純平均や駅別unique件数の全体一意化はしない。終了0は基本・詳細の計測成立、2は部分/不整合/条件不一致、3は入力不正/変更、4は利用不能。既知の品質問題があっても収集成立なら0となり得る。レポートはメモリのみで、raw source/旅程本文/秘密情報/IDを出力・保存しない。
+
+実source非公開QA（既存Phase 1C storeと対応7原本、2026-10-28〜30/8駅/route6・9）では、基本G=10,536/C=10,128/E=408、primary直通7,887/乗換2,241を維持。Eはexplicit_pass_info408、他5理由はknown/0。以下の「一意」はセル内一意対象数の延べ合計であり、全駅を跨ぐ独立列車数ではない。全母集団でnative raw confirmed（profile raw unique_match）と集約unique_matchのみを観測し、ambiguous/unmatched/unavailable/candidate_unconfirmedは各known/0。raw/集約の照合率はいずれも表の対象数/同数=100%。
+
+| 母集団 | 延べ参照の分子/分母 | セル内一意の分子/分母 |
+|---|---:|---:|
+| generated.firstLeg | 10,536/10,536 | 10,536/10,536 |
+| primary.firstLeg | 10,128/10,128 | 10,128/10,128 |
+| primary.secondLeg | 2,241/2,241 | 2,196/2,196 |
+| bestTransferAlternative.firstLeg | 6,570/6,570 | 6,570/6,570 |
+| bestTransferAlternative.secondLeg | 6,570/6,570 | 3,726/3,726 |
+
+itinerary INFOは681 occurrences/564生成行。内訳はdestination_explicit_pass564、destination_alighting_prohibited39、destination_arrival_missing39、direct_arrival_unavailable39。itinerary WARNING0、v2除外INFO408/UNKNOWN0/WARNING0、Rows/Cell validator error各0で、別体系のまま保持した。routeCoverageはcomplete48/insufficient0/unknown0、分類complete48。種別は正式Metro種別確定9,696/補助0/未確定432。未確定432はすべて愛称だけのservice brand行で、表示ラベルの欠損432件を意味しない。type resolution sourceはodpt_confirmed9,888/official_route_rule240。行先は確定10,128/欠損0/不明0。
+
+全5,136 metricsがknown、unavailable/部分評価metric0。基本144・詳細3,696 checksがPASS、finding0。分母0の率は既定どおりnullであり、0件の対象数・状態数と区別する。collectionStatus partial、basicMetricsStatus/detailedMetricsStatus collected。画面モデル、全有効接続組の各leg品質、セルを跨ぐ一意母集団、各validator probeの最初のerror以降、鮮度・公開資格は未評価。
+
+最終の実source CLI終了0。collector自身の計測は55.337秒、process peak RSS402,907,136 bytes（約384.2 MiB、macOS、呼出側のメモリ内stdout捕捉も含む）。原本7件/store内8 JSONの15ファイルについて、SHA-256・byte数・identityをcollector内と独立した外側のinventoryで前後照合し全件一致。engine/environmentも外側の前後走査で一致した。hash/bytes inventory digestはa96510d56bc64e71a958d757219a39952c1fd376c624dbabb9042a0d45aa0d8a。最終engineFingerprintは37fdb3d42f8d1167d20358d946948bd8e98bedc3fd73402bc56327eacdc38448、contextFingerprintは520f19078d6be6449c9a0c7099048e0606c9a1fb9e7a65a9948216ebaadc01b8。計測レポート・candidate payloadは永続化せず、本節には検証要約だけを記録した。

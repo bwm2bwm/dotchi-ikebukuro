@@ -123,8 +123,8 @@ class QualityMetricsTests(unittest.TestCase):
         self.assertEqual(summary['cellCount'], 48); self.assertEqual(summary['unevaluableCellCount'], 0)
         self.assertEqual(summary['consistency'], {'PASS': 144})
         keys = [tuple(m['dimensions'][k] for k in ('serviceDate', 'stationId', 'routeId')) + (m['metricId'],) for m in a['metrics']]
-        self.assertEqual(keys, sorted(keys)); self.assertEqual(len(set(keys)), 48 * 9)
-        self.assertTrue(all(set(m) == {'metricId','dimensions','availability','value','unit','reasonCodes','evidenceRefs'} for m in a['metrics']))
+        self.assertEqual(keys, sorted(keys)); self.assertEqual(len(set(keys)), 48 * (9 + len(metrics.details.UNITS)))
+        self.assertTrue(all(set(m) == {'metricId','dimensions','availability','value','unit','reasonCodes','evidenceRefs','numerator','denominator'} for m in a['metrics']))
         self.assertEqual(before, metrics._inventory(self.store, self.source))
         self.assertEqual(tree, sorted(p.relative_to(self.fixture.helper.root).as_posix() for p in self.fixture.helper.root.rglob('*')))
         self.assertNotIn('trip-6-', json.dumps(a))
@@ -153,7 +153,7 @@ class QualityMetricsTests(unittest.TestCase):
         self.assertEqual(summary['unevaluableCellCount'], 2)
         self.assertEqual(summary['knownCellCounts']['G'], 46)
         unknown = [m for m in report['metrics'] if m['availability'] == 'out-of-range']
-        self.assertEqual(len(unknown), 18); self.assertTrue(all(m['value'] is None for m in unknown))
+        self.assertEqual(len(unknown), 2 * (9 + len(metrics.details.UNITS))); self.assertTrue(all(m['value'] is None for m in unknown))
         self.assertEqual(report['collectionStatus'], 'partial')
 
     def test_generator_and_projection_failure_keep_confirmed_metrics(self):
@@ -232,10 +232,11 @@ class QualityMetricsTests(unittest.TestCase):
             altered['checks']['inputEnd']['comparisonReadiness'] = readiness
             with patch.object(metrics, 'collect_metrics', return_value=altered), redirect_stdout(io.StringIO()):
                 self.assertEqual(metrics.main(['--store', str(self.store), '--source-dir', str(self.source)]), expected)
-        # The collector can run with unresolved coverage; public bundle validation is never bypassed/changed.
-        with patch.object(metrics.v2, '_route_state', side_effect=AssertionError('coverage evaluated')), \
+        # The collector can diagnose unresolved coverage without calling the public bundle gate.
+        with patch.object(metrics.v2, '_route_state', wraps=metrics.v2._route_state) as coverage, \
              patch.object(metrics.v2, 'validate_bundle', side_effect=AssertionError('public gate called')):
             self.assertEqual(self.collect()['basicMetricsStatus'], 'collected')
+            self.assertTrue(coverage.called)
 
     def test_cli_actual_current_engine_with_synthetic_sources(self):
         out = io.StringIO()
