@@ -1333,3 +1333,34 @@ CLI: `python3 -B scripts/odpt_display_diff.py --baseline-store <store> --candida
 baseline収集81.935秒、candidate収集77.931秒、比較処理全体168.193秒、独立外側の前後照合込み171.269秒（回帰等と一部並行）。親peak RSS418,430,976 bytes、Node子最大144,384,000 bytes（合計peakではない）。各側generatorは8駅、駅日生成24回・runner成功起動32回。両側合計48駅日生成/64 runner起動で、同一Snapshotでも片側の結果を流用せず順次再評価する。各側内部の日別cacheにより同じ駅日をscenarioごとに再生成しない。環境probeのNode起動数は未計測。原本7/store8 JSON（同一path実体15ファイル）のSHA-256/bytes/identityとengine/runtime 27依存が、collector・外側比較・独立QAで前後一致。レポート/candidate/原本コピーの保存は行わない。
 
 **合成・回帰検証:** 新規19テストを含むPython ODPT統合301件PASS（497.258秒）、既存Node関連63件PASS。自己比較、件数/意味内容/順序の分離、重複多重度・best曖昧性、IDのみ変更、欠損とknown/0、direct条件の分離、line/departureと上限、best非表示・mark、条件/engine/runtime差、入力/response不正、途中の原本/engine変更、1,024セルの全件集計と1,000件保持、unchanged大量時の終了0、順序/digest決定性、既存collector/gate独立を確認。実異世代検出は合成のみ。変更は新比較module/test、engine seed、指定3文書の6ファイル。git diff --check PASS、commit/push/merge/deployなし。
+
+
+### Phase 2C-3c-2 運行状態・始発終電・UNKNOWN詳細表示差分（2026-11-04）
+
+既存 `dotchi.odpt.display-model-diff` / schemaVersion 1と4引数CLIを維持し、`odpt_display_state_diff.py` を比較層のhelperとして追加した。既存collectorでbaseline→candidateを同じengine/context/runtime・固定観測時刻により順次収集する。helperは静的import経由でengineへ自動追加（28依存）。collector/generator/matcher/adapter/runner・公開v2 gateは変更しない。
+
+基本 `summary` / `cellDiffs` / `basicDisplayDiffStatus` は従来のitems/groups/best比較の意味を維持。追加の `stateDiffs` はfeature・両値・availability・reasonCodesと観測時刻×駅×scenario（路線featureではserviceDate×routeIdも追加）を保持する。`stateSummary` は全featureのchanged/unchanged/not-evaluable件数、路線/terminalKnown/serviceStateの遷移件数、checks・不整合件数を集計する。`stateTransitions` は変化した既知遷移の明細、`stateChecks` は不整合明細、`stateFindings` はセル単位の状態finding。最上位 `findings` は基本/状態タグを同じセルへ統合し重複生成を抑える。`displaySummary` は基本/状態のセル集合を統合して件数を返す。changedとnot-evaluable/inconsistentの件数は独立で、同じセルが両方へ入ることがある。`stateDisplayDiffStatus` を追加し、確定状態差分があれば未評価や不整合が併存してもchangedを保持する。全体comparisonStatus partial、無差分時のdisplayDiffStatus indeterminateはDOM/描画等の未評価のため維持する。
+
+routeStateは既存8状態をそのまま観測し、route候補数/有無とcoverage由来のcandidateEligible/scheduledTripCount/data_insufficientの影響を別featureにする。欠route/dateをno_candidatesへ補完しない。未知状態値が比較層へ到達した場合はraw値とunknown-route-state-valueを未評価明細へ保持し、既知状態へ変換しない。上流runner/collectorが契約違反として拒否した応答は、従来の不正response扱いを維持し未知値を正常化しない。terminalKnownは日×路線でtrue/false遷移を集計し、lost/gainedを確認対象とする。serviceStateはboard値を比較し、候補ありrunning／候補なし当日2路線集約との整合を独立checkする。data_insufficientを新しいserviceStateとして補完しない。
+
+始発案内はnot_started/start_unconfirmed、終電案内はended/terminal_unconfirmedと、選択されたitems内のisLastDeparture/terminalBasis、意味内容、groups内存在を観測する。「終電」「直通終電」のlabel根拠を分離し、cardLimitで終電候補が非表示になる件数も保持する。ID/trip_idで終電を世代間対応付けず、選択されないalternativeやboard外の最終候補を推定しない。labelは既存rendererのbasis対応に基づくモデル観測であり、DOMの最終文言・ブラウザー描画は未評価。
+
+UNKNOWNは日×路線にboardが保持するnoValidArrivalCount/otherUnknownCountを追跡し、UNKNOWNなし・あり・始発未確認・終電未確認・coverage由来の未確認・QA evidence欠損を分離する。駅×日で両路線へ同じUNKNOWN件数が伝播することと、当日のboard監査件数との整合を検査する。INFOはboardのauditEvidenceへ保持するがUNKNOWNへ昇格させない。WARNINGはQA state/boardに独立件数として露出しないため、その件数自体はnotEvaluatedに残し、既存converterがquality_warningをUNKNOWNへ加算しないことを合成テストで確認する。生routeCoverage.dataStateもboardにはないため推定しない。coverage不足とUNKNOWNを同一原因にしない。
+
+日付境界featureは観測JST暦日、board serviceDate、必要/観測3日envelope、各表示候補の元serviceDate・routeId・departure epoch・発車JST日付の多重集合を比較する。時刻文字列は使わない。24時超便を翌serviceDateへ移動せず、同じ固定観測時刻で候補の出現消失を比較する。異なる観測時刻間を旧新比較セルとして対応付けない。
+
+分類はroute-state-changed、terminal-certainty-lost/gained、service-state-changed、start-guidance-changed、terminal-guidance-changed、unknown-suppression-changed、coverage-state-changed、not-evaluableに加え、route-candidates-changed、date-boundary-changed、inconsistency。品質影響はnot-assessedであり、確定性喪失/改善候補はダイヤの正当性・公開資格の証明ではない。全件比較/件数集計の後、changed/not-evaluable/inconsistency明細を各リスト既定1,000件（API最大10,000）まで保持し、省略数・detail_limit_reached/partialを記録する。unchangedは集計のみで上限消費・終了2を起こさない。既存のcollector上限超過による欠セルは未評価を維持する。時刻/駅/scenario/日/route/feature順の決定性を保持し、timings/resourcesはdigestから除外する。
+
+CLIは基本summaryにstate_summary/display_summary、遷移・certainty/始発終電/UNKNOWN/serviceState等のfeature件数とexit_codeを追加。原本・旅程・label本文は出力しない。0=比較成立（差分あり・全体partialも許容）、2=条件差/局所未評価/不整合/必要明細省略/引数不正、3=入力不正/途中変更、4=入力・環境利用不能。比較結果・candidate・原本コピーの永続化は行わない。
+
+**既定実source自己比較:** 保存済みPhase 1C storeと対応原本7件を両側へ使用。2026-10-29 12:00 JST×8駅×4scenario=32セル、両側items576/cards192/best・表示mark32。基本差分0、routeState/terminalKnown/coverage/routeCandidates/始発/終電/UNKNOWN各192比較、serviceState/dateBoundary各32比較はすべてunchanged。routeState遷移はended→ended64、not_started→not_started64、running→running64、terminalKnown true→true192、serviceState running→running32。changed0/unchanged32、局所未評価/不整合/確定finding/省略0、両側計2,304 checks PASS。basic/stateの既知範囲unchanged、overall partial/indeterminate、CLI終了0。
+
+baseline73.368秒、candidate83.507秒、比較全体164.729秒、独立照合込みQA全体167.675秒。親peak RSS422,023,168 bytes、Node子最大145,080,320 bytes（macOS、合算peakではなく、回帰と一部並行）。各側24駅日生成・32 runner成功起動、計48生成/64起動。環境probeのNode起動数は未計測。原本7/store8 JSONの全15実体についてSHA-256/byte数/device/inode/size/mtime/ctimeが前後一致し、engine/runtime28依存も独立走査で一致。比較digestはbd6a53f23c59510d7dc8c63ad085c9b494084817cc0f3693adf93e0fc061c16c。実異世代の変化検出は合成fixtureのみ。
+
+**実source境界追加QA:** 既存21時刻の境界集合からJST 10/29 23:59:59、10/30 00:00:00・00:12:59・00:13:00の4時刻を固定。旅程日28〜30と補助日31により必要3日を用意し、4×8駅×4scenario=128セルを両側順次比較した。両側items/cards332（直通312/乗換20）、best・表示mark96、0候補32セル。候補はすべて元の10/29 serviceDateを維持。routeState/terminalKnown/始発/終電/UNKNOWN/coverage/候補数は各768比較、serviceState/dateBoundaryは各128比較がすべてunchanged。観測routeStateはdata_insufficient96/ended160/not_started352/running160、terminalKnown true672/false96、serviceState running96/not_started32で、補助日のcoverage不足も補正しない。changed/局所未評価/不整合/確定finding/省略0、9,216 checks PASS、全体partial/indeterminate、終了0。
+
+境界QAはbaseline175.641秒/candidate187.940秒/比較全体369.693秒、独立照合込み372.256秒。親peak RSS426,311,680 bytes、Node子最大144,195,584 bytes（回帰等と一部並行）。各側32駅日生成/128 runner起動、合計64生成/256起動。原本7/store8 JSONの15実体のhash/bytes/stat identity、engine/runtime28依存が前後一致。digestは57e4709b81236d258d886efc52c2b718feeb9af40c487fa74f3ac3d973e9131e。全駅・全路線固有の境界を網羅したものではない。
+
+**合成・回帰:** 状態helperの合成12テストを追加し、既存比較testへ局所未評価と確定状態差分の併存検証を追加（新規計13件）。既存adapterで全8状態・始発60分/発車ちょうど/最終候補前後・直通終電/上限外カード・UNKNOWN両路線伝播・INFO/WARNING非昇格・QA欠損/coverage不足/欠日・23:59→00:00と24時超・未知値保持・ID/フォーマット非依存・1,024セルの全件集計/1,000件上限・決定性/digestを検証。既存基本items/groups/best、条件/engine/runtime差、途中変更、CLI終了コード、公開gate独立も回帰した。ODPT Python313件一括PASS（571.732秒）、追加WARNINGテストを含む状態12件を再実行PASS（追加後ODPT対象314件）、追記した合成異世代Snapshot検証も再実行PASS。QA準備Python7件・関連Node83件PASS。QA準備のlocalhost bind検査はsandbox制限で失敗したため、許可されたsandbox外再実行で7件PASSを確認した。
+
+変更は比較module/test、新helper/test、指定3文書の7ファイルのみ。実データ公開未承認を維持し、DOM/CSS/描画・性能最適化・Phase 2C-3d以降・鮮度/公開資格は対象外。API/新規取得、原本/store変更・複製・移動、applicationPeriod/publicationApproved変更、Actions/Cloudflare/Deploy、Commit/Push/Mergeは行っていない。

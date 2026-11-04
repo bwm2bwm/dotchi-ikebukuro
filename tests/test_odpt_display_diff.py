@@ -203,7 +203,7 @@ class DisplayDiffIntegrationTests(unittest.TestCase):
         self.assertEqual(before,[m.itinerary_metrics._inventory(*p) for p in ((self.a,self.a_source),(self.b,self.b_source))])
         again,_=self.compare();self.assertEqual(r['comparisonDigest'],again['comparisonDigest'])
 
-    def test_ids_only_and_deferred_terminal_state_fields_do_not_change_basic_diff(self):
+    def test_ids_and_state_fields_leave_basic_diff_independent(self):
         def mutate(r,n):
             if n==2:
                 for c in r['cells']:
@@ -215,7 +215,38 @@ class DisplayDiffIntegrationTests(unittest.TestCase):
                     recompute_cell(c)
                 reseal_report(r)
         r,_=self.compare(mutate);self.assertEqual(r['summary']['changedCellCount'],0)
-        self.assertEqual(diff.exit_code(r),0)
+        self.assertEqual(r['basicDisplayDiffStatus'],'unchanged')
+        self.assertEqual(r['stateDisplayDiffStatus'],'changed')
+        self.assertEqual(r['displayDiffStatus'],'changed')
+        self.assertEqual(r['stateSummary']['featureCounts']['serviceState']['changed'],32)
+        # This deliberately inconsistent board still preserves its observed changes.
+        self.assertGreater(r['stateSummary']['inconsistencyCount'],0)
+        self.assertEqual(diff.exit_code(r),2)
+
+    def test_state_only_change_and_local_missing_feature_keep_changed(self):
+        def mutate(r,n):
+            if n==2:
+                for c in r['cells']:
+                    board=c['model']
+                    for s in board['routeStates'].values():
+                        s['noValidArrivalCount']=1;s['terminalKnown']=False
+                        if s['state']=='not_started':s['state']='start_unconfirmed'
+                        if s['state']=='ended':s['state']='terminal_unconfirmed'
+                    board['noValidArrivalCount']=1;board['noValidArrival']=True
+                    for i in board['items']:i['isLastDeparture']=False
+                    recompute_cell(c)
+                # Missing evidence stays local while the other certainty changes survive.
+                del r['cells'][0]['model']['routeStates']['2026-10-28|6']['terminalKnown']
+                c=r['cells'][0];c['boardDigest']=m._js_digest(c['model'])
+                reseal_report(r)
+        r,_=self.compare(mutate)
+        self.assertEqual(r['basicDisplayDiffStatus'],'unchanged')
+        self.assertEqual(r['displayDiffStatus'],'changed')
+        self.assertEqual(r['stateSummary']['changedCellCount'],32)
+        self.assertEqual(r['stateSummary']['notEvaluableCellCount'],1)
+        self.assertEqual(r['stateSummary']['inconsistencyCount'],0)
+        self.assertEqual(diff.exit_code(r),2)
+        self.assertEqual(len(r['findings']),32)
 
     def test_known_difference_survives_a_local_unavailable_cell(self):
         def mutate(r,n):
@@ -312,6 +343,8 @@ class DisplayDiffIntegrationTests(unittest.TestCase):
                 quality_context=self.context,display_context=self.display)
         self.assertEqual(r['inputReadiness'],'ready');self.assertEqual(r['displayDiffStatus'],'changed')
         self.assertEqual(r['summary']['changedCellCount'],32);self.assertEqual(diff.exit_code(r),0)
+        self.assertEqual(len(r['findings']),32)
+        self.assertTrue(all('date-boundary-changed' in f['classifications'] for f in r['findings']))
         self.assertNotEqual(r['contentFingerprints']['baseline'],r['contentFingerprints']['candidate'])
 
     def test_direct_filter_scenarios_remain_separate(self):

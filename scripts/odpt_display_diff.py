@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private basic display-model comparison. Sequential, read-only, memory only."""
+"""Private display-model comparison. Sequential, read-only, memory only."""
 from __future__ import annotations
 import argparse
 from collections import Counter
@@ -13,15 +13,18 @@ import time
 
 if __package__:
     from . import odpt_display_metrics as collector
+    from . import odpt_display_state_diff as state_diff
 else:
     import odpt_display_metrics as collector
+    import odpt_display_state_diff as state_diff
 quality, display = collector.quality, collector.display
 SIDES = ('baseline', 'candidate')
 DIMS = ('observationInstant', 'stationId', 'scenarioId')
 DEFAULT_DETAIL_LIMIT = 1000
 MAX_DETAIL_LIMIT = 10000
 NOT_EVALUATED = sorted((set(collector.NOT_EVALUATED)-{'display-model-diff'}) | {
-    'route-states-detailed-diff', 'terminal-start-unknown-detailed-diff',
+    'raw-route-coverage-data-state', 'warning-count-not-exposed-by-board',
+    'last-eligible-candidate-outside-board',
     'cross-generation-train-or-journey-identity', 'environment-probe-process-count'})
 COUNT_METRICS = ('itemsCount', 'groupsCardCount', 'directCount', 'transferCount', 'visibleBestMarkerCount')
 ITEM_FIELDS = ('departureAtMs', 'arrivalAtMs', 'routeId', 'serviceDate', 'journeyKind', 'kind', 'destination')
@@ -137,7 +140,8 @@ def _compact_cell(cell, scenario, dates, snapshot_id):
     values = {k:m[k] for k in COUNT_METRICS if k!='visibleBestMarkerCount'}
     values.update(visibleBestMarkerCount=m['displayedBestMarkCount'], routeCardCounts=route_counts,
         serviceDateItemsCounts={d:date_counts.get(d,0) for d in dates}, best=best, bestInGroups=visible_best)
-    return {'availability':'known','reasonCodes':[],'values':values,'items':normalized,'groups':groups,'markers':markers}
+    return {'availability':'known','reasonCodes':[],'values':values,'items':normalized,'groups':groups,'markers':markers,
+            'stateEvidence':state_diff.compact_board(model,dates,scenario,semantic_item)}
 
 
 def _compact_report_impl(report, q, d, engine, snapshot_id, fingerprint):
@@ -258,10 +262,11 @@ def _sequence_diff(a,b,budget,addresses_a=None,addresses_b=None):
         'contentChanges':changes,'positionChangeCount':position_count,'positionChanges':positions}
 
 
-def compare_cells(a,b,expected,*,detail_limit=DEFAULT_DETAIL_LIMIT):
+def compare_cells(a,b,expected,*,detail_limit=DEFAULT_DETAIL_LIMIT,evaluate_states=False):
     """Compare compact, already validated evidence; missing cells remain unknown."""
     budget=Details(detail_limit);counts=Counter();totals={};records=[];findings=[];classes=Counter()
-    for k in sorted(expected):
+    expected=sorted(expected);basic_changed=set();basic_unknown=set()
+    for k in expected:
         sides=[index.get(k) for index in (a,b)]
         cell={'dimensions':dict(zip(DIMS,k)), 'availability':{side:(c['availability'] if c else 'missing') for side,c in zip(SIDES,sides)},
               'comparisonAvailability':'known','reasonCodes':[],'changed':False,'classifications':[],'metricDiffs':[]}
@@ -327,6 +332,8 @@ def compare_cells(a,b,expected,*,detail_limit=DEFAULT_DETAIL_LIMIT):
             if cell['changed']:counts['confirmedFindingCount']+=1
         if not cell['changed'] and cell['comparisonAvailability']=='known':counts['aggregatedUnchangedCellCount']+=1
         classes.update(cell['classifications'])
+        if cell['changed']:basic_changed.add(k)
+        if cell['comparisonAvailability']!='known':basic_unknown.add(k)
         if cell['changed'] or cell['comparisonAvailability']!='known':
             retained=budget.retain('cellDiffs',cell)
             if retained is not None:records.append(retained)
@@ -339,7 +346,30 @@ def compare_cells(a,b,expected,*,detail_limit=DEFAULT_DETAIL_LIMIT):
         'ambiguousCellCount','confirmedFindingCount','bestChangedCellCount','bestMarkerChangedCellCount','baselineBestNotVisibleCellCount','candidateBestNotVisibleCellCount')}
     summary.update(metricDiffTotals=totals,classificationCounts=dict(sorted(classes.items())),
                    unchangedDetailsAggregatedCount=counts['aggregatedUnchangedCellCount'])
-    return {'cellDiffs':records,'findings':findings,'summary':summary,'omittedDetails':dict(sorted(budget.omitted.items()))}
+    result={'cellDiffs':records,'findings':findings,'summary':summary}
+    if evaluate_states:
+        states,changed,unknown,inconsistent=state_diff.compare_states(a,b,expected,budget)
+        result.update(states)
+        # One finding per observed cell, with independent certainty and evaluation status.
+        merged={tuple(f['dimensions'][d] for d in DIMS):copy.deepcopy(f) for f in findings}
+        for f in states['stateFindings']:
+            k=tuple(f['dimensions'][d] for d in DIMS)
+            if k not in merged:merged[k]=copy.deepcopy(f)
+            else:
+                m=merged[k];m['classifications']=sorted(set(m['classifications'])|set(f['classifications']))
+                m['reasonCodes']=sorted(set(m['reasonCodes'])|set(f['reasonCodes']))
+                m['confirmedDifference'] |= f['confirmedDifference']
+                if m['confirmedDifference']:m['code']='display-cell-changed'
+        all_findings=[merged[k] for k in sorted(merged)]
+        result['findings']=all_findings[:detail_limit]
+        if len(all_findings)>detail_limit:budget.omitted['mergedFindings']+=len(all_findings)-detail_limit
+        union_changed=basic_changed|changed;union_unknown=basic_unknown|unknown
+        result['displaySummary']=dict(cellCount=len(expected),changedCellCount=len(union_changed),
+            unchangedCellCount=len(set(expected)-union_changed-union_unknown-inconsistent),
+            notEvaluableCellCount=len(union_unknown),inconsistentCellCount=len(inconsistent),
+            confirmedFindingCount=len(union_changed))
+    result['omittedDetails']=dict(sorted(budget.omitted.items()))
+    return result
 
 
 def comparison_digest(result):
@@ -352,8 +382,10 @@ def compare_display_models(baseline_store,candidate_store,baseline_source_dir,ca
         root=quality.ROOT,detail_limit=DEFAULT_DETAIL_LIMIT):
     result=dict(contract='dotchi.odpt.display-model-diff',schemaVersion=1,baselineSnapshotId=None,candidateSnapshotId=None,
         contentFingerprints=None,evaluationContexts=None,engineFingerprint=None,environment=None,
-        baselineSummary=None,candidateSummary=None,cellDiffs=[],findings=[],checks={},notEvaluated=list(NOT_EVALUATED),
+        baselineSummary=None,candidateSummary=None,cellDiffs=[],stateDiffs=[],stateTransitions=[],stateFindings=[],
+        stateChecks=[],stateSummary=None,displaySummary=None,findings=[],checks={},notEvaluated=list(NOT_EVALUATED),
         comparisonStatus='failed',displayDiffStatus='indeterminate',basicDisplayDiffStatus='indeterminate',
+        stateDisplayDiffStatus='indeterminate',
         inputReadiness='ready',reasonCodes=[],summary=None,omittedDetails={},timings={},resources={})
     problems=[];before={};compact=[];compared=None;paths=[(Path(baseline_store),Path(baseline_source_dir)),(Path(candidate_store),Path(candidate_source_dir))]
     started=time.perf_counter()
@@ -381,14 +413,14 @@ def compare_display_models(baseline_store,candidate_store,baseline_source_dir,ca
                                                         detail_limit=collector.MAX_DETAIL_LIMIT)
                 result['timings'][side+'Seconds']=time.perf_counter()-phase
                 compact.append(_compact_report(report,q,d,e,result[side+'SnapshotId'],result['contentFingerprints'][side]))
-                del report  # Keep only basic semantic evidence before evaluating the other side.
+                del report  # Keep compact semantic/state evidence before evaluating the other side.
                 result[side+'Summary']=compact[-1]['summary']
                 result['checks'][side+'ExecutionCounts']=compact[-1]['execution']
                 result['checks'][side+'CollectionOmissions']=compact[-1]['omittedDetails']
                 if compact[-1]['omittedDetails'].get('cells'):
                     result['notEvaluated'].append(side+'-collector-cell-details-omitted')
             expected=itertools.product(ds[0]['observationInstants'],qs[0]['stationIds'],(s['id'] for s in ds[0]['displayScenarios']))
-            compared=compare_cells(compact[0]['cells'],compact[1]['cells'],expected,detail_limit=detail_limit)
+            compared=compare_cells(compact[0]['cells'],compact[1]['cells'],expected,detail_limit=detail_limit,evaluate_states=True)
         # Covers both collections and the comparison itself, including a failed report validation.
         end=validate();result['checks']['inputEnd']=end
         if end['comparisonReadiness']!='ready':problems.append((end['comparisonReadiness'],end['reasonCodes']))
@@ -416,12 +448,19 @@ def compare_display_models(baseline_store,candidate_store,baseline_source_dir,ca
         result['reasonCodes']=sorted({code for _,codes in problems for code in codes})
         result['findings']=[{'code':'context-mismatch' if 'context' in code else 'not-evaluable','reasonCodes':[code],'confirmedDifference':False} for code in result['reasonCodes']][:limit]
         result['baselineSummary']=result['candidateSummary']=None
-        result['notEvaluated']=sorted(set(result['notEvaluated'])|{'basic-display-model-diff'})
+        result['notEvaluated']=sorted(set(result['notEvaluated'])|{'basic-display-model-diff','detailed-display-state-diff'})
     elif compared is not None:
         result.update(compared);s=result['summary']
         result['comparisonStatus']='partial' if s['comparedCellCount'] else 'failed'
         if s['confirmedFindingCount']:result['displayDiffStatus']=result['basicDisplayDiffStatus']='changed'
         elif not s['notEvaluableCellCount'] and not s['ambiguousCellCount']:result['basicDisplayDiffStatus']='unchanged'
+        ss=result['stateSummary']
+        if ss['confirmedFindingCount']:result['displayDiffStatus']=result['stateDisplayDiffStatus']='changed'
+        elif not ss['notEvaluableCellCount'] and not ss['inconsistencyCount']:result['stateDisplayDiffStatus']='unchanged'
+        result['checks']['stateEvidence']={'status':'inconsistency' if ss['inconsistencyCount'] else 'partial' if ss['notEvaluableCellCount'] else 'PASS',
+            'checkCount':ss['checkCount'],'inconsistencyCount':ss['inconsistencyCount']}
+        if ss['notEvaluableCellCount']:result['notEvaluated'].append('some-display-state-features')
+        if ss['inconsistencyCount']:result['notEvaluated'].append('inconsistent-display-state-evidence')
         if s['notEvaluableCellCount']:result['notEvaluated'].append('some-display-cells')
         if s['ambiguousCellCount']:result['notEvaluated'].append('semantic-duplicate-correspondence')
         if result['omittedDetails']:
@@ -440,6 +479,8 @@ def exit_code(result):
     if result['inputReadiness']=='unavailable':return 4
     s=result['summary']
     if result['inputReadiness']!='ready' or s is None or not s['comparedCellCount'] or s['notEvaluableCellCount'] or s['ambiguousCellCount'] or result['omittedDetails']:return 2
+    ss=result.get('stateSummary')
+    if ss and (ss['notEvaluableCellCount'] or ss['inconsistencyCount']):return 2
     return 0
 
 
@@ -450,12 +491,14 @@ def main(argv=None):
     r=compare_display_models(a.baseline_store,a.candidate_store,a.baseline_source_dir,a.candidate_source_dir)
     import json
     print('summary='+json.dumps(r['summary'],sort_keys=True))
+    print('state_summary='+json.dumps(r.get('stateSummary'),sort_keys=True))
+    print('display_summary='+json.dumps(r.get('displaySummary'),sort_keys=True))
     print('comparison_status='+r['comparisonStatus']+' display_diff_status='+r['displayDiffStatus']+' basic_display_diff_status='+r['basicDisplayDiffStatus'])
     print('not_evaluated='+','.join(r['notEvaluated']))
     print('reasons='+(','.join(r['reasonCodes']) or 'none'))
     print('comparison_digest='+r['comparisonDigest'])
     print('timings='+json.dumps(r['timings'],sort_keys=True));print('resources='+json.dumps(r['resources'],sort_keys=True))
-    return exit_code(r)
+    code=exit_code(r);print('exit_code='+str(code));return code
 
 
 if __name__=='__main__':raise SystemExit(main())

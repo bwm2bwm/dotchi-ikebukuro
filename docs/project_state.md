@@ -24,6 +24,8 @@ Phase 2C-3b-2で非公開単一Snapshot表示collector `odpt_display_metrics.py`
 
 Phase 2C-3c-1で独立した非公開表示モデル基本差分CLI `odpt_display_diff.py` を追加。同じ凍結engine/旅程・表示contextで既存collectorをbaseline→candidateの順に実行する。IDを除いた選択journey内容の多重集合・順序、groupsとbest/表示マークを比較し、重複の曖昧性と評価不能を保持する。unchangedは集計し、actionable明細だけ上限保持。routeStates/始発終電UNKNOWN詳細分類とDOM/視覚品質は未評価なので全体partial/indeterminate、確定差分があればchanged。engine依存は比較自身を加え27ファイル。
 
+Phase 2C-3c-2で同CLIへboard観測範囲の詳細状態差分を追加。日×路線のrouteStates/terminalKnown、board serviceState、始発/終電案内・終電候補のgroups内/上限外表示・UNKNOWN抑止・JST暦日とserviceDate/発車epochの対応を比較する。基本summary/items/groups/bestの意味は維持し、stateSummary/stateDiffs/stateTransitions/stateChecksと統合displaySummaryを追加。欠損・未知状態値・不整合と確定差分を独立に保持し、品質悪化や公開資格に変換しない。全件集計、明細リスト別既定1,000件上限、unchanged集約、決定的digestと終了コード0/2/3/4を維持。既定32セルの実source自己比較は基本・全状態差分0、整合2,304 checks PASS・終了0。終電/日付境界4時刻の追加128セルも全差分0・9,216 checks PASS・終了0。DOM/視覚品質、board外の最終候補、生coverage dataState/WARNING件数、鮮度・公開資格は未評価、全体partial/indeterminateを維持。helperの自動依存追跡でengineは28ファイル。実データ公開未承認・既存generator/matcher/adapter/公開gateは維持。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。
