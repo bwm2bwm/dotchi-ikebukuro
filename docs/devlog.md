@@ -901,3 +901,14 @@
 - 既存Source契約/inventory/store/compat/basic diff/ODPT6 source比較/GTFS loader・6table比較/matcher/itinerary/snapshot QA/public v2を含む関連回帰183件PASS（142.307秒）。最終CLI表示・成功系assertを含む統合7件もPASS。git diff --check PASS。
 - 実store/7原本の同一Snapshot自己比較で11table比較成立、7 source既知差分0。GTFS trips補助関係とStationTimetable opaque keyを保持し、GTFS/全体partial/indeterminate。旧解析17.022秒/新16.262秒、比較4.283秒、全体44.614秒、peak RSS約592.4 MiB。15ファイルhash/bytes前後一致。実世代間比較ではない。
 - 変更は新module/test、既存GTFS loader/比較、指定3文書のみ。applicationPeriod/publicationApproved、ODPT既存比較、取得/QA/public v2/synthetic/release-managed/Actions/Cloudflareは未変更。API/新規取得/原本・store変更や複製/結果persist/鮮度/同一ダイヤ/公開資格/Commit/Push/Mergeなし。
+
+
+## 2026-11-04 — ODPT-2G Phase 2C-2a 品質比較入力検証
+
+- 開始branch main、HEAD `80348cc770f9a154b148025e6b18cf3283ea9aaf`、cleanを確認。指定資料/コード、Phase 2C-1調査、station mappingと定数、直接・間接importを調査した。
+- `scripts/odpt_quality_input.py` と合成fixtureの `tests/test_odpt_quality_input.py` を追加。strict evaluationContext、canonical fingerprint、依存15ファイル/AST mapping/実行環境のengine manifest、条件一致分類、両storeと14原本のread-only binding・前後検証を実装。既存fingerprint/比較/gateは変更なし。
+- Phase 2C-1の3段階・分母/欠損・同一engine/context再計算・公開資格との分離をresearchへ採用契約として記録。初期QA日2026-10-28〜30、8駅/route6・9/池袋発、wait60〜3600、cross-date=false。observation/scenarioは未評価で、旅程・metrics・差分・表示モデルを実装しない。
+- 合成15テストPASS。正常ready、strict JSON/context型・日付/駅/路線/wait、canonical順序、条件差/不足/改ざん、engine改ざん・依存欠落/変更・runtime差、station mapping実装差、store契約、原本欠落/hash不一致/読取中・終了時変更、CLIを検証。
+- 品質入力15件と既存Phase 2A/2B関連の合計117件PASS（11.817秒）。engineの現在値との完全一致を必須にした最終状態でも対象15件PASS。旅程生成を伴う実QAは実行していない。git diff --check PASS。
+- 実Phase 1C store/7原本の同一入力・engine/contextでready。両store契約/contentFingerprint、14原本、engine/env、終了時再検証PASS。15ファイルhash/byte数前後一致。約6.879秒。Node24.15.0/ICU78.2/CPython。旅程生成/metrics/画面モデルの実行なし。
+- 変更は新module/testと指定3文書のみ。API/新規取得、原本/store複製・変更、v2 gate、applicationPeriod/publicationApproved、公開資格、Actions/Cloudflare/Deploy、Commit/Push/Mergeなし。
