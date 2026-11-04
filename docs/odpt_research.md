@@ -1090,3 +1090,22 @@ GTFS findings/ambiguitiesは合計1,000件まで保持し、全件のtable集計
 CLI: `python3 -B scripts/odpt_gtfs_semantic_diff.py --baseline-store <absolute-store> --candidate-store <absolute-store> --baseline-source-dir <absolute-raw-dir> --candidate-source-dir <absolute-raw-dir>`。差分件数・coverage・未評価table・calendar状態・固定code・計測値のみ表示する。入力/構造/同一性不正、Calendar評価不能・上限、詳細打切りは終了2。対象範囲の比較完了は差分の有無によらず0（意図した5table未評価や保持された未知fieldによるpartialは明示して許容）。既存CLIの終了コードは変更しない。
 
 実自己比較QAでは6tableがcomplete/equivalent、変更0、GTFS partial/全体indeterminate、未評価5table。共通期間2026-09-19〜2027-03-12、350 service-date組、運行有無差0。原本7件/store8 JSON計15ファイルのhash/bytesは前後一致。旧/新解析・compact化・表現検査各14.871秒、比較3.083秒、全体37.861秒、peak RSS584,773,632 bytes（macOS、約558 MiB）。findings/ambiguities/打切りはいずれも0。loaderのshape/block補助関係未評価も保持する。両世代を同時に保持する前にloaderのcellsと未評価5tableの解析recordを解放し、比較には対象6tableの正規化recordと表現証拠hashだけを残す。今後は表現検査とloaderの二重CSV走査の共有化が最適化候補だが、今回は大規模変更しない。これは自己比較であり実世代間QAではない。
+
+
+### Phase 2B-2c-3 GTFS全11テーブルと7 source統合（2026-11-04）
+
+profile `dotchi.odpt-gtfs.semantic` / `1.0.0`、semantic diff contract/schemaVersion 1を維持する。新 `scripts/odpt_semantic_compare.py` が既存比較を再利用し、ODPT6 sourceとGTFS11テーブルを統合する。従来のcompare-semantic（ODPT6件）とodpt_gtfs_semantic_diff.py既定CLI（GTFS主要6テーブル）は対象・終了コードを変えない。拡張は明示的なall_tables=True経路のみ。今回鮮度、公開資格、source間同一ダイヤ、結果persistを実装しない。
+
+agencyはagency_id、feed_infoは単一record、fare_attributesはfare_idで対応付け、既知optional属性を含む全値を比較する。feed version/publisher/language/収録期間の変更は記録するがapplicationPeriodへ転記しない。欠落columnと空cell、未知列・enumを保持し、既知差分を消さずpartialとする。
+
+fare_rulesとtranslationsのkey候補を[GTFS公式Reference](https://gtfs.org/documentation/schedule/reference/)の定義と照合した（2026-11-04）。fare_rulesは全fieldのkey（標準fieldはfare_id/route_id/origin_id/destination_id/contains_id）、translationsはtable_name/field_name/language/record_id/record_sub_id/field_value。異なるroute/zoneのfare行やrecord指定・field_value指定の翻訳ルール併存は正当に表現できる。完全に同じ公式keyの重複を正当と認定はしないが、拡張列やselectorによる曖昧性を調べるため新統合経路は全行保持の監査を許容する。loader既定のtranslations重複拒否は維持し、明示preserve_selector_duplicates=Trueのときだけtranslation_key_ambiguous/validity not-confirmedとして保持する。既存profileを黙って一意化・変更しない。
+
+両tableの候補keyはoptional selectorの存在bitと空/値の状態を含む。行順はルールの識別順ではなく、多重集合として完全な正規化rowの一致分を個数付きで差し引く。候補keyが両側で一意ならfield差分を検出する。複数行groupは不変でもambiguous/partialとし、対応を確定せず残差の追加・削除を記録する。重複除去やlast-write上書きはしない。record_idとfield_value指定の優先関係は公式仕様に存在するが、今回その適用後の表示意味は解決せず、混在groupをtranslation_precedence_not_evaluatedとしてpartialにする。stop_timesの数値record_sub_id表記aliasも検出してpartial、推測統合しない。
+
+GTFS tableResultsは11件。各tableにcoverage/semanticStatus、added/removed/modified/ambiguous等のcounts、categories/categoryCounts、checks、findings、ambiguities、unsupportedFields、detailCompleteを保持する。source coverageは全11件に加えloaderの未評価補助関係、Calendar範囲評価、曖昧性・打切りを集約して決める。shape_id/block_id関係は既知ID値を比較できても意味解決済みとはせず、tripsとGTFS全体をpartialとする。詳細はGTFS findings+ambiguities合計1,000件、ODPTは各既存上限を維持し、集計と打切り件数は失わない。
+
+固定7 sourceを単一結果へ統合する。各sourceのcoverage/status/categories/counts/ambiguities/unsupportedFields/checks、topのconfirmedChanges/checks/errorCodesを返す。比較完了範囲ではcomplete/equivalentまたはchanged、未解明・未評価・曖昧・上限ならpartial/indeterminate、意味parse失敗ならfailed/indeterminate。入力bytes/契約が成立した後の一方の意味比較失敗でも他sourceの確定結果を残す。失敗sourceはcountsKnown=false/confirmedChanges=nullとし無差分としない。bytes不一致・store不正等は固定codeで比較失敗。crossSourceConsistencyはnot-evaluated。profile外の鮮度・旅程品質・公開資格はnotEvaluatedに明示し、比較完了をそれらの保証に読み替えない。
+
+新CLI: `python3 -B scripts/odpt_semantic_compare.py --baseline-store <absolute-store> --candidate-store <absolute-store> --baseline-source-dir <absolute-raw-dir> --candidate-source-dir <absolute-raw-dir>`。7 source/11tableの状態・分類・件数・checks・固定理由codeと時間/RSSを表示し、raw値・record key/field値・秘密情報は出力しない。終了0は差分あり/なしを問わず、部分評価の理由を明示した比較結果の生成完了。入力異常・意味parse失敗・詳細上限・Calendar評価不能/上限は2。既存CLIは変更しない。
+
+実自己比較で7 sourceとも既知差分0。Railway/Station/TrainTimetable2件はcomplete/equivalent、StationTimetable2件はopaque keyでpartial/indeterminate。GTFS11tableすべて比較成立、tripsだけ補助関係でpartial、他10件complete。GTFSと全体はpartial/indeterminate。原本7件/store8 JSONのhash/byte数前後一致。旧解析17.022秒、新16.262秒、比較4.283秒、全体44.614秒、peak RSS621,150,208 bytes（約592.4 MiB、macOS）。cellsを解放しながら正規化record/groupだけを保持し、原本・解析結果の余分な複製は避けた。大規模リファクタリングなし。実世代間の検証実績ではない。

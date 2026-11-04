@@ -129,7 +129,7 @@ def _key(name, row):
     return tuple((field in row['cells'], row['cells'].get(field, '')) for field in SCHEMAS[name][2].split())
 
 
-def _table(name, raw):
+def _table(name, raw, *, preserve_selector_duplicates=False):
     try: text = raw.decode('utf-8-sig')
     except UnicodeDecodeError: fail('csv_utf8_invalid')
     _quotes(text)
@@ -156,8 +156,8 @@ def _table(name, raw):
             key = _key(name, row)
             if key in seen:
                 duplicate += 1
-                if name not in {'fare_rules'}: fail('gtfs_key_duplicate')
-                issues.add('fare_rule_key_ambiguous')
+                if name != 'fare_rules' and not (name == 'translations' and preserve_selector_duplicates): fail('gtfs_key_duplicate')
+                issues.add('fare_rule_key_ambiguous' if name == 'fare_rules' else 'translation_key_ambiguous')
             seen.add(key)
             rows.append(row)
             if len(rows) > MAX_ROWS: fail('gtfs_row_limit_exceeded')
@@ -238,7 +238,7 @@ def _references(tables, issues, members):
     return dict(sorted(counts.items()))
 
 
-def parse_gtfs(raw):
+def parse_gtfs(raw, *, preserve_selector_duplicates=False):
     """Return normalized in-memory tables. Bytes API has no source identity claim."""
     if len(raw) > MAX_SOURCE_BYTES: fail('source_size_limit_exceeded')
     issues = set()
@@ -251,7 +251,7 @@ def parse_gtfs(raw):
                 name = member[:-4]
                 if name not in SCHEMAS:
                     issues.add('unsupported_table'); continue
-                tables[name] = _table(name, archive.read(member))
+                tables[name] = _table(name, archive.read(member), preserve_selector_duplicates=preserve_selector_duplicates)
             if not {'agency', 'routes', 'trips', 'stop_times'} <= tables.keys(): fail('gtfs_required_table_missing')
             if not {'calendar', 'calendar_dates'} & tables.keys(): fail('gtfs_service_table_missing')
             if 'translations' in tables and 'feed_info' not in tables: fail('gtfs_feed_info_required')
@@ -277,7 +277,7 @@ def _read(path):
     except SemanticDiffError as exc: fail(exc.code)
 
 
-def load_gtfs(path: Path, source_record=None):
+def load_gtfs(path: Path, source_record=None, *, preserve_selector_duplicates=False):
     """Read one explicit absolute ZIP path; optionally bind to a validated Source record."""
     if not isinstance(path, Path) or not path.is_absolute() or '..' in path.parts: fail('source_path_invalid')
     raw, identity = _read(path)
@@ -287,7 +287,7 @@ def load_gtfs(path: Path, source_record=None):
         if source_record['sourceId'] != 'metro.gtfs': fail('source_record_id_mismatch')
         artifact = source_record['artifact']
         if not artifact or (hashlib.sha256(raw).hexdigest(), len(raw)) != (artifact['sha256'], artifact['sizeBytes']): fail('source_bytes_mismatch')
-    result = parse_gtfs(raw)
+    result = parse_gtfs(raw, preserve_selector_duplicates=preserve_selector_duplicates)
     again, after = _read(path)
     if identity != after or raw != again: fail('source_changed_during_validation')
     if source_record is not None: result['input']['sourceIdentity'] = 'verified'

@@ -4,9 +4,9 @@
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
-ODPT-2G Phase 0〜1D、Phase 2A基本差分、Phase 2B-2a/2b意味比較を実装済み。意味比較対象はODPT JSON 6 source（TrainTimetable、Railway、Station、StationTimetable）で、両storeと両側7原本のhash/byte数を検証する。StationTimetableの動的boolean keyはopaque extensionとしてcoverage partial。GTFSは部分評価のため全体semanticStatusはindeterminate。取得履歴は不明で、鮮度・同一ダイヤ性・旅程品質・公開資格は判定しない。詳細はODPT-2G節とdevlogを参照。
+ODPT-2G Phase 0〜1D、Phase 2A基本差分、Phase 2B-2a/2b意味比較を実装済み。意味比較対象はODPT JSON 6 source（TrainTimetable、Railway、Station、StationTimetable）で、両storeと両側7原本のhash/byte数を検証する。StationTimetableの動的boolean keyはopaque extensionとしてcoverage partial。GTFSの補助関係やStationTimetableのopaque keyは部分評価のため、実自己比較の全体semanticStatusはindeterminate。取得履歴は不明で、鮮度・同一ダイヤ性・旅程品質・公開資格は判定しない。詳細はODPT-2G節とdevlogを参照。
 
-Phase 2B-2c-1では独立read-only GTFS loaderを追加。11テーブルのZIP/CSV安全検証・key/参照検証・日付/時刻/sequence正規化をメモリ内で行う。Phase 2B-2c-2では独立CLIからGTFS運行系6テーブルの意味比較と共通feed期間の運行有無比較を追加。GTFS全体はpartial、残る5テーブルはnot-evaluated。既存compare-semantic CLIのODPT比較・終了コードは維持する。
+Phase 2B-2c-1では独立read-only GTFS loaderを追加。11テーブルのZIP/CSV安全検証・key/参照検証・日付/時刻/sequence正規化をメモリ内で行う。Phase 2B-2c-3でGTFS全11テーブルの意味比較と固定7 sourceの統合を追加。新しいodpt_semantic_compare.pyからcoverage・確定差分・曖昧性・checksを一括確認できる。既存ODPT比較・6テーブルCLIの対象/終了コードは維持する。実自己比較の既知差分は7 sourceとも0、GTFSのshape/block補助関係・StationTimetable opaque keyは未解明のまま。
 
 ## 現在の配信・QA経路
 
@@ -28,7 +28,7 @@ Phase 2B-2c-1では独立read-only GTFS loaderを追加。11テーブルのZIP/C
 - 保存sourceの取得成功日時、最新性、ODPTとGTFSの同一ダイヤ版性。
 - 実データの承認済み `applicationPeriod` と、GTFS feed期間との整合規則。
 - ODPT Newsの確認頻度と担当運用、東京メトロGTFSへの `date=current/next/latest` 適用可否。
-- 新規取得履歴生成、GTFS残り5テーブルの意味比較、7 source全体の比較完了判定、candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
+- 新規取得履歴生成、未知selector・補助参照の意味解明、candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
 - 公開payloadの再構成リスク、表示・クレジット条件の実データ公開適用確認。
 - release-managedのrollback実地確認、旧タブ・cache境界QA。
 - 運行日境界を跨ぐ乗換探索は未実装。
@@ -37,7 +37,7 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. GTFS残り5テーブルの意味比較と全体完了判定、世代別raw保管方式、旅程品質差分を後続Phaseで設計する。
+1. 未知selector・補助関係の評価範囲、世代別raw保管方式、旅程品質差分を後続Phaseで設計する。
 2. Source取得履歴とapplicationPeriod根拠の検証を、差分処理・公開判断から分離して設計する。
 3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
 

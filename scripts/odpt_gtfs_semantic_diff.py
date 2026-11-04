@@ -43,6 +43,9 @@ def _signature(row, excluded=()):
 
 
 def _record_key(table, row):
+    if table in NOT_EVALUATED:
+        return tuple((f in row, 'empty' if row.get(f) is None else 'value', row.get(f) if row.get(f) is not None else '')
+                     for f in loader.SCHEMAS[table][2].split())
     fields = loader.SCHEMAS[table][2].split()
     return tuple(row[field] for field in fields)
 
@@ -75,15 +78,30 @@ def _csv_evidence(raw):
             'lexicalRows': _digest(tuple(sorted(records.items())))}
 
 
-def _compact(path, record):
+def _compact(path, record, *, all_tables=False):
     started = time.perf_counter()
-    parsed = loader.load_gtfs(path, record)
-    result = {'tables': {}, 'input': parsed['input'], 'issues': parsed['errorCodes'], 'period': None}
+    parsed = loader.load_gtfs(path, record, preserve_selector_duplicates=all_tables)
+    table_names = TABLES + NOT_EVALUATED if all_tables else TABLES
+    result = {'tables': {}, 'input': parsed['input'], 'issues': parsed['errorCodes'], 'period': None,
+              'unsupportedTables': sorted(parsed['unsupportedTables']), 'referenceChecks': parsed['referenceChecks']}
     feed = parsed['tables'].get('feed_info', {}).get('rows', [])
     if feed:
         a, b = (feed[0]['values'].get(f) for f in ('feed_start_date', 'feed_end_date'))
         if a and b: result['period'] = (a, b)
-    for table in TABLES:
+    if all_tables and 'translations' in parsed['tables']:
+        tab = parsed['tables']['translations']; aliases = {}; methods = defaultdict(set)
+        for entry in tab['rows']:
+            row = entry['values']; context = tuple(row.get(f) for f in ('table_name','field_name','language'))
+            methods[context].add('record' if row.get('record_id') else 'value')
+            sub = row.get('record_sub_id')
+            if row['table_name'] == 'stop_times' and sub:
+                key = (*context, row.get('record_id'), int(sub), row.get('field_value'))
+                if key in aliases and aliases[key] != sub:
+                    tab['issues'].append('translation_selector_alias'); parsed['errorCodes'].append('translation_selector_alias')
+                aliases[key] = sub
+        if any(len(m) > 1 for m in methods.values()):
+            tab['issues'].append('translation_precedence_not_evaluated'); parsed['errorCodes'].append('translation_precedence_not_evaluated')
+    for table in table_names:
         tab = parsed['tables'].pop(table, None)
         if tab is None:
             result['tables'][table] = {'present': False, 'headers': [], 'rows': {}, 'issues': [], 'cellsDigest': None}
@@ -92,8 +110,11 @@ def _compact(path, record):
         for entry in tab['rows']:
             cells.update(_digest(tuple(sorted(entry.pop('cells').items()))).encode())
             row = entry.pop('values'); key = _record_key(table, row)
-            if key in indexed: loader.fail('gtfs_key_duplicate')
-            indexed[key] = row
+            if table in {'fare_rules', 'translations'}:
+                indexed.setdefault(key, []).append(row)
+            else:
+                if key in indexed: loader.fail('gtfs_key_duplicate')
+                indexed[key] = row
         result['tables'][table] = {'present': True, 'headers': tab['headers'], 'rows': indexed,
                                   'issues': tab['issues'], 'cellsDigest': cells.hexdigest()}
     # All remaining table semantics are deliberately discarded, never compared.
@@ -101,7 +122,7 @@ def _compact(path, record):
     raw, _ = loader._read(path)
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         result['memberHashes'] = {name: hashlib.sha256(archive.read(name)).hexdigest() for name in sorted(archive.namelist())}
-        for table in TABLES:
+        for table in table_names:
             if result['tables'][table]['present']:
                 result['tables'][table]['csvEvidence'] = _csv_evidence(archive.read(table + '.txt'))
     result['parseSeconds'] = time.perf_counter() - started
@@ -112,9 +133,12 @@ class Evidence:
     def __init__(self):
         self.findings = []; self.ambiguities = []; self.categories = Counter(); self.total = 0
         self.counts = Counter(); self.truncated = 0
+        self.tableCategories = defaultdict(Counter); self.tableAmbiguities = Counter()
 
     def add(self, kind, table, key=(), field=None, *, ambiguity=False, **extra):
         self.categories[kind] += 1; self.total += 1
+        self.tableCategories[table][kind] += 1
+        if ambiguity: self.tableAmbiguities[table] += 1
         finding = {'kind': kind, 'table': table, 'recordKey': list(key), **extra}
         if field is not None: finding['fieldPath'] = '/' + field.replace('~', '~0').replace('/', '~1')
         if len(self.findings) + len(self.ambiguities) < MAX_DETAILS:
@@ -125,6 +149,9 @@ class Evidence:
 def _kind(table, field, unknown):
     if unknown: return 'unsupported-field-change'
     if table in {'calendar', 'calendar_dates'}: return 'calendar-record-changed'
+    if table == 'feed_info': return 'feed-period-changed' if field in {'feed_start_date', 'feed_end_date'} else 'feed-metadata-changed'
+    if table == 'fare_attributes': return 'fare-attribute-changed'
+    if table == 'translations': return 'translation-changed'
     if table == 'stop_times':
         if field in {'arrival_time', 'departure_time'}: return 'time-changed'
         if field == 'stop_id': return 'stop-pattern-changed'
@@ -267,16 +294,117 @@ def _service_candidates(left, right, evidence):
                                  baselineCandidateCount=len(old), candidateCandidateCount=len(new))
 
 
-def compare_loaded(left, right):
+def _compare_multiset(table, left, right, evidence):
+    """Exact multiset cancellation; never pair ambiguous selector groups."""
+    def empty(tab): return {**tab, 'rows': {}}
+    result = _compare_table(table, empty(left), empty(right), evidence)
+    counts = Counter(result['counts']); ambiguous = False
+    for key in sorted(left['rows'].keys() | right['rows'].keys()):
+        a, b = left['rows'].get(key, []), right['rows'].get(key, [])
+        if len(a) <= 1 and len(b) <= 1:
+            pack = lambda rows: {'rows': {key: rows[0]} if rows else {}, 'headers': [], 'present': True, 'issues': []}
+            compared = _compare_table(table, pack(a), pack(b), evidence)
+            counts.update(compared['counts'])
+        else:
+            ambiguous = True
+            evidence.add('ambiguous-selector-group', table, key, ambiguity=True,
+                         baselineRows=len(a), candidateRows=len(b), validity='not-confirmed')
+            ca, cb = Counter(_signature(r) for r in a), Counter(_signature(r) for r in b)
+            for kind, remainder in (('record-removed', ca-cb), ('record-added', cb-ca)):
+                for signature in sorted(remainder, key=repr):
+                    for _ in range(remainder[signature]): evidence.add(kind, table, key, matching='multiset-difference')
+                counts['removed' if kind == 'record-removed' else 'added'] += sum(remainder.values())
+    partial = ambiguous or bool(left['issues'] or right['issues'])
+    result.update(counts=dict(sorted(counts.items())), baselineRecords=sum(map(len, left['rows'].values())),
+                  candidateRecords=sum(map(len, right['rows'].values())),
+                  coverage='partial' if partial else 'complete',
+                  semanticStatus='indeterminate' if partial else 'changed' if any(counts.values()) else 'equivalent')
+    return result
+
+
+def _finish_gtfs(result, left, right, evidence):
+    issues = sorted(set(left['issues'] + right['issues']))
+    for tab in result['tableResults']:
+        name = tab['table']
+        tab['categories'] = sorted(evidence.tableCategories[name])
+        tab['categoryCounts'] = dict(sorted(evidence.tableCategories[name].items()))
+        tab['counts']['ambiguous'] = evidence.tableAmbiguities[name]
+        tab['findings'] = [f for f in result['findings'] if f['table'] == name]
+        tab['ambiguities'] = [f for f in result['ambiguities'] if f['table'] == name]
+        tab['checks'] = {'parsed': 'PASS', 'referenceValidation': 'PASS-with-scope-limits' if issues else 'PASS',
+                         'baselinePresent': left['tables'][name]['present'], 'candidatePresent': right['tables'][name]['present'],
+                         'baselineIssues': left['tables'][name]['issues'], 'candidateIssues': right['tables'][name]['issues'],
+                         'keyUniqueness': 'not-confirmed' if evidence.tableAmbiguities[name] else 'PASS'}
+        tab['unsupportedFields'] = sorted((set(left['tables'][name]['headers']) | set(right['tables'][name]['headers'])) -
+                                          set((loader.SCHEMAS[name][0] + ' ' + loader.SCHEMAS[name][1]).split()))
+        related = [code for code in issues if (name == 'trips' and code == 'trip_auxiliary_reference_not_evaluated') or
+                   (name == 'stops' and code == 'level_reference_not_evaluated') or
+                   (name == 'stop_times' and code == 'flex_reference_not_evaluated') or
+                   (name == 'translations' and code.startswith('translation_'))]
+        if related:
+            tab['checks']['scopeLimits'] = related; tab.update(coverage='partial', semanticStatus='indeterminate')
+    partial = (bool(issues or result['ambiguities']) or result['truncated'] or
+               result['calendarEvaluation']['status'] in {'partial', 'no-common-period'} or
+               any(t['coverage'] != 'complete' for t in result['tableResults']))
+    changed = any(sum(t['counts'].get(k, 0) for k in ('added','removed','modified','schemaChanges')) for t in result['tableResults'])
+    result.update(coverage='partial' if partial else 'complete', comparisonStatus='partial' if partial else 'complete',
+                  semanticStatus='indeterminate' if partial else 'changed' if changed else 'equivalent')
+    result['errorCodes'] = sorted(set(result['errorCodes'] + issues))
+    result['notEvaluated'] = sorted(set(left['unsupportedTables'] + right['unsupportedTables']))
+    result['unsupportedFields'] = [{'table': t['table'], 'field': f} for t in result['tableResults'] for f in t['unsupportedFields']]
+    result['checks'] = {'inputBytes': 'verified-both', 'loaderReferences': {'baseline': left['referenceChecks'], 'candidate': right['referenceChecks']},
+                        'calendarEvaluation': result['calendarEvaluation']['status'], 'crossSourceConsistency': 'not-evaluated'}
+    result['counts']['ambiguous'] = sum(evidence.tableAmbiguities.values())
+    result['counts']['changes'] = sum(result['counts'].get(k, 0) for k in ('added','removed','fieldChanges','schemaChanges','effectiveDateChanges'))
+
+
+def _failed_gtfs(code):
+    return {'sourceId': 'metro.gtfs', 'coverage': 'partial', 'comparisonStatus': 'failed', 'semanticStatus': 'indeterminate',
+            'categories': [], 'counts': {'added': 0, 'removed': 0, 'modified': 0, 'changes': 0, 'ambiguous': 0},
+            'findings': [], 'ambiguities': [], 'unsupportedFields': [], 'checks': {'structure': 'FAIL'},
+            'errorCodes': [code], 'notEvaluated': list(TABLES + NOT_EVALUATED),
+            'tableResults': [{'table': t, 'coverage': 'not-evaluated', 'checks': {'structure': 'not-evaluated'},
+                              'counts': {}, 'categories': [], 'findings': [], 'ambiguities': []} for t in TABLES + NOT_EVALUATED],
+            'calendarEvaluation': {'status': 'partial'}, 'truncated': False, 'omittedDetails': 0}
+
+
+def _finish_integrated(result):
+    sources = result['sourceResults']; gtfs = next(s for s in sources if s['sourceId'] == 'metro.gtfs')
+    for source in sources:
+        if source['sourceId'] != 'metro.gtfs':
+            source['unsupportedFields'] = source.get('unknownFields', [])
+            source['checks'] = {'inputBytes': source['inputBytesStatus'], 'errors': source['errorCodes'],
+                                'warnings': sorted({w['code'] for w in source.get('warnings', [])}),
+                                'crossSourceConsistency': 'not-evaluated'}
+    failed = any(s['comparisonStatus'] == 'failed' for s in sources)
+    partial = any(s['coverage'] != 'complete' for s in sources)
+    for source in sources: source['countsKnown'] = source['comparisonStatus'] != 'failed'
+    confirmed = {s['sourceId']: s['counts'] if s['countsKnown'] else None for s in sources}
+    changed = any(s['counts'].get('changes', 0) > 0 for s in sources)
+    result.update(comparisonStatus='failed' if failed else 'partial' if partial else 'complete',
+                  coverage='partial' if failed or partial else 'complete',
+                  semanticStatus='indeterminate' if failed or partial else 'changed' if changed else 'equivalent',
+                  confirmedChanges=confirmed, crossSourceConsistency='not-evaluated')
+    outside = [x for x in result['notEvaluated'] if not x.startswith('metro.gtfs/')]
+    result['notEvaluated'] = outside + ['metro.gtfs/' + x for x in gtfs['notEvaluated']]
+    result['ambiguities'] = {s['sourceId']: s['ambiguities'] for s in sources}
+    result['checks'] = {s['sourceId']: s['checks'] for s in sources}
+    result['errorCodes'] = sorted({code for s in sources for code in s['errorCodes']})
+    result['timings']['peakRSSBytes'] = result['timings']['peakRSSPlatformUnits'] * (1 if __import__('sys').platform == 'darwin' else 1024)
+
+
+def compare_loaded(left, right, *, all_tables=False):
     """Compare compact, validated inputs. Never declares whole GTFS equivalence."""
     started = time.perf_counter(); evidence = Evidence()
-    tables = [_compare_table(name, left['tables'][name], right['tables'][name], evidence) for name in TABLES]
+    table_names = TABLES + NOT_EVALUATED if all_tables else TABLES
+    tables = [(_compare_multiset if name in {'fare_rules', 'translations'} else _compare_table)(
+        name, left['tables'][name], right['tables'][name], evidence) for name in table_names]
     _service_candidates(left, right, evidence)
     calendar = _calendar(left, right, evidence)
     representations = []
     if left['input']['sha256'] != right['input']['sha256'] and left['memberHashes'] == right['memberHashes']:
         representations.append({'kind': 'zip-container-only', 'scope': 'member-bytes'})
-    for table in TABLES:
+    for table in table_names:
         a, b = left['tables'][table], right['tables'][table]
         if not a['present'] or not b['present']: continue
         if left['memberHashes'][table+'.txt'] == right['memberHashes'][table+'.txt']: continue
@@ -297,19 +425,21 @@ def compare_loaded(left, right):
         table['detailComplete'] = evidence.truncated == 0
         if evidence.truncated:
             table.update(coverage='partial', semanticStatus='indeterminate')
-    return {'sourceId': 'metro.gtfs', 'coverage': 'partial', 'comparisonStatus': 'partial', 'semanticStatus': 'indeterminate',
+    result = {'sourceId': 'metro.gtfs', 'coverage': 'partial', 'comparisonStatus': 'partial', 'semanticStatus': 'indeterminate',
             'categories': sorted(evidence.categories), 'categoryCounts': dict(sorted(evidence.categories.items())),
             'counts': dict(sorted(counts.items())), 'findings': evidence.findings, 'ambiguities': evidence.ambiguities,
-            'tableResults': tables + [{'table': name, 'coverage': 'not-evaluated'} for name in NOT_EVALUATED],
+            'tableResults': tables + ([] if all_tables else [{'table': name, 'coverage': 'not-evaluated'} for name in NOT_EVALUATED]),
             'calendarEvaluation': calendar, 'representations': representations, 'loaderIssues': {'baseline': left['issues'], 'candidate': right['issues']},
-            'notEvaluated': list(NOT_EVALUATED), 'truncated': evidence.truncated > 0, 'omittedDetails': evidence.truncated,
+            'notEvaluated': [] if all_tables else list(NOT_EVALUATED), 'truncated': evidence.truncated > 0, 'omittedDetails': evidence.truncated,
             'totalDetails': evidence.total, 'detailLimit': MAX_DETAILS,
             'errorCodes': (['detail_limit_reached'] if evidence.truncated else []) + ([calendar['errorCode']] if 'errorCode' in calendar else []),
             'timings': {'baselineParseSeconds': left['parseSeconds'], 'candidateParseSeconds': right['parseSeconds'],
                         'compareSeconds': time.perf_counter() - started}}
+    if all_tables: _finish_gtfs(result, left, right, evidence)
+    return result
 
 
-def compare_gtfs(baseline_store, candidate_store, baseline_source_dir, candidate_source_dir):
+def compare_gtfs(baseline_store, candidate_store, baseline_source_dir, candidate_source_dir, *, all_tables=False):
     started = time.perf_counter()
     try:
         stores = [load_store_contract(p) for p in (baseline_store, candidate_store)]
@@ -318,7 +448,7 @@ def compare_gtfs(baseline_store, candidate_store, baseline_source_dir, candidate
         for role, store in zip(('baseline', 'candidate'), stores):
             for field in ('snapshotId', 'contentFingerprint'):
                 if result[role + field[0].upper() + field[1:]] != store['snapshot'][field]: loader.fail('store_changed_during_comparison')
-        if result['comparisonStatus'] == 'failed': loader.fail('source_input_validation_failed')
+        if result['comparisonStatus'] == 'failed' and not all_tables: loader.fail('source_input_validation_failed')
         signatures = {}
         for side, (directory, store) in enumerate(zip((baseline_source_dir, candidate_source_dir), stores)):
             _root(directory)
@@ -328,10 +458,15 @@ def compare_gtfs(baseline_store, candidate_store, baseline_source_dir, candidate
                 if signature != (record['artifact']['sha256'], record['artifact']['sizeBytes']): loader.fail('source_bytes_mismatch')
                 signatures[side, record['sourceId']] = (signature, identity)
         parsed = []
-        for directory, store in zip((baseline_source_dir, candidate_source_dir), stores):
-            record = next(r for r in store['records'] if r['sourceId'] == 'metro.gtfs')
-            parsed.append(_compact(directory / SOURCE_FILES['metro.gtfs'], record))
-        gtfs = compare_loaded(*parsed); del parsed
+        try:
+            for directory, store in zip((baseline_source_dir, candidate_source_dir), stores):
+                record = next(r for r in store['records'] if r['sourceId'] == 'metro.gtfs')
+                parsed.append(_compact(directory / SOURCE_FILES['metro.gtfs'], record, all_tables=all_tables))
+            gtfs = compare_loaded(*parsed, all_tables=all_tables)
+        except loader.GTFSError as exc:
+            if not all_tables: raise
+            gtfs = _failed_gtfs(exc.code)
+        del parsed
         gtfs['inputBytesStatus'] = {'baseline': 'verified', 'candidate': 'verified'}
         for side, (directory, store_path) in enumerate(zip((baseline_source_dir, candidate_source_dir), (baseline_store, candidate_store))):
             _root(directory)
@@ -344,8 +479,9 @@ def compare_gtfs(baseline_store, candidate_store, baseline_source_dir, candidate
         result['categories'] = sorted({c for r in result['sourceResults'] for c in r['categories']})
         result['counts'] = {'gtfs': gtfs['counts'], 'odpt': {r['sourceId']: r['counts'] for r in result['sourceResults'] if r['sourceId'] != 'metro.gtfs'}}; result['coverage'] = 'partial'
         result['findings'] = gtfs['findings']; result['ambiguities'] = gtfs['ambiguities']
-        result['timings'] = {**gtfs['timings'], 'totalSeconds': time.perf_counter() - started,
+        result['timings'] = {**gtfs.get('timings', {}), 'totalSeconds': time.perf_counter() - started,
                              'peakRSSPlatformUnits': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
+        if all_tables: _finish_integrated(result)
         return result
     except (StoreError, SemanticDiffError) as exc: loader.fail(exc.code)
 

@@ -889,3 +889,15 @@
 - 新GTFS比較と既存loader/Source契約/inventory/store/compat/basic diff/ODPT6 source比較/matcher/itinerary/snapshot QA/public v2を合わせ176テストPASS（113.197秒）。git diff --check PASS。
 - 実自己比較で6table比較成立、既知差分0、共通期間2026-09-19〜2027-03-12の350 service-date組で運行差0。5table未評価、GTFS partial/全体indeterminate。解析（compact化/表現検査含む）旧14.871秒/新14.871秒、比較3.083秒、全体37.861秒、peak RSS約558 MiB。詳細0、打切り0、15原本/storeファイルのhash/bytes前後一致。異世代実績ではない。
 - 変更は新module/testと指定3文書のみ。ODPT6比較、既存CLI、GTFS loader、取得/QA/public v2/synthetic/release-managed/Actions/Cloudflareは未変更。API/取得/原本・store変更/結果persist/残り5table意味比較/公開資格判定/Commit/Push/Mergeなし。
+
+
+## 2026-11-04 — ODPT-2G Phase 2B-2c-3 GTFS11テーブル・7 source統合
+
+- 開始branch main、HEAD `b1387d4ce335f3f260f0975212df34e50a5095f0`、前工程commit済み・cleanを確認。README・指定文書/比較profile・実装・関連テストを確認した。
+- `scripts/odpt_semantic_compare.py` と合成fixtureのみの `tests/test_odpt_semantic_compare.py` を追加。既存GTFS比較へ明示all_tables経路を追加し、agency/feed_info/fare_attributes/fare_rules/translationsを含む11件とODPT6件の結果を統合する。既存ODPT・主要6table・CLIの既定規則は維持。
+- fare_rules/translationsの候補key groupを多重集合で比較し、複数候補は全行保持/partial、残差の追加削除を記録する。loaderは新統合時だけtranslationsの重複監査を許容、従来のstrict既定値は維持。公式key/optional selector/翻訳優先関係と未解決事項をresearchへ記録した。
+- 各table/sourceのcoverage、確定件数、曖昧性、未知項目、checks、固定codeを統合し、parse失敗時も他sourceの既知差分を保持する。入力契約・14原本hash/bytes・読取identity・比較後全原本/store再照合は既存処理を再利用。上限と決定性を維持する。
+- 合成7テストメソッド（補助5table属性/selector/重複/翻訳優先/未知項目/表現差/方向反転/決定性/上限、ODPT単独・GTFS単独・同時変更、片側parse失敗、partial伝播、CLI・原本不一致）と既存loader/GTFS比較を含む対象27件PASS。
+- 既存Source契約/inventory/store/compat/basic diff/ODPT6 source比較/GTFS loader・6table比較/matcher/itinerary/snapshot QA/public v2を含む関連回帰183件PASS（142.307秒）。最終CLI表示・成功系assertを含む統合7件もPASS。git diff --check PASS。
+- 実store/7原本の同一Snapshot自己比較で11table比較成立、7 source既知差分0。GTFS trips補助関係とStationTimetable opaque keyを保持し、GTFS/全体partial/indeterminate。旧解析17.022秒/新16.262秒、比較4.283秒、全体44.614秒、peak RSS約592.4 MiB。15ファイルhash/bytes前後一致。実世代間比較ではない。
+- 変更は新module/test、既存GTFS loader/比較、指定3文書のみ。applicationPeriod/publicationApproved、ODPT既存比較、取得/QA/public v2/synthetic/release-managed/Actions/Cloudflareは未変更。API/新規取得/原本・store変更や複製/結果persist/鮮度/同一ダイヤ/公開資格/Commit/Push/Mergeなし。
