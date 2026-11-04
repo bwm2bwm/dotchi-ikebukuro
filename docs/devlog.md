@@ -980,3 +980,13 @@
 - 実QAはserviceDates 10/28〜30＋aux 27/31、固定21時刻×8駅×4 scenario=672表示セルknown、findings/省略/評価不能0。生成40駅日G17,288/C16,604/E684。items3,288/cards1,688、best存在/表示内/mark各512・整合672、0候補160。routeStates running832/not_started2016/ended1056/data_insufficient128、terminalKnown true3904/false128。補助日10/31のcoverage不足を保持し、氷川台副都心線ではunmatched6/WARNING3行を補足確認。UNKNOWN抑止は実source0、合成で始発/終電未確認を確認。
 - 固定境界リストはresearchへ記録。JST午前0時の前後、24時超、始発60分前、昼候補60分前、終電前後を既存状態のまま観測。境界QA629.257秒、親peak RSS426,160,128 bytes・Node子最大145,002,496 bytes（回帰等と一部並行）。最終既定CLIはJST10/29正午32セル・items576/cards192・best表示32・finding0・終了0、74.316秒/親peak410,988,544 bytes。
 - 原本7/store8 JSONのhash/bytes/identityとengine/runtime26依存は独立inventoryを含め前後一致。結果はメモリ内のみ。旧新表示比較・DOM/描画・鮮度/公開資格は未評価、collectionStatus partialを維持。新collector/test、engine seed、指定3文書の6ファイルだけ変更。git diff --check PASS、commit/push/merge/deployなし。
+
+
+## 2026-11-04 — ODPT-2G Phase 2C-3c-1 表示モデル基本差分
+
+- 開始main / 43ffa1580796a51b405cc24f4bf3ddeb712879e2、Phase 3b-2 commit済み・cleanを確認。既存collector・入力検証/context/Node/adapterと関連文書・testを確認。
+- odpt_display_diff.pyと合成testを追加。同一engine/context/runtime、両Snapshot/7原本と両側収集reportを検証し、baseline→candidateを順次収集。ID非依存の意味多重集合・順序・groups・best/マークを比較する。比較自身をengineへ追加し27依存。
+- 局所欠損とknown/0を分け、確定差分を部分評価でも維持。重複はambiguousとして個体を対応付けない。unchangedは集計、actionable明細優先・全件比較/集計・既定1,000件上限。全体partial/indeterminateを維持し、確定変化はchanged。旧newID安定性、品質悪化、公開資格は判定しない。
+- 実source自己比較はJST10/29正午×8駅×4 scenario=32セル。両側items576/cards192、best/mark32、全基本差分0、changed0/unchanged32、ambiguous/未評価/確定finding0。unchanged集約32・明細省略0、overall partial/indeterminate・basic unchanged、CLI終了0。原本7/store8 JSONのhash/bytes/identity実体15件とengine/runtime27依存が前後一致。
+- baseline81.935秒/candidate77.931秒、全体168.193秒、独立QA照合込み171.269秒。親peak418,430,976 bytes/Node子最大144,384,000 bytes（回帰等と一部並行）。駅日生成24回/Node runner32起動を各側で行い、合計48回/64起動。環境probe起動数は未計測。routeStates/始発終電UNKNOWN詳細分類、DOM/視覚品質、鮮度/公開資格は未評価。実source境界の追加比較は今回実施しない。
+- 新規19テストを含むPython統合301件PASS（497.258秒）、Node63件PASS。IDのみ変更/重複/内容と順序/局所未評価/不正response/条件差/原本・engine途中変更/1,000件上限/unchanged大量時の終了0/実合成Snapshotの差分を確認。変更は比較module/test、engine seed、指定3文書の6ファイル。既存collector/generator/matcher/adapter/public gateは未変更。API/新規取得/原本store変更・コピー/CI/Deploy/Commit/Push/Mergeなし、git diff --check PASS。

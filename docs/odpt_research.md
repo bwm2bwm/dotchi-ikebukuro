@@ -1307,3 +1307,29 @@ routeStatesは計4,032参照のうちrunning832/not_started2,016/ended1,056/data
 JST午前0時を跨ぐ前後で候補を維持し、24時超便は元serviceDateを保持。00:12:59の32候補が00:13:00に0となる際、過去serviceDateのroute stateはended、観測暦日のboard serviceStateはnot_startedとなる既存挙動をそのまま記録した。全駅・全路線・全filterの固有境界時刻を網羅したものではなく、上記代表時刻による共通評価である。
 
 境界QAは独立inventory/engine走査込み629.257秒（回帰等と一部並行実行）、親process peak RSS426,160,128 bytes、Node子process最大RSS145,002,496 bytes（合計peakではない）。672成功requestの入力bytes合計425,470,096、応答4,759,700。各セルで既存runnerが3日payloadを再検証するため、反復コストが大きい。最終既定CLIは74.316秒、親peak RSS410,988,544 bytes。双方で原本7/store8 JSONのSHA-256/bytes/identity全15件、engine/runtime 26依存が前後一致。結果・candidate・原本コピーを保存しない。性能最適化、旧新比較、DOM/ブラウザー描画、鮮度/公開資格、serviceDate跨ぎ乗換探索は今回追加しない。
+
+
+### Phase 2C-3c-1 表示モデル基本差分（2026-11-04）
+
+独立contract `dotchi.odpt.display-model-diff` / schemaVersion 1、read-only `scripts/odpt_display_diff.py` を追加。両Snapshot ID/contentFingerprints、両旅程/表示evaluationContexts、同一engineFingerprint/environment、baselineSummary/candidateSummary、cellDiffs/findings/checks/notEvaluated、comparisonStatus/displayDiffStatus/basicDisplayDiffStatus、summary/omittedDetails/comparisonDigestをメモリ上に保持する。既存collector・generator・matcher・adapter・public gateと各schemaは変更しない。比較自身をengine seedへ追加し、27依存とする。
+
+既存Phase 2C-2a検証で両store/原本7件・hash/bytes・Snapshot契約・contentFingerprint・context/engine/runtimeを検証。両側のphysical inventoryを収集前に凍結し、両collector・差分計算終了まで再検証する。表示contextもnormalize・参照・hash・同一性を確認。collectorは同一条件で順次実行し、baselineのraw boardを基本意味内容へcompactしてからcandidateを評価する。collection contract/digest、Snapshot/context/engine/environment、開始終了check、knownセルの内容・group参照/上限・bestと件数/集計の整合を検証する。global入力不正や途中変更時は数値差分を返さずfailed、条件差はincomparable。Node runtime不一致はincomparable、不正payload/responseはinvalid。局所unavailable/out-of-rangeでは他セルの確定差分を残す。
+
+比較セルはobservationInstant×stationId×表示scenario（既存collectorのscenarioId）。items/cards/直通/乗換/可視bestマーク数、route別cards、serviceDate別items、best意味内容/表示内存在を両値・delta・availability/reasonCodes付きで保持する。欠損セルや未評価はnullで、0補完しない。完全に評価されたhistogram内の未出現だけを観測済み0として扱う。summaryの差分合計は両側knownな同一セルのみを分母とし、独立した両側収集summaryから単純減算しない。
+
+itemsはdeparture/arrival epoch・route・serviceDate・選択journey種別・列車種別文字列・行先・乗換駅/待ち秒/乗継路線を正規化。ID/sourceId/public ID/trip_id、isBest/終電flagは項目同一性に使わない。選ばれなかったalternativeはitem内容に含めない。意味内容をcounterで数え、多重度を維持して追加/除去を計測する。変更項目を同じ列車と推定して対応付けない。多重集合が同じときは意味列の順序を直接比較し、内容が変わるときは共通かつ各側一意な内容の相対順序を比較する。挿入による位置移動と相対順序変更を区別。重複内容の個体対応はambiguousとして保持し、1対1に割り当てない。意味列そのものの同一性が確認できても個体対応の曖昧性は別に残す。
+
+groupsはdeparture全体6枚/line各路線3枚を入力証拠として検査し、item比較とは別にgroup ID付きカード列・group存在・内容/順序/位置を比較。位置明細は列全体位置とgroup内addressを保持する。bestIdは各側model内で解決して意味内容とepochを比較し、同内容候補が複数ならbestの個体対応もambiguous。bestInGroups、visibleBestMarkerCount、実カードのマーク位置/内容/labelを別比較する。bestが表示上限外でも選択を変えず、両側の非表示件数を集計する。両側同じ非表示状態だけから変更findingを生成しない。
+
+分類はunchanged、items/cards-increased/decreased、item/card-content-changed、item/card-order-changed、best-changed、best-not-visible、best-marker-changed、ambiguous、not-evaluable、context-mismatch。1セルのfindingへタグを集約し、減少やbest変化を品質悪化と断定しない。routeStates・terminalKnown・始発/終電・UNKNOWNの詳細差分分類は3c-2へ残す。side summaryの既存状態集計は説明情報であり今回の変化分類には使わない。DOM/CSS/視覚品質・公開資格/鮮度も未評価。
+
+全体は比較できるセルがあればpartial、確定差分ありはdisplayDiffStatus changed、基本一致でも全体indeterminate。既知基本範囲の一致だけをbasicDisplayDiffStatus unchangedとする。曖昧/未評価があれば基本範囲もindeterminate。unchangedは件数中心で個別明細を保持しない。changed/ambiguous/not-evaluableセル・findings・contentChanges・positionChangesは各リストにつき既定1,000件（API最大10,000）、全件集計と省略数を保持する。必要明細省略はdetail_limit_reached/partial、unchanged件数だけでは打切り扱いにしない。collectorへは既存最大10,000セル保持を要求し、collector自身が省略したセルはmissing/not-evaluableとして明示する。collector上限を超えるcontextの全セル意味比較は未完了となるが、取得済みの確定差分は維持する。
+
+CLI: `python3 -B scripts/odpt_display_diff.py --baseline-store <store> --candidate-store <store> --baseline-source-dir <source-dir> --candidate-source-dir <source-dir>`。既定はJST2026-10-29正午・8駅・4scenario。集計・状態・notEvaluated・digest・時間/RSSだけを表示し、原本/旅程/ラベル本文を出さない。0=対象基本比較成立（差分ありも0、全体partial許容）、2=条件差/局所未評価/曖昧/必要明細省略/引数不正、3=入力不正、4=入力・環境利用不能。時刻/駅/scenario、内容key順で決定的処理。timings/resourcesはcomparisonDigestから除外する。Node子最大RSSはRUSAGE_CHILDRENの最大値で親と合算せず、環境probeのNode起動数は今回未計測と明示する。
+
+
+**実source自己比較QA:** 既存Phase 1C storeと対応する保存済み7原本を両側に指定。旅程日2026-10-28〜30、観測2026-10-29T03:00:00Z（JST12:00）、8駅×4scenarioの32セル。両側items576（直通480/乗換96）、cards192（route6/9各96）、best/表示マーク32。全基本値・内容/順序・best差分0、changed0/unchanged32、ambiguous/未評価/確定finding0。unchangedDetailsAggregatedCount32、個別cellDiffs/findings0、省略0、comparisonStatus partial/displayDiffStatus indeterminate/basicDisplayDiffStatus unchanged、CLI終了0。今回は実source境界時刻の追加比較は行わず、境界収集は3b-2 QAと合成テストを参照する。実異世代の検出は合成source/storeから既存v2生成・QA state・Node runnerを通す検証を含む合成fixtureで確認。
+
+baseline収集81.935秒、candidate収集77.931秒、比較処理全体168.193秒、独立外側の前後照合込み171.269秒（回帰等と一部並行）。親peak RSS418,430,976 bytes、Node子最大144,384,000 bytes（合計peakではない）。各側generatorは8駅、駅日生成24回・runner成功起動32回。両側合計48駅日生成/64 runner起動で、同一Snapshotでも片側の結果を流用せず順次再評価する。各側内部の日別cacheにより同じ駅日をscenarioごとに再生成しない。環境probeのNode起動数は未計測。原本7/store8 JSON（同一path実体15ファイル）のSHA-256/bytes/identityとengine/runtime 27依存が、collector・外側比較・独立QAで前後一致。レポート/candidate/原本コピーの保存は行わない。
+
+**合成・回帰検証:** 新規19テストを含むPython ODPT統合301件PASS（497.258秒）、既存Node関連63件PASS。自己比較、件数/意味内容/順序の分離、重複多重度・best曖昧性、IDのみ変更、欠損とknown/0、direct条件の分離、line/departureと上限、best非表示・mark、条件/engine/runtime差、入力/response不正、途中の原本/engine変更、1,024セルの全件集計と1,000件保持、unchanged大量時の終了0、順序/digest決定性、既存collector/gate独立を確認。実異世代検出は合成のみ。変更は新比較module/test、engine seed、指定3文書の6ファイル。git diff --check PASS、commit/push/merge/deployなし。
