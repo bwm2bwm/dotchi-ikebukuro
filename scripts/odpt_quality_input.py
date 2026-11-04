@@ -37,7 +37,7 @@ SEEDS = ('scripts/odpt_itinerary.py','scripts/odpt_train_matcher.py','scripts/od
          'scripts/odpt_display_context.py','scripts/odpt_display_runner.mjs',
          'scripts/odpt_display_metrics.py','scripts/odpt_display_diff.py',
          '_local_preview/selection.mjs','_local_preview/preview_odpt_v2_qa.mjs',
-         '_local_preview/odpt_v2_qa.html')
+         '_local_preview/odpt_v2_qa.html','scripts/odpt_dom_metrics.py','scripts/odpt_dom_runner.mjs')
 FIELDS = set('contract schemaVersion profile serviceDates auxiliaryServiceDates stationIds routeIds originStationId direction minimumWaitSeconds maximumWaitSeconds crossServiceDateSearch transferStationId journeyPolicy primaryRule observationInstants displayScenarios displayEvaluation engineFingerprint contextFingerprint'.split())
 NOT_EVALUATED = ['feed-service-availability','journey-generation','quality-metrics','quality-diff','display-model','browser-runtime',
                  'freshness','application-period','publication-eligibility','cross-source-consistency',
@@ -254,7 +254,7 @@ def build_engine(root=ROOT, environment=None):
         if path.suffix=='.mjs':
             for spec in re.findall(r"(?:from\s*|import\s*\(?\s*)['\"]([^'\"]+)['\"]",raw.decode('utf-8')):
                 if not spec.startswith(('./', '../')):
-                    if spec in {'node:crypto', 'node:url'}: continue
+                    if spec in {'node:crypto', 'node:url', 'node:path', 'node:assert/strict'}: continue
                     fail('engine_js_import_unresolved')
                 dep=(path.parent/spec).resolve()
                 try: relative=dep.relative_to(root.resolve())

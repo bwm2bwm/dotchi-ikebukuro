@@ -28,6 +28,8 @@ Phase 2C-3c-2で同CLIへboard観測範囲の詳細状態差分を追加。日×
 
 Phase 2C-3d-2で合成専用の固定時計DOM harness・表示整合テストを追加。既存Fake DOM、メモリ内fetch、実candidate bytes/hash・公開ID検証、Web Crypto、手動intervalを利用し、同じepochのreference board.groupsとDOMカードの構造・順序・文言・classを検証する。4シナリオ、直通alternative、上限内外best/終電、countdownのミリ秒境界、8 routeState、UNKNOWN/INFO/補助日coverage、24/25時、空表示・検証失敗、後始末・反復決定性を確認。実HTMLの接続は標準HTMLParserによる別検査。最終の関連Node57件（v2 DOM20件含む）・Python20件（HTML3件含む）がPASS。途中失敗はテストがIntlのcomma区切り日時をdatetime-localへ渡したことが原因で、境界観測を固定Date.now＋手動intervalへ修正した。既存adapter/DOM/UI・品質比較・公開gate・engine 28依存は未変更。Node意味表示の合成QAを追加した範囲であり、既存比較のpartial/indeterminateは維持。実source接続は3d-3、ブラウザー実描画・CSS/フォント/safe-area・focus/アクセシビリティ・HTTP/CSP/cache・鮮度/公開資格は未評価。
 
+Phase 2C-3d-3aで独立read-only `scripts/odpt_dom_metrics.py`（`dotchi.odpt.dom-qa`/schemaVersion 1）を追加。既存collectorの駅日生成・厳密除外監査・envelope・bounded Node transportと3d-2 DOM harnessを共有し、全8駅×必要3日をメモリ内で一度ずつ生成・監査して全駅QA stateを構成する。DOM対象は固定2026-10-29 12:00 JSTの千川・氷川台×4scenario＝8セルに限定。候補object/canonical bytes/hash/IDを同一入力として既存Node adapterとDOM entryへ渡し、groups/内容/状態/countdownを照合する。generator/matcher/v2射影/QA state/adapter/DOM/UI・公開gateの規則は維持。completeは宣言したNode DOM意味評価範囲のみを表し、既存比較のpartial/indeterminateは変更しない。runtime/engine条件差はincomparable、欠損・利用不能・既知0・不整合をreason/availabilityとnullで区別する。engineは新collector/runner/harnessを加え31依存となり、旧engineの結果は同一条件比較不可。実source smoke、合成/回帰結果と実測値はresearch/devlogに記録。全駅・全境界へのDOM評価拡大、旧新DOM比較、実ブラウザー/CSS等の視覚品質、鮮度・公開資格は未評価。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。

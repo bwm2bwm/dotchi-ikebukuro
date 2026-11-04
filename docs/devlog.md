@@ -1015,3 +1015,17 @@
 - 最終関連Node57件PASS（16.991秒、v2 DOM20件含む）。対象はodpt_v2_qa_dom/adapter/display_runner/preview_selection/terminal_ui/preview_runtime_dom_qa。Python20件PASS（10.717秒、HTML3/context5/状態差分12）。スキップ・失敗0。git diff --check PASS。
 - 変更はDOMテスト、HTML検査テストと指定3文書の計5ファイル。generator/matcher/adapter/DOM/UI、既存公開gate・品質比較・engine 28依存、applicationPeriod/publicationApprovedは未変更。原本/storeを使用せず、API/新規取得/実データ公開/Deploy/Commit/Push/Mergeなし。
 - ブラウザー実描画、CSS cascade・フォント/折返し/safe-area、dialog focus/アクセシビリティ、HTTP/CSP/cache、実source接続QA、鮮度/公開資格は未評価。テストPASSを実機表示品質の保証とせず、既存partial/indeterminateを維持。3d-3以降の実装なし。
+
+
+## 2026-11-05 — ODPT-2G Phase 2C-3d-3a 非公開DOM接続QA
+
+- 開始main / `2b942f1a31c33b3e7e3c086425f31cf18cac7309`、3d-2 commit済み・cleanを確認。指定文書/collector/context/runner/生成/adapter/DOM/harnessと関連テストを調査。
+- 独立 `odpt_dom_metrics.py` / `odpt_dom_runner.mjs` を追加。既存collectorの駅日生成・厳密監査をprivate helperへ抽出し、bounded Node transportを既定互換のprivate引数で共用。3d-2 harness/checkerはodpt_dom_harness.mjsへ抽出し、既存テストも同じ処理を利用。合成bundle builderはtests/odpt_dom_fixture.mjsへ分離。
+- 8駅×必要3日を一度ずつ生成し、各駅の厳密なv2 audit/envelope/hash/bytes/QA countsを照合して全8駅stateを構成。1駅でも不足すれば正常DOM評価を停止。payload objectとcanonical bytesが一致し、reference adapter・DOM fetchが同一候補を使用することを検証。candidateEligible/60分/horizon/直通alternative/上限とgroups→DOM構造・内容・状態・countdownを確認する。
+- contract dotchi.odpt.dom-qa/schemaVersion1、独立domQaStatus complete/partial/failed/incomparable、明細上限/全件集計/省略数/決定的digest/固定終了0・2・3・4を実装。runtime差はincomparable、確定不整合は明細上限0でも終了3を維持。既存比較の意味・公開report・gateは維持する。CLIのstdoutは要約のみ、payload・旅程本文や観測内容は非公開IPC/メモリだけ。
+- 新Node接続10件を含む関連67件PASS（21.853秒）。既存collector/表示差分/context/HTMLのPython44件PASS（323.559秒）。最終新collector15/品質入力15/context5/HTML3のPython38件PASS（131.461秒、前runとの重複8件）。欠駅、bytes不一致、0/利用不能/不整合、4scenario・境界/UNKNOWN/INFO/WARNING/coverage、Node失敗/timeout/JSON/サイズ、後始末、決定性、入力/store/engine変更とruntime差、上限・CLI非漏えいを検証。
+- 最終の実sourceは既存Phase 1C store/7原本を非公開read-only使用。JST2026-10-29 12:00、千川/氷川台×4scenario=8セル。各24駅日・全8駅QA state PASS、G10,536/C10,128/E408、primary直通7,887/乗換2,241、items140/groups12/cards48/DOM48/best8、終電バッジ0、状態running8。Node checks88 PASS・finding/省略0、complete・終了0。実sourceで出ない条件は合成検証と区別する。
+- 同じ最終engine/contextで2runのdigest `b1e58a0e9c83cd49a6978f6ab603c2dbe31e84e60633dcbebbf8c7ece5a75e5a` 一致。75.090/69.496秒、親peak423,534,592/435,683,328 bytes、Node子最大377,700,352/378,163,200 bytes。各8起動（反復16）、初期CLI確認8を含め実source計24起動。環境probe数未計測。RSSは親process寿命の累積peakで同時合計ではない。
+- 原本7/store8 JSONのSHA-256/bytes/identityは各runと2run全体で前後一致。engine/runtimeも一致。engineは新3依存を加え31ファイル、最終fingerprint `8dd8a21a6d50ef30d280ac2e24bfe09f915f28093b25831f7a0842e8c8a09399`。Node24.15.0/ICU78.2/CPython3.14.5。旧28依存engineからの値変更と非互換比較条件をresearchへ記録。
+- 変更は新module3/新test・fixture3、既存collector/engine seed/DOM test、指定3文書の計12ファイル。generator/matcher/v2射影/QA state/adapter/DOM/CSS/HTML/UI・公開gate・applicationPeriod/publicationApprovedは未変更。原本/store変更/複製/移動・新規取得/API・実source公開artifact・Deploy/Actions/Cloudflare/Commit/Push/Mergeなし。既存公開synthetic回帰の一時fixtureだけは従来通りテスト内で生成・後始末する。
+- 全駅/全境界DOM拡大・旧新DOM比較・3d-3b以降は未実装。ブラウザー/CSS/font/safe-area/focus/HTTP等・鮮度/公開資格は未評価。complete/終了0は宣言したNode DOM意味評価だけ。git diff --check PASS、branch/HEAD維持。

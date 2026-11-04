@@ -77,14 +77,15 @@ def _js_digest(value):
     return hashlib.sha256(_json_bytes(normalized(value))).hexdigest()
 
 
-def _run_node(request, *, root=quality.ROOT, timeout=20):
+def _run_node(request, *, root=quality.ROOT, timeout=20,
+              runner="odpt_display_runner.mjs", response_contract="odpt-display-adapter-response"):
     """Bound all three pipes in memory, including a child producing endless output."""
     raw = _json_bytes(request)
     if len(raw) > REQUEST_LIMIT: _fail('node_request_size_limit')
     node = shutil.which('node')
     if not node: _fail('node_runtime_unavailable')
     try:
-        process = subprocess.Popen([node, str(Path(root)/'scripts/odpt_display_runner.mjs')],
+        process = subprocess.Popen([node, str(Path(root)/'scripts'/runner)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError: _fail('node_subprocess_failed')
     out, err, sent = bytearray(), bytearray(), 0
@@ -128,7 +129,7 @@ def _run_node(request, *, root=quality.ROOT, timeout=20):
     except (UnicodeError, quality.QualityInputError): _fail('node_response_json_invalid')
     if code != 0:
         reasons = response.get('reasonCodes') if isinstance(response, dict) else None
-        if not isinstance(response, dict) or code != 2 or set(response) != {'contract','schemaVersion','status','reasonCodes'} or response['contract'] != 'odpt-display-adapter-response' or response['schemaVersion'] != 1 or response['status'] != 'failed' or not isinstance(reasons, list) or len(reasons) != 1 or stderr != reasons[0] or not re.fullmatch('[a-z][a-z0-9_]*', stderr):
+        if not isinstance(response, dict) or code != 2 or set(response) != {'contract','schemaVersion','status','reasonCodes'} or response['contract'] != response_contract or response['schemaVersion'] != 1 or response['status'] != 'failed' or not isinstance(reasons, list) or len(reasons) != 1 or stderr != reasons[0] or not re.fullmatch('[a-z][a-z0-9_]*', stderr):
             _fail('node_exit_protocol_invalid')
         _fail('node_runner_'+stderr)
     if stderr: _fail('node_unexpected_stderr')
@@ -243,6 +244,30 @@ def _envelope(station, days, cache):
     return payload, state
 
 
+def _generate_day(generator, station, day):
+    """Shared private station/day projection and strict audit; no persistence."""
+    entry = {'stationId':station,'serviceDate':day,'availability':'unavailable','reasonCode':'generator_input_unavailable'}
+    try:
+        if generator is None: _fail('generator_input_unavailable')
+        payload, measured = v2._build_station_payload(generator,station,[day],'2000-01-01T00:00:00Z')
+        v2.validate_v2_payload(payload)
+        audit = v2._build_exclusion_audit(measured['exclusionAudit'])
+        actual = {(station,day):len(payload['serviceDays'][0]['departures'])}
+        v2._validate_exclusion_audit(audit,[station],[day],actual,measured['itineraryResultCount'])
+        result = {'availability':'known','payload':payload,'audit':audit['byStationDate'][0]}
+        entry = dict(stationId=station,serviceDate=day,availability='known',
+                     generatedCount=audit['totalGeneratedCount'],candidateCount=audit['candidateCount'],
+                     excludedCount=audit['excludedCount'],reasonCounts=audit['reasonCounts'],
+                     classificationCounts=audit['classificationCounts'],routeCoverage=payload['serviceDays'][0]['routeCoverage'],status='PASS')
+    except v2.V2Error as exc:
+        entry.update(reasonCode=exc.code,availability='out-of-range' if exc.code == 'requested_service_date_outside_feed' else 'unavailable')
+    except DisplayCollectionError as exc: entry.update(reasonCode=exc.code,availability=exc.availability)
+    except Exception: entry.update(reasonCode='payload_generation_failed')
+    if entry['availability'] != 'known':
+        result = {k:entry[k] for k in ('availability','reasonCode')}
+    return result, entry
+
+
 def _cell_metrics(board, response):
     items = board['items']; visible = [i for g in board['groups'] for i in g['items']]
     best = next((i for i in items if i['id'] == board['bestId']), None)
@@ -319,25 +344,8 @@ def collect_display_models(store, source_dir, *, quality_context=None, display_c
                 except Exception: pass
                 for day in needed:
                     total_generation += 1
-                    entry = {'stationId':station,'serviceDate':day,'availability':'unavailable','reasonCode':'generator_input_unavailable'}
-                    try:
-                        if generator is None: _fail('generator_input_unavailable')
-                        payload, measured = v2._build_station_payload(generator,station,[day],'2000-01-01T00:00:00Z')
-                        v2.validate_v2_payload(payload)
-                        audit = v2._build_exclusion_audit(measured['exclusionAudit'])
-                        actual = {(station,day):len(payload['serviceDays'][0]['departures'])}
-                        v2._validate_exclusion_audit(audit,[station],[day],actual,measured['itineraryResultCount'])
-                        cache[day] = {'availability':'known','payload':payload,'audit':audit['byStationDate'][0]}
-                        entry = dict(stationId=station,serviceDate=day,availability='known',
-                                     generatedCount=audit['totalGeneratedCount'],candidateCount=audit['candidateCount'],
-                                     excludedCount=audit['excludedCount'],reasonCounts=audit['reasonCounts'],
-                                     classificationCounts=audit['classificationCounts'],routeCoverage=payload['serviceDays'][0]['routeCoverage'],status='PASS')
-                    except v2.V2Error as exc:
-                        entry.update(reasonCode=exc.code,availability='out-of-range' if exc.code == 'requested_service_date_outside_feed' else 'unavailable')
-                    except DisplayCollectionError as exc: entry.update(reasonCode=exc.code,availability=exc.availability)
-                    except Exception: entry.update(reasonCode='payload_generation_failed')
-                    if day not in cache:
-                        cache[day] = {k:entry[k] for k in ('availability','reasonCode')}
+                    cache[day], entry = _generate_day(generator, station, day)
+                    if entry['availability'] != 'known':
                         finding({'code':entry['reasonCode'],'stationId':station,'serviceDate':day})
                     # Day evidence is separate from observation cell totals (never summed across scenarios).
                     generation_availability[entry['availability']] += 1

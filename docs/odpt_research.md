@@ -1379,3 +1379,35 @@ harnessはテストファイル内の小さいhelperへ整理。import前に時�
 現行挙動の固定と改善候補：bestはitems全体で選びgroups上限外ならマーク0件、終電も上限外ならバッジ0件となる。補助日の不足は全体warningへ反映するが個別ラベルは今日の2路線だけ。必要日欠落のunavailableでは通知data-stateがokになる場合がある。これらを修正せず回帰期待として記録する。表示改善の判断は別工程で行う。
 
 検証は関連Node57件PASS（16.991秒、v2 DOM20件を含む）、Python20件PASS（10.717秒、HTML3/context5/状態差分12）。Nodeはodpt_v2_qa_dom・adapter・display_runner・preview_selection・terminal_ui・preview_runtime_dom_qaの6ファイル。Pythonはtest_odpt_v2_qa_html・test_odpt_display_context・test_odpt_display_state_diff。結果はdevlogにも記録する。テストPASSはブラウザー実描画・視覚品質の保証ではない。CSS cascade、フォント・折返し・safe-area、dialog focus/アクセシビリティ、HTTP/CSP/cache、実source接続QA、鮮度・公開資格は未評価。既存collector/比較の結果状態をcompleteへ昇格しない。generator/matcher/adapter/DOM、公開v2 gate、applicationPeriod/publicationApproved、原本/store、engine定義は未変更。API・新規取得・Deploy・Commit/Push/Mergeなし。
+
+
+### Phase 2C-3d-3a 単一Snapshotの非公開DOM接続QA（2026-11-05）
+
+独立read-only API/CLI `scripts/odpt_dom_metrics.py` を追加。contract=`dotchi.odpt.dom-qa` / schemaVersion 1。既定は2026-10-29T03:00:00Z（JST12:00）、千川・氷川台×departure-all/departure-direct/line-all/line-directの8セル。評価順はstation ID・scenario IDの固定順。表示contextは従来の全8駅/4scenario契約を変更せず、DOM評価対象の2駅を独立evaluationScopeへ明示する。1観測instantのみを受け付け、全駅・全境界DOM評価や旧新比較は追加しない。
+
+入力は既存validate_inputs、原本7/store8 JSONのinventory、engine/context/runtime検証を再利用する。既存表示collectorの駅日v2生成・厳密監査部分を`_generate_day`へ抽出し、既存collectorとDOM collectorの両方が同じ処理を呼ぶ。必要D-1/D/D+1を全8駅で一度ずつ生成し（24駅日）、generatorは駅ごとに解放する。生成結果はメモリ内cacheのみ。`_envelope`の厳密なG=C+E・全除外理由/分類・候補integrity・QA counts bindingを8駅すべてに適用してから、実際の各駅stateと候補hash/bytesを合成する。1駅/必要1日でも作れなければ正常DOM評価へ進まない。欠損を0やcompleteに補完しない。
+
+v2 payload・canonical UTF-8 bytes・SHA-256・ID・対象駅/日をメモリで共有する。Node reference boardへ渡すpayload objectとcandidateTextのparsed canonical内容一致、およびTextEncoder bytesとQA stateのhash/byte数一致を検査する。DOMは同じbytesをメモリ内fetchで受け取り、既存entry自身がbytes/hash/公開IDを再検証する。全8駅QA stateを要求する既存DOMに対応し、対象外6駅のstateを仮値で作らない。WARNINGとUNKNOWNは既存規則のままで、WARNINGをUNKNOWNへ昇格しない。除外理由/分類とcoverageは生成証拠に保持し、最小QA state自体には既存通りWARNING fieldを追加しない。
+
+3d-2のFake DOM・固定時計・fetch・manual interval・後始末・board照合を`scripts/odpt_dom_harness.mjs`へ抽出し、旧テストと新runnerで共用する。合成bundle builderはtests側だけへ分離。runnerは`odpt-dom-request/odpt-dom-response` / schemaVersion 1の別protocolとし、既存`runRequest`のcontext/runtime/payload/ID/旅程policy/board/group/best検証を呼ぶ。nowMsはobservationInstantのepochと厳密一致させる。既存bounded subprocess transportをrunner名/response contractのprivate引数だけで共用し、従来runnerの既定I/Oは維持する。request上限8 MiB、response32 MiB、stderr4 KiB、既定20秒timeout（上限120秒）、kill/reapを維持。1セル1Node process。stderrは固定codeのみで、例外本文・原本・旅程をechoしない。
+
+正規化したDOM観測はgroups/cardsの順序・同一board内ID、路線/種別/行先/発着/元serviceDate、直通/乗換/待ち約分/接続保証なし、best/終電、countdown/red、coverage/status/INFO/UNKNOWN、空案内、modeのaria/classとfilterを保持する。referenceは既存adapter。items全体ではなくgroupsとDOMカードを比較し、上限外best/終電を選び直さない。public IDは同一セル参照のみ。CSSや実ブラウザーを模倣した合格判定ではない。
+
+結果はsnapshotId/contentFingerprint、品質/表示context fingerprint、engine/environment、evaluationScope、cells/checks/findings/notEvaluated、domQaStatus、resultDigestを持つ。completeは宣言したNode DOM意味評価8セルの成立だけ。正常0はknown/0、利用不能/不正はmetrics=null。局所未評価は他セルを残し、条件不一致・入力途中変更等の全体失敗では確認できないセル値/生成数値を無効化する。cells/generation/findingsに個別明細上限を適用し、全件集計と省略数を保持する。digestからtimings/resourcesを除く。既存comparisonStatus/displayDiffStatusと公開gateの意味は変更しない。
+
+CLI: `python3 -B scripts/odpt_dom_metrics.py --store <saved-store> --source-dir <saved-source-dir>`。stdoutはSnapshot/評価scope・数値集計・固定finding code・状態・未評価・digest・時間/RSSのみ。payload/DOM/card本文はprivate IPCとメモリ内reportに限定し、候補・原本・reportをpersistしない。終了0=宣言範囲成立、2=部分/省略/条件差、3=入力不正・確定不整合、4=入力/環境利用不能。0でも実機描画・公開資格を意味しない。
+
+engine依存へ新collector/runnerを明示seed追加し、harness/normalizationはimport closureで含める。DOM entry/HTML/selection等の既存依存も維持する。Node標準path/assertの既知依存だけをresolverへ追加し、外部依存は増やさない。DOM entryの動的importは既存の明示seedで封印する。engine値変更により旧engineの結果との同一条件比較は不可。CSS/viewport/font/browserはNode意味評価範囲外として扱う。
+
+ブラウザー実描画、CSS cascade・font/折返し/safe-area、dialog focus/アクセシビリティ、HTTP/CSP/cache、鮮度/公開資格、全駅/全境界DOM評価・旧新DOM差分は未評価。実sourceで発生しないUNKNOWN・不足・空候補・上限外best/終電・境界等は合成テストで確認する。generator/matcher/v2射影・QA state・adapter/DOM/HTML/CSS/UI・公開v2 gateは変更しない。API・新規取得・原本/store変更/複製/移動・実source公開artifact生成・applicationPeriod/publicationApproved変更・Actions/Cloudflare/Deploy・Commit/Push/Mergeなし。
+
+
+**3d-3a検証結果:** 新規Node接続10件、既存v2 DOM20件を含む関連Node67件PASS（最終21.853秒）。共有処理抽出後の既存表示collector/差分/context/HTMLのPython44件PASS（323.559秒）。最終の新collector15件・品質入力15件・表示context5件・HTML3件のPython38件PASS（131.461秒、先の44件とcontext/HTML8件が重複）。known/0・全8駅stateと1駅欠損・bytes/hash/object不一致、4scenario/直通alternative/上限/best/終電/始発/UNKNOWN/INFO/coverage/WARNING分類/24時超/countdown、DOM不一致、Node起動失敗・timeout・不正JSON/出力上限、後始末、繰返しdigest、store変更・実行後engine変化/runtime不一致、明細上限/確定失敗終了code保持、CLI本文非出力を確認。合成fixtureのみをGit管理する。
+
+**最終実source smoke:** 保存済みPhase 1C store（Snapshot 33af11c1-60f6-47fd-993a-94aa8b469cb1、contentFingerprint 9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d）と対応原本7件を使用。JST10/29正午、必要日10/28〜30。各run24駅日生成・全8駅QA state PASS。G10,536=C10,128+E408、primary直通7,887/乗換2,241。8セルはすべてknown、items延べ140/groups12/groupsカード48/DOMカード48、best表示8/8、終電バッジ0、serviceState running8。routeStatesはended16/not_started16/running16、terminalKnown true48。Node意味整合check88 PASS、FAIL0、findings0、省略0、domQaStatus complete、終了0。正午に発生しない始発/終電/空候補/不足/UNKNOWN/上限外best等の条件は合成で確認し、実sourceでの当該条件の検証とは扱わない。
+
+最終固定engineで2回実行し、resultDigestは両方 `b1e58a0e9c83cd49a6978f6ab603c2dbe31e84e60633dcbebbf8c7ece5a75e5a` で一致。qualityContextFingerprint `2583ffb6846cb491894c0a0b408abcc77178352a44e04a0f73195e6f155cdf7f`、displayContextFingerprint `74738b5c6562b573b061b43a02dad629f58eed887276d1d5afbbfea6b328976c`。原本7/store8 JSONのhash/bytes/identityは各runと2run全体で前後一致し、engine/runtimeも一致。
+
+最終run時間75.090秒/69.496秒。親process peak RSS423,534,592/435,683,328 bytes、Node子最大RSS377,700,352/378,163,200 bytes（macOS、同一親processでの累積peakであり同時合計peakではない、回帰と一部並行）。セルrunnerは各8起動、反復計16起動。環境probe起動は未計測。最終前のCLI経路確認でも8セル正常・77.422秒/8起動を確認したが、途中engineの結果を最終digestと同一条件比較しない。実source確認のセルrunnerは初期CLIを含め計24起動。以前のboard専用runnerよりNode RSSが増える実測を記録し、性能最適化は追加していない。
+
+3d-2時点のengineFingerprint `c5544d758801cfc0e1b7ee10c171a3f4d964524d15066315ac43f00b268c6f15`（28依存）から、最終 `8dd8a21a6d50ef30d280ac2e24bfe09f915f28093b25831f7a0842e8c8a09399`（31依存）へ変更。Node24.15.0/ICU78.2/CPython3.14.5で検証した。旧新engine結果を同じ条件の差分とは扱わない。git diff --check PASS、branch main・HEAD 2b942f1a31c33b3e7e3c086425f31cf18cac7309を維持。実データ公開未承認と既存gateを維持。
