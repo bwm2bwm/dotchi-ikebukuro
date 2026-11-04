@@ -33,7 +33,7 @@ STATIONS = ('Kanamecho','Senkawa','KotakeMukaihara','Hikawadai','Heiwadai','Chik
 SEEDS = ('scripts/odpt_itinerary.py','scripts/odpt_train_matcher.py','scripts/odpt_stop_patterns.py',
          'scripts/odpt_public_v2.py','scripts/odpt_snapshot_qa.py','scripts/export_local_timetable_payload.py',
          'scripts/prepare_odpt_v2_qa.py','_local_preview/odpt_v2_qa_adapter.mjs','scripts/odpt_quality_input.py',
-         'scripts/odpt_quality_metrics.py','scripts/odpt_quality_details.py')
+         'scripts/odpt_quality_metrics.py','scripts/odpt_quality_details.py','scripts/odpt_quality_diff.py')
 FIELDS = set('contract schemaVersion profile serviceDates auxiliaryServiceDates stationIds routeIds originStationId direction minimumWaitSeconds maximumWaitSeconds crossServiceDateSearch transferStationId journeyPolicy primaryRule observationInstants displayScenarios displayEvaluation engineFingerprint contextFingerprint'.split())
 NOT_EVALUATED = ['feed-service-availability','journey-generation','quality-metrics','quality-diff','display-model','browser-runtime',
                  'freshness','application-period','publication-eligibility','cross-source-consistency',

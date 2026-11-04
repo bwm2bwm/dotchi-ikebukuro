@@ -14,6 +14,8 @@ Phase 2C-2b-1で単一Snapshotのgenerator/v2基本metrics収集を追加。初�
 
 Phase 2C-2b-2で単一Snapshotの詳細metricsを追加。collector専用の観測派生クラスでraw matcher状態を取得し、generator集約状態、primary/最良乗換alternativeの第1・第2区間、延べ参照/セル内一意対象、照合率の分子/分母を分離する。診断code・v2除外・validator error・routeCoverage・種別/行先の根拠を収集する。既存generator/matcher/v2 gateと表示ラベルは未変更。品質engine依存は17ファイル。全体collectionStatusはpartialを維持し、旧新品質差分・画面モデル・公開資格は未評価。
 
+Phase 2C-2c-1で独立read-only `scripts/odpt_quality_diff.py` を追加。同じ凍結engine/contextで既存collectorをbaseline→candidateの順に実行し、基本9指標（除外理由は理由別）の差分を48セルで比較する。欠損・取得不能は0補完せず、両側の算術検査を独立に実行する。結果は非公開・メモリ内のみで、詳細保持上限・集計保持・決定的digestを持つ。比較自体もengine依存に加え現在18ファイル。全体comparisonStatusはpartial、確定変化ありならqualityDiffStatus=changed、基本差分0でも詳細/表示モデル未比較のためindeterminate。実自己比較は48セル・672比較で基本差分0、原本/store前後不変を確認。候補減少を品質悪化・公開資格へ変換しない。詳細metrics差分・画面表示モデル比較は後続。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。
@@ -43,7 +45,7 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. 未知selector・補助関係の評価範囲、世代別raw保管方式、旅程品質差分を後続Phaseで設計する。
+1. 未知selector・補助関係の評価範囲、世代別raw保管方式、詳細旅程品質差分・画面表示モデル比較を後続Phaseで設計する。
 2. Source取得履歴とapplicationPeriod根拠の検証を、差分処理・公開判断から分離して設計する。
 3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
 
