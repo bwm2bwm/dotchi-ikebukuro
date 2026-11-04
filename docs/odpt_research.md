@@ -1069,3 +1069,24 @@ trips→routes/service、stop_times→trips/stops、parent_station、routes/fare
 独立CLI: `python3 -B scripts/odpt_gtfs_loader.py --zip <absolute-zip> --source-record <absolute-source-record-json>`。既存compare-semanticは変更せず、ODPT6件とGTFS not-evaluatedの結果契約も維持。CLIはsource同一性と構造検証、件数、一意性、参照集計、未知列数、固定codeのみを表示。終了0は構造検証完了（partialは明示して許容）、入力・同一性・構造不正と引数不正は2。本文・ID値・原本pathは出力しない。
 
 実GTFS自己検証はhash/bytes一致、11テーブル検出、未知列0、候補key重複0、参照resolved474,507/optional-absent68,061。shape_id/block_idの補助参照未評価によりcoverage partial。約7.842秒、process peak RSS 480,075,776 bytes（約458 MiB、macOS resource計測、Python/結果全体を含む）。原本7件/store8 JSONのhash/byte数は前後一致。異世代GTFS比較は未実施。
+
+
+### Phase 2B-2c-2 GTFS運行系6テーブル比較（2026-11-04）
+
+`scripts/odpt_gtfs_semantic_diff.py` を追加し、profile `dotchi.odpt-gtfs.semantic` / `1.0.0` と既存semantic diff contract/schemaVersionを維持する。routes/stops/trips/stop_times/calendar/calendar_datesのみ比較し、agency/feed_info/fare_attributes/fare_rules/translationsは意味比較not-evaluated。feed_infoの期間は評価範囲指定だけに使う。既存ODPT6 source比較とcompare-semantic CLIは変更しない。新CLIはODPT比較結果を再利用して固定7 sourceResultsへGTFS結果を組み込み、確定した差分と未評価・曖昧性を保持する。GTFS coverageと全体coverageはpartial、全体semanticStatusは常にindeterminate。
+
+入力は両storeと両原本directoryを明示する。既存store reader・Phase 2A基本差分・ODPT6 source比較の14原本検証を再利用し、全7 sourceのhash/bytesとidentityを確認してから旧新GTFS loaderを実行する。比較後も14原本と両storeを再検証し、欠落・不一致・読取/比較中変更は固定error codeで失敗する。旧原本を現行原本で代用しない。
+
+各tableの既存loader keyで対応付け、header/columnの存在、record追加削除、全既知属性、未知列の値を比較する。stop_timesはtrip_id+数値stop_sequenceを使い、時刻はservice day秒として比較、両側が既知時刻ならdeltaSecondsを記録する。空セルとmissing columnを区別し、24時超、停車駅・sequence、停車順の意味を保持する。pickup/dropoff/timepoint等も比較する。未知列や未対応enumはpartialとしてunsupported-field-changeを記録する。raw値は結果に複製せず、recordKey・fieldPath・状態と分類だけを保持する。
+
+Calendarは元record差分と有効運行日差分を別に保持する。両feed期間のunionRangesと共通期間を返し、片側期間外はnot-evaluated、共通期間がなければno-common-periodとする。共通期間内ではcalendarの曜日/rangeにcalendar_dates例外を優先適用し、service_id×serviceDateの追加・削除を記録する。片側に定義のないservice_idはその側に当該serviceがないという比較事実として扱い、別IDへ結合しない。feed期間欠損は推定せずpartial。最大3,660日かつ100万service-date組で、上限超過時は展開せずpartial/indeterminate。未対応曜日/例外値も未確定として保持する。
+
+route_id/stop_id/trip_id変更は削除・追加が基本。他の全比較属性が厳密一致し、双方向一意かつ未知field/enumがない場合だけpossible-identifier-changeを付記する。service_id候補はcalendarとcalendar_datesを合わせた全recordパターン一致を要求する。一意でも同一対象と確定しない。複数候補・対応できないID/参照連鎖変更はambiguous-change。同じIDで路線/運行日/駅参照等が変わる場合はsuspected-identifier-reuseを別記する。
+
+表現差は根拠を限定する。全member bytesのhashが同一ならZIPコンテナ差を記録できるが、全体意味同値とはしない。対象tableの全rawセルとheader集合が同一ならCSV表現差を分類する。headerと各rowの正確な引用符・改行を含むlexical multisetが同一ならcsv-record-order-only、解析後物理行順が同じならcsv-format-only、両方変化ならcsv-format-and-record-order。数値等の正規化でだけ一致するものはnormalized-value-representationとして区別する。差を説明できない場合は表現差のみと断定しない。残る5tableはmember bytes照合以外の意味比較をしない。
+
+GTFS findings/ambiguitiesは合計1,000件まで保持し、全件のtable集計と分類件数、totalDetails/omittedDetailsを維持する。打切りは明示し、table detailComplete=false、coverage partial/semanticStatus indeterminateとする。並びと比較事実は決定的、時間/RSS計測値は再実行で変わる。結果persistなし。
+
+CLI: `python3 -B scripts/odpt_gtfs_semantic_diff.py --baseline-store <absolute-store> --candidate-store <absolute-store> --baseline-source-dir <absolute-raw-dir> --candidate-source-dir <absolute-raw-dir>`。差分件数・coverage・未評価table・calendar状態・固定code・計測値のみ表示する。入力/構造/同一性不正、Calendar評価不能・上限、詳細打切りは終了2。対象範囲の比較完了は差分の有無によらず0（意図した5table未評価や保持された未知fieldによるpartialは明示して許容）。既存CLIの終了コードは変更しない。
+
+実自己比較QAでは6tableがcomplete/equivalent、変更0、GTFS partial/全体indeterminate、未評価5table。共通期間2026-09-19〜2027-03-12、350 service-date組、運行有無差0。原本7件/store8 JSON計15ファイルのhash/bytesは前後一致。旧/新解析・compact化・表現検査各14.871秒、比較3.083秒、全体37.861秒、peak RSS584,773,632 bytes（macOS、約558 MiB）。findings/ambiguities/打切りはいずれも0。loaderのshape/block補助関係未評価も保持する。両世代を同時に保持する前にloaderのcellsと未評価5tableの解析recordを解放し、比較には対象6tableの正規化recordと表現証拠hashだけを残す。今後は表現検査とloaderの二重CSV走査の共有化が最適化候補だが、今回は大規模変更しない。これは自己比較であり実世代間QAではない。

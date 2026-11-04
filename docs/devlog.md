@@ -877,3 +877,15 @@
 - 新loaderと既存Source契約/inventory/store/compat/basic diff/ODPT6 source意味比較/matcher/itinerary/snapshot QA/public v2を合わせ167テストPASS（122.390秒）。git diff --check PASS。開始HEAD/branchは維持、変更は指定3文書・inventory・新loader・新testの6ファイル。
 - 実自己検証は既存Phase 1C storeに結びつくZIPをread-only利用。agency1/feed_info1/routes9/stops185/trips9,706/stop_times176,385/calendar2/calendar_dates20/fare_attributes8/fare_rules33,938/translations494。全key重複0、未知列0、参照resolved474,507、optional-absent68,061。shape_id/block_id補助参照未評価によりpartial。7.842秒、ピークRSS約458 MiB。15原本/storeファイルのhash/byte数は前後一致。
 - 変更文書はproject_state/research/devlogのみ。ODPT6件の比較、既存GTFS解析・snapshot QA、取得/public v2/synthetic/release-managed/Actions/Cloudflareは変更なし。API・新規取得・原本複製・結果persist・旧新GTFS比較・公開資格・Commit/Push/Mergeなし。
+
+
+## 2026-11-04 — ODPT-2G Phase 2B-2c-2 GTFS運行系6テーブル意味比較
+
+- 開始branch main、HEAD `ebbfec7ccf22b6a622315d32b4f08e56e455408b`、前工程commit済み・cleanを確認。README/指定文書/Source・Snapshot・基本/ODPT意味比較/GTFS loader・関連テストと既存profileを確認。
+- 独立 `scripts/odpt_gtfs_semantic_diff.py` と合成fixtureのみの `tests/test_odpt_gtfs_semantic_diff.py` を追加。両store/両原本を明示し、Source/Snapshot契約、14原本hash/bytes/identity、loaderのstrict parse/keys/参照検査を利用する。比較前後の原本/storeも再確認する。
+- routes/stops/trips/stop_times/calendar/calendar_datesのrecord/key/属性・参照・時刻・停車順差、共通feed期間のservice-date運行差、ID変更候補/曖昧性/再利用警告、証拠を限定したZIP/CSV表現差を実装。結果は既存semantic schemaの固定7 sourceへ統合し、5table意味未評価/GTFS partial/全体indeterminateを維持。
+- Calendarは最大3,660日・100万service-date組、GTFS詳細は1,000件まで。集計/打切り件数を保持し、未知値・期間欠損・上限等を完全比較としない。ID変更を同一列車/同一serviceへ自動結合しない。新CLIはraw非表示、差分だけなら終了0、入力不正・範囲評価不能・打切りは2。既存CLI不変。
+- 合成9テストメソッド（subTest含む）と対象44件PASS。6table同一・表現差・各属性・追加削除・方向反転・60秒/24時超/空時刻・例外日・feed共通期間/上限・ID/参照連鎖・未知値・決定性・統合CLI・原本不一致/欠落・不変を確認。
+- 新GTFS比較と既存loader/Source契約/inventory/store/compat/basic diff/ODPT6 source比較/matcher/itinerary/snapshot QA/public v2を合わせ176テストPASS（113.197秒）。git diff --check PASS。
+- 実自己比較で6table比較成立、既知差分0、共通期間2026-09-19〜2027-03-12の350 service-date組で運行差0。5table未評価、GTFS partial/全体indeterminate。解析（compact化/表現検査含む）旧14.871秒/新14.871秒、比較3.083秒、全体37.861秒、peak RSS約558 MiB。詳細0、打切り0、15原本/storeファイルのhash/bytes前後一致。異世代実績ではない。
+- 変更は新module/testと指定3文書のみ。ODPT6比較、既存CLI、GTFS loader、取得/QA/public v2/synthetic/release-managed/Actions/Cloudflareは未変更。API/取得/原本・store変更/結果persist/残り5table意味比較/公開資格判定/Commit/Push/Mergeなし。
