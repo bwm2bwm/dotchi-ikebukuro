@@ -10,6 +10,8 @@ Phase 2B-2c-1では独立read-only GTFS loaderを追加。11テーブルのZIP/C
 
 Phase 2C-2aの品質比較入力基盤を追加。Phase 2C-1採用契約をresearchへ記録し、strict evaluationContext、15依存ファイル・実行環境のengine fingerprint、両storeと14原本のread-only検証を行う。同一Snapshot自己比較でreadyを確認。readyは条件・入力の一致のみで、旅程生成/metrics/品質差分/表示モデルは未評価。
 
+Phase 2C-2b-1で単一Snapshotのgenerator/v2基本metrics収集を追加。初期3日×8駅×2出発路線の48セルで生成行G・表示候補C・実測除外E、primary直通/乗換、除外理由、generatorが保持するalternative/接続組数をメモリ内に返す。既存入力検証と原本7件/store8件の開始・終了照合を利用し、collector自身もengine依存へ追加（現在16ファイル）。collectionStatusはpartialで、品質PASS・公開資格を表さない。matcher・UNKNOWN/WARNING・routeCoverage詳細、品質差分・表示モデルは後続。既存v2 gateと実データ公開未承認は維持。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。

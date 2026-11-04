@@ -912,3 +912,14 @@
 - 品質入力15件と既存Phase 2A/2B関連の合計117件PASS（11.817秒）。engineの現在値との完全一致を必須にした最終状態でも対象15件PASS。旅程生成を伴う実QAは実行していない。git diff --check PASS。
 - 実Phase 1C store/7原本の同一入力・engine/contextでready。両store契約/contentFingerprint、14原本、engine/env、終了時再検証PASS。15ファイルhash/byte数前後一致。約6.879秒。Node24.15.0/ICU78.2/CPython。旅程生成/metrics/画面モデルの実行なし。
 - 変更は新module/testと指定3文書のみ。API/新規取得、原本/store複製・変更、v2 gate、applicationPeriod/publicationApproved、公開資格、Actions/Cloudflare/Deploy、Commit/Push/Mergeなし。
+
+## 2026-11-04 — ODPT-2G Phase 2C-2b-1 単一Snapshot基本metrics
+
+- 開始branch `main`、HEAD `3d5b0feb95fabaa07639328ecb1e7e4b1ba21572`、Phase 2C-2a commit済み・cleanを確認。指定README/文書、品質入力/generator/v2/snapshot QA、関連テストと駅路線mappingを確認した。
+- 独立read-only `scripts/odpt_quality_metrics.py` を追加。既存入力validatorへ同じSnapshotを渡してcontext/engine/env/Source/Snapshot契約・原本hash/bytesを開始・終了に検証し、さらに原本7件/store8件の物理bytes/identityを前後照合する。collector自身をengine seedへ追加（現在16依存）。元のgenerator/v2射影・除外理由関数を再利用し、公開gateは変更しない。
+- 2026-10-28〜30×既存8駅×出発route6/9（有楽町/副都心）の48セル、wait60〜3600秒・cross-date=false。G/C/E、primary直通/乗換、排他的除外理由、既存fieldのdirect alternative行/best transfer行/有効接続組数を取得する。0と不明、生成行と候補行、primaryとalternative、行と接続組を区別。未知fieldはunavailable/null、局所失敗でも他の確定値を保持し、全体入力/engine変更時は正常な収集として確定しない。
+- メモリ内contract=odpt-itinerary-quality-collection/schemaVersion1、quality profile=dotchi.odpt.itinerary-quality/0.1.0-draft。48セルでG=C+E、C=primary直通+乗換、E=実測理由合計を検査し、不一致は補正せずfinding。collectionStatusはpartial/failedのみ。CLIは対象条件・known集計/セル数・未評価項目・状態・時間/RSSのみ表示し、本文/列車ID/結果artifactを出力・保存しない。終了0=基本収集成立、2=部分/不整合/条件不一致、3=入力不正/変更、4=利用不能。
+- 新規合成14テスト＋入力検証15テスト（最終29件）PASS。6理由の正確な件数、G/C/E、primary/alternative/接続組の区別、48セル/決定性/known0、入力・engine異常、原本・store整形・engine変更、局所失敗保持、既存v2射影一致、CLI/gate独立を確認。関連統合216件では215件PASS、既存localhost server test1件はsandboxのbind拒否となり、権限付き単独再実行でPASS。統合後に追加した3テストも最終29件でPASS。既存v2 adapter/DOM Node12件PASS。
+- 実Phase 1C store/原本7件で48セル・全432 metricsがknown、評価不能0。延べG10,536/C10,128/E408、primary直通7,887/乗換2,241。除外はexplicit_pass_info408、他5理由はknown/0。direct alternative行7,887/best transfer行6,570/有効接続組50,772。独立列車数として合算しない。3算術checks×48=144 PASS、finding0、collectionStatus partial/basicMetricsStatus collected、実CLI終了0。matcher/UNKNOWN・WARNING/routeCoverage詳細と品質差分/表示モデル/鮮度/公開資格は未評価。
+- 最終実QA46.558秒（独立前後inventoryを含む）、process peak RSS363,638,784 bytes（約346.8 MiB、macOS）。原本7件/store8件のhash/byte数・identityが前後一致し、外側の独立照合でも15/15一致。集計レポートは永続化せず、検証要約だけresearchと本履歴へ記録した。
+- 変更は新module/test、品質engine seed、指定3文書のみ。既存generator/QA/v2 gate、applicationPeriod/publicationApproved、取得/公開/CI/Cloudflare経路は未変更。API/新規取得、原本・store変更/複製/移動、旧新比較、Deploy、Commit/Push/Mergeなし。

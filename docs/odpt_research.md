@@ -1136,3 +1136,32 @@ environmentはCPython implementation/full version/cache tag/binary SHA、Node bi
 CLI: `python3 -B scripts/odpt_quality_input.py --baseline-store <absolute-store> --candidate-store <absolute-store> --baseline-source-dir <absolute-raw-dir> --candidate-source-dir <absolute-raw-dir>`。context/engine file無指定では現在のengineと明示した初期QA contextをメモリに構成する。--baseline-context/--candidate-context、--baseline-engine/--candidate-engineで既存のprivate JSONも明示できる。一方だけ指定した場合は他方を自動補完しない。出力はreadiness・設定/fingerprint/契約check要約・固定code・metrics未評価のみ。0=ready、2=incomparable（argparse引数不正も2）、3=invalid、4=unavailable。永続化なし。
 
 実自己検証は既存Phase 1C store/原本でready、context identical、engine PASS、両側7原本/契約/fingerprint/終了時check PASS、reasonCodesなし。原本7件/store8 JSONのhash/bytes前後一致。Node24.15.0/ICU78.2/CPythonで約6.879秒（engine/env走査含む）。旅程生成・品質metrics・表示モデル実行なし。後続は2C-2bで単一Snapshot metrics、2C-2cで同一engine/contextの両側比較、2C-3で固定clock/filterのadapterモデルを実装する。既存gate・synthetic/public経路は維持する。
+
+### Phase 2C-2b-1 単一Snapshotの基本metrics（2026-11-04）
+
+独立read-only `scripts/odpt_quality_metrics.py` を追加。profileは `dotchi.odpt.itinerary-quality` / `0.1.0-draft`。`collect_metrics(store, source_dir, context=..., engine=...)` は単一SnapshotをPhase 2C-2a validatorの両側へ同じ入力として渡し、比較・差分は作らない。Source/Snapshot契約、原本7件のhash/bytes、context、現在engineと環境を開始・終了に検証する。さらに原本7件/store8件のSHA-256・byte数とdevice/inode/size/mtime/ctimeを開始前・終了後で照合し、JSON整形だけのstore変更も検出する。collector自身をengine rootsに追加し、現在の依存集合は16ファイル。既存公開用fingerprint/gateは変更しない。
+
+既定contextは2026-10-28〜30、池袋発、既存8駅、出発routeId 6=有楽町線・9=副都心線（GTFS内部IDも同じ文字列）、wait60〜3600秒、crossServiceDateSearch=false。各駅で既存ItineraryGeneratorを使い、日別の返却行を出発路線別に分ける。生成を繰り返して乗換接続を再計算する独自ロジックは持たない。48セルを基本とし、配列順はserviceDate・stationId・routeId・metricId。
+
+| metricId | 計測値と母集団 | unit |
+|---|---|---|
+| G | generator返却行すべて。到達不能・除外予定を含む | generated-rows |
+| C | 既存v2 `_public_departure` で射影された候補行 | candidate-rows |
+| E | 射影がNoneになった行を1行ずつ実測 | excluded-rows |
+| primaryDirectCount / primaryTransferCount | Cのprimary.kind別件数 | candidate-rows |
+| exclusionReasonCounts | 既存 `_exclusion_detail` の排他的な6理由別実測件数 | excluded-rows-by-reason |
+| alternativeDirectRowCount | Gのdirect_alternativeが存在する行数。primary直通の行も含む | generated-rows |
+| bestTransferRowCount | Gのbest_transfer_alternativeが存在する行数。primaryと独立 | generated-rows |
+| validTransferPairCount | Gのtransfer_candidates_countの合計。最良1候補へ絞る前の有効接続組数 | transfer-pairs |
+
+補助3指標はgeneratorの既存fieldから直接取得する。field欠落・接続組数の型/値不正はunavailable/nullと理由を記録し、推定や再探索はしない。空の評価可能セルはknown/0。各metricはmetricId/dimensions（snapshotId/serviceDate/stationId/routeId）/availability/value/unit/reasonCodes/evidenceRefsを持つ。availability語彙はknown/unavailable/out-of-range/not-applicable/failed（この工程ではnot-applicableを生成する対象なし）。不明値はnull。日付期間外はout-of-range、generator/射影例外はfailed。射影失敗でもGと取得できた補助指標、他セルの確定値を保持する。
+
+セルごとにG=C+E、C=primaryDirect+primaryTransfer、E=除外理由の実測合計を検査する。不一致はfindingに残し補正しない。EをG-Cから求めない。v2既存のsignature/public ID helperを使って重複・衝突も検出する。既存公開gate、routeCoverage判定、matcher集計、UNKNOWN/WARNING分類別詳細、画面モデルは実行しない。除外理由に既存quality_warning等が含まれることと、診断詳細の品質評価は別である。
+
+結果contractはodpt-itinerary-quality-collection/schemaVersion 1。profile、Snapshot ID/contentFingerprint、evaluationContext/contextFingerprint、engineFingerprint、metrics、checks、findings、notEvaluated、collectionStatusを返す。全体は常にpartialまたはfailedでcompleteを付けない。basicMetricsStatus=collectedはこの9指標の収集と算術検査だけが成立した意味。セル評価不能・指標欠損・算術不一致があればbasicMetricsStatus=partial。全体入力・engineの不一致/実行中変更ならfailedとし、当該Snapshotの確定値として扱えない全metricをfailed/nullにする。結果に時計・処理時間・RSSを混ぜず決定性を保ち、レポート/payload/旅程本文を永続化しない。
+
+CLI: `python3 -B scripts/odpt_quality_metrics.py --store <absolute-store> --source-dir <absolute-source-dir>`。現在engineと初期contextをメモリに作り、対象日付・8駅・路線、knownなセルだけの各合計とknownセル数、全セル数/評価不能数、算術check件数、未評価項目、collectionStatus、入力前後不変、時間/RSSを表示する。合計は駅日路線の延べ行/接続組数であり、route6/9や8目的地を跨ぐ独立列車数ではない。全値不明なら合計もnullで0にしない。CLI終了0=基本metrics収集成立（全体partial）、2=部分収集/整合不一致/engine条件不一致/引数不正、3=入力不正・変更、4=入力/環境利用不能。raw source・旅程本文・列車IDは出力しない。
+
+実source非公開QAは既存Phase 1C store（snapshotId `33af11c1-60f6-47fd-993a-94aa8b469cb1`、contentFingerprint `9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d`）と対応原本7件を利用。全48セル・432 metricsがknown、評価不能0、findings0。延べG=10,536、C=10,128、E=408、primary直通7,887/乗換2,241。補助指標はdirect alternative行7,887、best transfer行6,570、有効接続組50,772。除外理由はexplicit_pass_info=408、他5理由は各known/0（要町・千川の副都心線で各204、3日合計）。各日16セルのG=3,512/C=3,376/E=136、直通2,629/乗換747。出発route6の3日・8駅合計はG=5,256/C=5,256/E=0、route9はG=5,280/C=4,872/E=408。これらは延べ行であり独立列車数ではない。
+
+G=C+E、C=直通+乗換、E=理由合計をそれぞれ48セル、合計144 checksでPASS。開始・終了のcontext identical、engine/env、Source/Snapshot契約・hash/bytesともPASS。collectionStatus=partial/basicMetricsStatus=collected、CLI終了0。レポートはメモリ内のみ。最終実行は46.558秒（独立した外側の前後inventory照合も含む）、process peak RSS363,638,784 bytes（約346.8 MiB、macOS）。原本7件/store8件の全15ファイルについて、collector内と独立照合の両方でSHA-256・byte数・identity前後一致。最終engineFingerprintは `ac072b0989e44e6ced288a0a05cbddaad9068b3e8f3108941fc7ba736e71d101`、contextFingerprintは `310f7ccd8e8ff892dbfffba5a03055fc5bd12cd5ace77bd8c5972ab3626c5735`。品質PASS・鮮度・公開資格の判定は行わない。
