@@ -154,7 +154,8 @@ class QualityDiffTests(unittest.TestCase):
         self.assertEqual(diff.exit_code(r),0)
         self.assertEqual(len(r['baselineMetrics']),432)
         self.assertEqual(len(r['candidateMetrics']),432)
-        self.assertIn('detailed-metrics-diff',r['notEvaluated'])
+        self.assertFalse(r['omittedDetails'])
+        self.assertNotIn('detailed-metrics-diff',r['notEvaluated'])
         self.assertFalse(r['findings'])
         self.assertEqual(before,collector._inventory(self.store,self.source))
         self.assertEqual(tree,sorted(self.fixture.fixture.helper.root.rglob('*')))
@@ -231,7 +232,7 @@ class QualityDiffTests(unittest.TestCase):
         self.assertEqual(r['summary']['metricDiffTotals']['C']['delta'],-18)
         self.assertEqual(r['summary']['metricDiffTotals']['G']['delta'],-156)
         self.assertTrue(any('candidate-disappeared' in f.get('classifications',[]) for f in r['findings']))
-        self.assertEqual(diff.exit_code(r),0)
+        self.assertEqual(diff.exit_code(r),2)
 
     def test_input_mutation_during_first_collector_call(self):
         original=collector.ItineraryGenerator.generate;changed=False
@@ -316,7 +317,7 @@ class QualityDiffTests(unittest.TestCase):
         self.assertTrue(all(m['reasonCodes']==sorted(m['reasonCodes']) for m in r['metricDiffs']))
 
     def test_cli_fixed_codes_and_difference_is_not_error(self):
-        r=self.compare();args=['--baseline-store',str(self.store),'--candidate-store',str(self.store),
+        r=self.compare(detail_limit=10000);args=['--baseline-store',str(self.store),'--candidate-store',str(self.store),
                               '--baseline-source-dir',str(self.source),'--candidate-source-dir',str(self.source)]
         for readiness,code in (('ready',0),('incomparable',2),('invalid',3),('unavailable',4)):
             report=copy.deepcopy(r);report['inputReadiness']=readiness
@@ -337,6 +338,7 @@ class QualityDiffTests(unittest.TestCase):
             code=diff.main(['--baseline-store',str(self.store),'--candidate-store',str(self.store),
                            '--baseline-source-dir',str(self.source),'--candidate-source-dir',str(self.source)])
         self.assertEqual(code,0)
+        self.assertNotIn('detail_limit_reached',out.getvalue())
         self.assertIn('"unchangedCellCount": 48',out.getvalue())
         self.assertIn('quality_diff_status=indeterminate',out.getvalue())
         self.assertNotIn('trip-6-',out.getvalue())

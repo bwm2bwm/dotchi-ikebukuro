@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private basic itinerary quality comparison; read-only, sequential, memory only."""
+"""Private basic/detailed itinerary quality comparison; sequential, memory only."""
 from __future__ import annotations
 
 import argparse
@@ -14,8 +14,10 @@ from pathlib import Path
 
 if __package__:
     from . import odpt_quality_metrics as collector
+    from . import odpt_quality_detail_diff as detail_diff
 else:
     import odpt_quality_metrics as collector
+    import odpt_quality_detail_diff as detail_diff
 quality = collector.quality
 
 DIMENSIONS = ('serviceDate', 'stationId', 'routeId')
@@ -23,7 +25,7 @@ SIDES = ('baseline', 'candidate')
 DEFAULT_DETAIL_LIMIT = 1000
 MAX_DETAIL_LIMIT = 10000
 NOT_EVALUATED = sorted((set(collector.NOT_EVALUATED) - {'quality-diff'}) | {
-    'detailed-metrics-diff', 'display-model-diff', 'quality-verdict',
+    'display-model-diff', 'quality-verdict',
     'cross-generation-trip-or-public-id-matching',
 })
 
@@ -33,13 +35,15 @@ def _key(metric):
 
 
 def _compact(report):
-    # The unmodified collector still collects all detailed metrics. Release those
-    # observations before evaluating the other Snapshot; only basic evidence is retained.
+    # Retain aggregates only; generator/DTO observations are released before the other side.
     return {k: copy.deepcopy(report.get(k)) for k in (
         'snapshotId', 'contentFingerprint', 'contextFingerprint', 'engineFingerprint',
         'collectionStatus', 'basicMetricsStatus', 'reasonCodes', 'failureCategory')} | {
         'metrics': sorted((copy.deepcopy(m) for m in report['metrics']
                            if m['metricId'] in collector.METRIC_UNITS), key=_key),
+        'detailedMetrics': sorted((copy.deepcopy(m) for m in report['metrics']
+                                  if m['metricId'] in collector.details.UNITS), key=_key),
+        'detailedConsistency': copy.deepcopy(report['checks'].get('detailedConsistency', [])),
         'inputChecks': {k: copy.deepcopy(report['checks'][k]) for k in (
             'inputStart', 'inputEnd', 'inputImmutability') if k in report['checks']}}
 
@@ -212,9 +216,12 @@ def compare_quality(baseline_store, candidate_store, baseline_source_dir, candid
         'notEvaluated': list(NOT_EVALUATED), 'comparisonStatus': 'failed', 'qualityDiffStatus': 'indeterminate',
         'basicQualityDiffStatus': 'indeterminate', 'inputReadiness': 'ready', 'reasonCodes': [],
         'summary': None, 'omittedDetails': {}, 'detailLimit': detail_limit}
+    result.update(baselineDetailedMetrics=[], candidateDetailedMetrics=[], detailedMetricDiffs=[],
+                  detailedSummary=None, detailedQualityDiffStatus='indeterminate', confirmedFindingCount=0)
     problems = []
     compact = []
     compared = None
+    detailed = None
     before = {}
     paths = [(Path(baseline_store), Path(baseline_source_dir)), (Path(candidate_store), Path(candidate_source_dir))]
     try:
@@ -264,6 +271,7 @@ def compare_quality(baseline_store, candidate_store, baseline_source_dir, candid
                     problems.append(('incomparable', ['collection_conditions_mismatch']))
             if not problems:
                 compared = compare_basic(*compact, contexts[0], detail_limit=detail_limit)
+                detailed = detail_diff.compare_details(*compact, contexts[0], detail_limit=detail_limit)
             # End checks cover the arithmetic comparison as well as both collectors.
             end = validate()
             result['checks']['inputEnd'] = end
@@ -290,6 +298,12 @@ def compare_quality(baseline_store, candidate_store, baseline_source_dir, candid
         omitted = len(report['metrics']) - len(result[side + 'Metrics'])
         if omitted:
             result['omittedDetails'][side + 'Metrics'] = omitted
+        actionable = set(detailed['actionableMetricKeys']) if detailed else set()
+        candidates = [m for m in report['detailedMetrics']
+                      if (tuple(m['dimensions'][k] for k in detail_diff.DIMS),m['metricId']) in actionable]
+        result[side+'DetailedMetrics'] = candidates[:detail_limit]
+        omitted = len(candidates)-len(result[side+'DetailedMetrics'])
+        if omitted: result['omittedDetails'][side+'DetailedMetrics'] = omitted
     if problems:
         result['inputReadiness'] = next(c for c in ('invalid', 'unavailable', 'incomparable') if any(p[0] == c for p in problems))
         result['comparisonStatus'] = 'incomparable' if result['inputReadiness'] == 'incomparable' else 'failed'
@@ -301,6 +315,7 @@ def compare_quality(baseline_store, candidate_store, baseline_source_dir, candid
         if len(findings) > limit:
             result['omittedDetails']['findings'] = len(findings) - limit
         result['notEvaluated'] = sorted(set(result['notEvaluated']) | {'basic-metrics-diff'})
+        result['notEvaluated'] = sorted(set(result['notEvaluated']) | {'detailed-metrics-diff'} | set(detail_diff.TIME_NOT_EVALUATED))
     else:
         result.update(metricDiffs=compared['metricDiffs'], findings=compared['findings'], summary=compared['summary'])
         result['checks']['consistency'] = compared['consistency']
@@ -318,6 +333,23 @@ def compare_quality(baseline_store, candidate_store, baseline_source_dir, candid
             result['basicQualityDiffStatus'] = 'unchanged'
         if summary['partialCellCount']:
             result['notEvaluated'] = sorted(set(result['notEvaluated']) | {'basic-metrics-or-consistency-incomplete'})
+        result['detailedMetricDiffs'] = detailed['detailedMetricDiffs']
+        result['detailedSummary'] = detailed['summary']
+        result['unchangedDetailsAggregatedCount'] = detailed['unchangedDetailsAggregatedCount']
+        result['checks']['detailedConsistency'] = detailed['checks']
+        result['notEvaluated'] = sorted(set(result['notEvaluated']) | set(detailed['notEvaluated']))
+        result['omittedDetails'].update(detailed['omittedDetails'])
+        combined = result['findings'] + detailed['findings']
+        if len(combined) > detail_limit:
+            result['omittedDetails']['combinedFindings'] = len(combined)-detail_limit
+        result['findings'] = combined[:detail_limit]
+        result['confirmedFindingCount'] = summary['changedMetricCount'] + detailed['summary']['confirmedFindingCount']
+        if detailed['summary']['changedMetricCount']:
+            result['qualityDiffStatus'] = result['detailedQualityDiffStatus'] = 'changed'
+        elif not detailed['summary']['partialCellCount']:
+            result['detailedQualityDiffStatus'] = 'unchanged'
+        if detailed['summary']['knownMetricCount'] and result['comparisonStatus'] == 'failed':
+            result['comparisonStatus'] = 'partial'
     if result['omittedDetails']:
         result['reasonCodes'] = sorted(set(result['reasonCodes']) | {'detail_limit_reached'})
         result['notEvaluated'] = sorted(set(result['notEvaluated']) | {'omitted-comparison-details'})
@@ -330,6 +362,7 @@ def exit_code(result):
     if result['inputReadiness'] == 'unavailable': return 4
     if (result['inputReadiness'] != 'ready' or result['summary'] is None or
         result['summary']['partialCellCount'] or result['omittedDetails']): return 2
+    if (result.get('detailedSummary') or {}).get('partialCellCount'): return 2
     return 0
 
 
@@ -342,6 +375,8 @@ def main(argv=None):
     result = compare_quality(args.baseline_store, args.candidate_store, args.baseline_source_dir, args.candidate_source_dir)
     print('profile=' + quality.PROFILE['id'] + ' version=' + quality.PROFILE['version'])
     print('summary=' + json.dumps(result['summary'], sort_keys=True))
+    print('detailed_summary=' + json.dumps(result['detailedSummary'], sort_keys=True))
+    print('confirmed_finding_count=' + str(result['confirmedFindingCount']))
     print('comparison_status=' + result['comparisonStatus'] + ' quality_diff_status=' + result['qualityDiffStatus']
           + ' basic_quality_diff_status=' + result['basicQualityDiffStatus'] + ' input_readiness=' + result['inputReadiness'])
     print('not_evaluated=' + ','.join(result['notEvaluated']))
