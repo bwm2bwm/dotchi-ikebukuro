@@ -252,20 +252,27 @@ def generate_inventory(source_dir: Path, observed_at: str | None = None,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", choices=("inspect", "persist", "verify", "compare-legacy", "compare"), default="inspect")
+    parser.add_argument("command", nargs="?", choices=("inspect", "persist", "verify", "compare-legacy", "compare", "compare-semantic"), default="inspect")
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SNAPSHOT)
     parser.add_argument("--store", type=Path)
     parser.add_argument("--baseline-store", type=Path)
     parser.add_argument("--candidate-store", type=Path)
+    parser.add_argument("--baseline-source-dir", type=Path)
+    parser.add_argument("--candidate-source-dir", type=Path)
     args = parser.parse_args(argv)
-    if args.command == "compare":
+    if args.command in {"compare", "compare-semantic"}:
         if args.store is not None or args.baseline_store is None or args.candidate_store is None:
             parser.error("compare requires --baseline-store and --candidate-store; --store is not valid")
         if not args.baseline_store.is_absolute() or not args.candidate_store.is_absolute():
             parser.error("compare store paths must be absolute")
     elif args.baseline_store is not None or args.candidate_store is not None:
         parser.error("--baseline-store and --candidate-store are only valid for compare")
-    if args.command not in {"inspect", "compare"} and args.store is None:
+    if args.command == "compare-semantic":
+        if args.baseline_source_dir is None or args.candidate_source_dir is None:
+            parser.error("compare-semantic requires --baseline-source-dir and --candidate-source-dir")
+    elif args.baseline_source_dir is not None or args.candidate_source_dir is not None:
+        parser.error("source directory pairs are only valid for compare-semantic")
+    if args.command not in {"inspect", "compare", "compare-semantic"} and args.store is None:
         parser.error(f"--store is required for {args.command}")
     if args.command == "inspect" and args.store is not None:
         parser.error("--store is only valid for persist, verify, or compare-legacy")
@@ -285,6 +292,27 @@ def main(argv: list[str] | None = None) -> int:
         from odpt_source_store import StoreError
         from odpt_source_compat import CompatibilityError
         from odpt_source_diff import SourceDiffError
+        from odpt_train_semantic_diff import SemanticDiffError
+        if args.command == "compare-semantic":
+            from odpt_train_semantic_diff import compare_train_timetables
+            result = compare_train_timetables(args.baseline_store, args.candidate_store,
+                                             args.baseline_source_dir, args.candidate_source_dir)
+            print(f"compare_semantic={result['comparisonStatus']} semantic_status={result['semanticStatus']} "
+                  f"profile={result['profile']['id']} version={result['profile']['version']}")
+            for row in result["sourceResults"]:
+                print(f"source_id={row['sourceId']} coverage={row['coverage']} "
+                      f"semantic_status={row['semanticStatus']} categories={','.join(row['categories']) or 'none'} "
+                      f"added={row['counts']['added']} removed={row['counts']['removed']} "
+                      f"modified={row['counts']['modified']} changes={row['counts']['changes']} "
+                      f"truncated={row['truncated']}")
+                for code in row["errorCodes"]:
+                    print(f"source_id={row['sourceId']} error={code}")
+                for code in sorted({item['code'] for item in row['warnings'] + row['ambiguities']}):
+                    print(f"source_id={row['sourceId']} warning={code}")
+            for error in result["inputErrors"]:
+                print(f"side={error['side']} source_id={error['sourceId']} error={error['code']}")
+            incomplete = any(row["coverage"] == "partial" for row in result["sourceResults"])
+            return 2 if result["comparisonStatus"] == "failed" or incomplete else 0
         if args.command == "persist":
             from odpt_source_store import persist_snapshot
             result = persist_snapshot(args.store, args.source_dir)
@@ -321,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
         result = compare_legacy(args.store, args.source_dir)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0 if result["status"] == "PASS" else 2
+    except SemanticDiffError as exc:
+        print(f"compare_semantic=FAIL error={exc.code}")
+        return 2
     except SourceDiffError as exc:
         print(f"compare=FAIL error={exc.code}")
         return 2

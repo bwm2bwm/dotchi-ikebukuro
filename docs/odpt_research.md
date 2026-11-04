@@ -241,6 +241,46 @@ metadata比較ではODPT recordCountと`dc:date`/`dct:issued`値集合、GTFS fe
 
 本文のJSON/GTFS意味比較、旅程品質差分、総合公開資格判定、結果永続保存は未実装。hash一致は保存bytesの同一性を強く確認するが、取得日時・ダイヤ有効性・source間の同一版性を証明しない。
 
+### Phase 2B-1採用契約・Phase 2B-2a TrainTimetable意味比較（2026-11-04）
+
+比較profileは `dotchi.odpt-gtfs.semantic` / `1.0.0`。本節をPhase 2B-1レビューで採用した契約とし、初回実装は [`scripts/odpt_train_semantic_diff.py`](../scripts/odpt_train_semantic_diff.py) のTrainTimetable有楽町・副都心2 sourceだけに限定する。残るRailway、Station、StationTimetable 2件、GTFSは意味比較しない。世代別raw保管方式、GTFS table別キー・カレンダー比較、StationTimetableの動的boolean key等は後続工程で設計・確定し、今回実装しない。
+
+**採用した基本規則**
+
+- JSON objectのkey順・空白・escape表現を解析後の値で比較する。重複key、NaN/Infinity等の非標準定数、構造・型不正を拒否する。数値の解析はDecimalで精度を保持し、unknown値も型を保持して比較する。
+- ODPT record主キーは `owl:sameAs`。`@id`も必須・一意とし変更を検出する。トップレベル配列は主キー存在・一意性の検査後だけ並び順を無視する。停車・発着イベント、起終点駅配列は順序を保持する。未定義配列のsort・重複除去はしない。
+- missing、null、空文字、false、0を区別する。必須識別子・参照は空でない文字列、起終点駅は空でない文字列配列。metadataは文字列・null・missingを受理して区別する。イベント時刻はmissing/null/空文字を保存された欠損状態として保持し、false/0等の不正型を拒否する。欠損が同じことは時刻の妥当性を保証しない。
+- 既知時刻はASCII `HH:MM` / `HH:MM:SS`（hourは2〜3桁、分秒0〜59）を秒へ変換し、秒省略は00秒とする。24時超を保持し、24時間剰余、丸め、日付補完をしない。文字列のtrim・大小文字・全半角・駅名統合も行わない。
+- 識別子の世代間安定性を仮定しない。主キー変更は削除・追加を維持する。識別子4項目（owl:sameAs、@id、train、trainNumber）以外の全値が厳密一致し、unknownがなく、旧新の対応が双方向に一意な場合だけ `possible-identifier-change` を付記する。複数候補は `multiple-identifier-candidates`。いずれも同一列車と自動確定しない。
+- 同じ主キーのtrain/trainNumber/railway/railDirection/calendar変更、または同じ@idが異なる主キー・異なる内容へ対応する場合は `suspected-identifier-reuse` 警告を残す。
+- 未知fieldはrecord/eventのfield pathとsideを保持し、その値も比較する。unknownが不変でもcoverageはpartial。既知以外の@contextは警告・partial、未対応@typeやsourceとrailwayの不整合は入力不正とする。URIを外部へ解決しない。
+
+**TrainTimetableの既知field**
+
+| 分類 | field（`odpt:` prefixは対象語に適用） |
+| --- | --- |
+| 識別・schema | owl:sameAs、@id、@context、@type、train、trainNumber |
+| 参照 | railway、railDirection、calendar、operator |
+| 種別・起終点 | trainType、originStation、destinationStation |
+| metadata | dc:date、dct:issued |
+| ordered events | trainTimetableObject内のdepartureStation、arrivalStation、departureTime、arrivalTime |
+
+イベントは駅参照を最低1つ必要とし、時刻があれば対応する発着駅参照を要求する。外部駅IDは文字列として保持し、Railway/Station等への意味的参照整合や同一ダイヤ版性の検証は未実施。既存matcherの番号表記候補化、駅名変換、時刻剰余化、停車列の重複除去は本profileへ流用しない。
+
+**読み取り専用入力・結果**
+
+baseline/candidateそれぞれのstoreと絶対pathの原本directoryを明示指定する。Phase 1C readerとPhase 2A比較を再利用し、両storeの契約・7件・record参照・fingerprintを検証する。両側7原本のSHA-256/byte数を対応recordへ照合し、対象2件だけstrict parse・意味比較する。他5件はbytes照合のみ。通常ファイル、symlink/traversal拒否、読取前後のdevice/inode/size/mtime/ctime、比較終了時の全原本再読とstore再検証を行う。元sourceがない場合や不一致・変更中に、その入力を意味比較の根拠にしない。実原本を過去Snapshotの代用品にせず、複製・移動・取得・persistしない。
+
+結果contractは `odpt-semantic-diff` / schemaVersion 1。profile、両Snapshot ID/fingerprint、Phase 2AのbasicDiff、comparisonStatus、semanticStatus、固定7件のsourceResults、notEvaluated、inputErrorsをメモリ上だけに生成する。sourceResultsにはinputBytesStatus、coverage、comparisonStatus、semanticStatus、categories/categoryCounts、added/removed/modified/change件数、recordKeyとfieldPath付きchanges、unknownFields、ambiguities、warnings、errorCodes、truncatedを含む。本文や旧新record全体を結果へ複製しない。
+
+比較対象2件のcoverageはcomplete/partial、状態はequivalent/changed/indeterminate。未知・曖昧・警告・打切りがあればpartial/indeterminate、入力不正ならfailed。未実装5件はcoverageとcomparisonStatusがnot-evaluated。したがって全体は常にsemanticStatus=indeterminate、comparisonStatusは通常partial、入力エラー時failed。確定したfield差分は残し、全体equivalentにはしない。
+
+変更分類は `json-format-only`、`record-order-only`（JSON表現を除去した後のrecord順差）、metadata-changed、time-changed、stop-station-changed、stop-order-changed、event-structure-changed、train-type-changed、destination-changed、origin-changed、identifier-changed、reference-changed、schema-context-changed、record-added/removed、unknown-field-changed、ID変更候補/曖昧性。純粋なイベント並び替えはstop-orderとして記録し、移動した駅の時刻同士からdeltaを作らない。順序と内容の同時変更で位置対応が異なる時刻差はevent-position-changedとし、同じ発着駅contextで対応する既知時刻だけdeltaSecondsを付ける。
+
+source入力上限128 MiB、record数20,000/source、event数500,000/source、JSON深さ32。changes/unknown/ambiguity/warningの保持は合計1,000件/sourceまで。field差分と変更recordの集計は走査完了時に全件分を保持し、詳細超過は `detail_limit_reached`、truncated=true、partialとして示す。入力構造上限は固定error codeでfailedとし、未走査を無差分としない。sourceId・record key・field key順で決定的に処理する。
+
+CLI: `python3 -B scripts/odpt_source_inventory.py compare-semantic --baseline-store <absolute-store> --candidate-store <absolute-store> --baseline-source-dir <absolute-raw-dir> --candidate-source-dir <absolute-raw-dir>`。出力は固定sourceId、coverage、変更分類・件数、固定error/warning codeのみ。raw本文、recordKey、metadata値、field値を表示しない。終了コード0は対象2件を完全比較（変更自体は失敗でなく、5件の未実装による全体partialは許容）、2は入力不正・比較不能・未知・曖昧・上限到達。引数不正も2。expected-change、鮮度保証、公開資格、applicationPeriod/publicationApprovedに接続しない。
+
 ### 推奨する全体フロー
 
 1. **更新確認:** ODPT開発者サイトNewsを更新通知の一次情報として確認する。News確認は更新の手掛かりであり、ファイル取得成功やsource内容の同一性を証明しない。通知後の静的データ更新条件は基本ライセンス/Developer Guidelineを確認する。

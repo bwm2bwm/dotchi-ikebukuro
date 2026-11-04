@@ -846,3 +846,13 @@
 - Phase 1C実store `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c`の同一store比較でoverall `identical`、固定7 sourceすべてhash/byte数一致、metadata差なし。CLIはraw bytes照合をせず、元source参照不要として明示。実store・sourceの書込みなし。
 - CLI終了コードは比較完了（identical/changed）0、比較不能/unavailable/不正store 2。Phase 2A statusはPhase 0総合分類から分離し、expected-change/publication approvalを付与しない。JSON/GTFS意味比較、旅程品質差分、公開資格判定、結果persistは未実装。
 - `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。取得経路、`odpt_snapshot_qa.py`、public-display-v2、synthetic/release-managed、Actions/Cloudflare、applicationPeriod/publicationApprovedは変更なし。APIアクセス、source取得、Commit/Push/Mergeなし。
+
+## 2026-11-04 — ODPT-2G Phase 2B-2a TrainTimetable意味比較
+
+- 開始時branch `main`、HEAD `038fa6d241e81b2ea624e8c4f8f3696bd4ba2749`（Phase 2A commit）、作業tree cleanを確認。Phase 2B-1調査報告と指定資料・既存解析/照合/関連テストを確認し、採用profile `dotchi.odpt-gtfs.semantic` / `1.0.0`と制約を `odpt_research.md` に記録した。
+- `scripts/odpt_train_semantic_diff.py`を追加。両storeと原本directoryの明示指定、Phase 1C reader/Phase 2A再利用、両側7原本のSHA-256/byte数照合、strict JSON/ID/参照型/event構造検証、読取中と比較前後の原本・store変更検出を実装した。他5 sourceはbytes照合のみで意味比較しない。
+- 主キーowl:sameAsと@id一意性、トップrecord順の限定無視、イベント順保持、metadata・時刻・駅・種別・行先・ID等のfield path付き差分をメモリ内で生成する。missing/null/空文字/false/0を区別し、24時超を保持。ID変更候補を削除・追加へ付記し、複数候補や再利用疑いを保留・警告にする。unknownは値を捨てず比較しcoverage partial。詳細合計1,000件/sourceで保持を制限し、集計・打切り・固定codeを示す。
+- inventory CLIへ `compare-semantic --baseline-store ... --candidate-store ... --baseline-source-dir ... --candidate-source-dir ...` を追加。Source別coverage/分類/件数と固定codeのみ表示し、本文・recordKey・metadata値は出さない。対象2件の完全比較は差分の有無によらず終了0、入力不正/unknown/曖昧/上限は2。未実装5件のため全体は通常partial/indeterminateで、全体equivalentや公開承認は付与しない。
+- 合成fixtureの新規19テストと既存Source契約/inventory/store/compat/basic diff、train matcher、itinerary、snapshot QA、public v2を合わせ151テストPASS。整形/key順/record順、追加削除、60秒差、時刻表現、種別行先・駅・イベント順、metadata、ID候補/再利用、unknown型差、null/missing、破損JSON/store/fingerprint、原本欠落/不一致/読取中変更、決定性・詳細/構造上限、CLI、成功失敗時の原本/store不変を確認した。
+- 実QAは既存Phase 1C store `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c` と対応する `local_data/odpt/` の自己比較のみ。対象2件ともcoverage complete / semanticStatus equivalent、変更0。全体partial / indeterminate、未評価5件、両側raw入力14件verified。CLI終了0。実行前後に7原本とstore 8 JSONのSHA-256・byte数一致を確認。異なる実世代の比較は未検証。
+- `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。原本/storeの複製・移動・変更、新Snapshot/差分結果persist、API/取得、他5 source意味比較、公開資格判定、取得コード/snapshot QA/public v2/synthetic/release-managed/Actions/Cloudflare変更なし。applicationPeriod/publicationApproved未変更、Commit/Push/Mergeなし。
