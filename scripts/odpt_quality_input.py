@@ -35,6 +35,7 @@ SEEDS = ('scripts/odpt_itinerary.py','scripts/odpt_train_matcher.py','scripts/od
          'scripts/prepare_odpt_v2_qa.py','_local_preview/odpt_v2_qa_adapter.mjs','scripts/odpt_quality_input.py',
          'scripts/odpt_quality_metrics.py','scripts/odpt_quality_details.py','scripts/odpt_quality_diff.py',
          'scripts/odpt_display_context.py','scripts/odpt_display_runner.mjs',
+         'scripts/odpt_display_metrics.py',
          '_local_preview/selection.mjs','_local_preview/preview_odpt_v2_qa.mjs',
          '_local_preview/odpt_v2_qa.html')
 FIELDS = set('contract schemaVersion profile serviceDates auxiliaryServiceDates stationIds routeIds originStationId direction minimumWaitSeconds maximumWaitSeconds crossServiceDateSearch transferStationId journeyPolicy primaryRule observationInstants displayScenarios displayEvaluation engineFingerprint contextFingerprint'.split())

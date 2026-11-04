@@ -969,3 +969,14 @@
 - itemsとgroups、bestのgroups内存在、実表示最早着マーク、terminalKnownを分離。欠日boardは別形のまま保持し、runnerの欠日入力は検証失敗で返す。JSON/stdin 8 MiB・深さ64・重複key拒否・固定stderr code。stdoutは非公開JSONプロトコル専用。
 - fingerprint依存へcontext/runner/selection/DOM JS/HTMLを追加し、root内相対importを解決。既存adapter/generator/collector/v2 gateとUIは未変更。原本/storeは使用せず、実source生成・Python表示collector・旧新表示比較・DOM/視覚品質・鮮度/公開資格は未評価。
 - 合成Node9件・既存Node54件PASS。ODPT統合Python265件PASS（184.046秒）、追加依存検査込みの表示context5件もPASS。祝日は既存generatorの_active_servicesへ通常平日・追加/除外・振替休日相当の合成例外を与える範囲で検証。runnerはservice_idを判定しない。engine依存25件を確認。原本/storeの読取・生成・書込みなし。git diff --check PASS、commit/push/merge/deployなし。
+
+
+## 2026-11-04 — ODPT-2G Phase 2C-3b-2 非公開単一Snapshot表示collector
+
+- 開始main / 5eb230aa6aaf38196e0806889ea17db34f84b363、Phase 3b-1 commit済み・cleanを確認。指定文書・context/runner/生成・射影/QA state・関連testを確認。
+- odpt_display_metrics.pyと合成testを追加。既存Source/Snapshot検証、駅/日別メモリ内v2生成・厳密な除外監査、_qa_state、既存Node runnerを接続。collectorをengine seedへ追加し26依存。原本/store前後不変とengine/runtimeの一致をNode/集計終了まで検証する。
+- 固定時計・3日envelope・日別キャッシュ・期間外/利用不能と既知0の区別・UNKNOWN伝播・bestの表示内存在を計測。stdin/stdout JSONとbyte上限/timeout/終了code/stderr/schema/内容digestを照合し、明細上限時も全集計・省略数を保持する。候補やreportは保存しない。既存generator/matcher/adapter/公開gate/DOMは未変更。
+- 合成collector16件の検証を追加。Python統合278件PASS（374.968秒）、追加4件と変更箇所の対象再検証PASS、Node63件PASS。異常engine型もfailedレポートへ変換し、入力不正時の例外漏れを防止。
+- 実QAはserviceDates 10/28〜30＋aux 27/31、固定21時刻×8駅×4 scenario=672表示セルknown、findings/省略/評価不能0。生成40駅日G17,288/C16,604/E684。items3,288/cards1,688、best存在/表示内/mark各512・整合672、0候補160。routeStates running832/not_started2016/ended1056/data_insufficient128、terminalKnown true3904/false128。補助日10/31のcoverage不足を保持し、氷川台副都心線ではunmatched6/WARNING3行を補足確認。UNKNOWN抑止は実source0、合成で始発/終電未確認を確認。
+- 固定境界リストはresearchへ記録。JST午前0時の前後、24時超、始発60分前、昼候補60分前、終電前後を既存状態のまま観測。境界QA629.257秒、親peak RSS426,160,128 bytes・Node子最大145,002,496 bytes（回帰等と一部並行）。最終既定CLIはJST10/29正午32セル・items576/cards192・best表示32・finding0・終了0、74.316秒/親peak410,988,544 bytes。
+- 原本7/store8 JSONのhash/bytes/identityとengine/runtime26依存は独立inventoryを含め前後一致。結果はメモリ内のみ。旧新表示比較・DOM/描画・鮮度/公開資格は未評価、collectionStatus partialを維持。新collector/test、engine seed、指定3文書の6ファイルだけ変更。git diff --check PASS、commit/push/merge/deployなし。

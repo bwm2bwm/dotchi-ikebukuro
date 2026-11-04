@@ -1268,3 +1268,42 @@ payload/QA stateはobject入力のため元candidate file bytesのhash照合は�
 実sourceのpayload生成・全駅収集は実施せず、原本/storeを読まない合成QAに限定。祝日・振替休日をrunnerが再判定しない。Python合成calendarで通常平日・例外切替・振替休日を模した固定例外を既存_active_servicesに適用し、実際の祝日feed・深夜境界の全駅QAは3b-2以降に残す。
 
 検証: 新Node runner合成9件、既存Node adapter/DOM/selection/timetable関連54件PASS。Python ODPT統合265件PASS（184.046秒）、追加の依存閉包検査を含む表示context単独5件PASS。4 scenario、UTC/JST、3日不足、24/25時、60分ゲート、発車同時刻、直通alternative、同着、bestのgroups外、8 route状態、UNKNOWN抑止、0/unavailable、schema/runtime/context hash、重複JSON/depth上限、結果決定性を確認。engine依存25ファイル。実source QA・性能評価は今回実施していない。
+
+
+### Phase 2C-3b-2 単一Snapshot非公開表示モデル収集（2026-11-04）
+
+独立read-only CLI/API `scripts/odpt_display_metrics.py` を追加。contract=`odpt-display-model-collection` / schemaVersion 1。Snapshot ID/contentFingerprint、旅程/表示context fingerprintと実context、engine/environment、観測時刻/scenario、cells/aggregateMetrics/checks/findings/notEvaluated/collectionStatus/collectionDigestをメモリ上に保持する。既存context・Node request/responseの意味は維持。既存25 engine依存を引き続き検証し、collector自身を追加して26依存とする。engine/hashの方式やschemaは変更しない。
+
+Phase 2C-2a validate_inputsを単一Snapshotの両側同一指定で再利用。生成前に原本7/store8 JSONのphysical inventory（SHA-256/bytes/identity）を凍結し、終了時はNode処理と集計まで含めて再検証する。engine/context/runtime/Source/Snapshot不一致や途中変更時は全cells・数値集計・生成証拠を無効化してfailed。局所的な日付不足/期間外・Node失敗では他セルの確認済み結果を保持する。DOMと視覚品質は未評価のため、正常収集時もcollectionStatus=partialであり全画面品質PASSではない。
+
+観測時刻ごとのD-1/D/D+1のunionを駅ごとに一度ずつ生成し、generatorは駅単位で解放する。既存_build_station_payload（内部の_route_state/_public_departure/_exclusion_detail）、Python validator、_build_exclusion_audit/_validate_exclusion_audit、_qa_stateを再利用する。固定generatedAt=2000-01-01T00:00:00Zを検証用envelopeだけに使用し、評価時計はcontextのUTC instantのみ。3日payloadを組み立てる前に必要日を確認し、期間外はout-of-range、不正構造/利用不能はunavailable、metrics=null。欠日を空候補に補完しない。
+
+除外監査は全reason/classification fieldとG=C+E、E=理由合計、分類集計・候補数・対象駅/日の完全性を既存validatorで検査してから_qa_stateへ渡す。_qa_stateの既存default 0を未取得情報の代用にしない。no_valid_arrivalとprimary_arrival_missing/unknownの集計、INFO、WARNING、coverageを保持し、payloadとQA stateの対応を検査する。candidate integrityは生成したメモリ内canonical UTF-8 bytesのSHA-256/byte数を計算・照合する。原本bytesのSource照合とは別の証拠であり、候補ファイルは保存しない。public run_pipeline/prepare/validate_bundleや公開資格gateを呼ばない。gate相当の問題がある候補も構造検証成立範囲だけを非公開観測し、構造不正はNodeへ渡さない。
+
+Nodeはshellなし・stdin/stdout JSONで1セルずつ起動。request 8 MiB、response 32 MiB、stderr 4 KiB、既定20秒（上限120秒）を適用し、nonblocking pipesで上限超過/timeout時はkill/reapする。終了code・固定stderr・JSON/response schema・context/instant/scenario/runtime参照、board/group/card/best集計、UNKNOWNとterminalKnown、内容/digestを照合する。成功要求のrequest/response byte数と失敗理由数を保持。Node単体が未評価としているsource binding/candidate integrityはcollectorが別証拠で確認し、DOM等の未評価を全体reportに残す。
+
+表示セルはSnapshot×observationInstant×station×scenario。itemsCount/groupsCardCount、路線別カード、serviceDate別候補、直通/乗換、bestの内容参照/表示内存在/マーク数、routeStates/terminalKnown、serviceState、UNKNOWN除外による抑止とcoverage等の不確実状態を区別して記録する。bestがgroups外でも選択を変更せず、枚数制限の既存挙動として件数に残す。public IDはSnapshot内参照だけに使う。集計は観測・駅・scenarioごとの延べ値で、独立列車数や旅程48セルの集計とは異なる。日別生成G/C/Eは別のgenerationSummaryで数え、シナリオ数で水増ししない。
+
+cells/生成明細/findingsは既定1,000件、最大10,000件。評価不能・不整合セル/生成証拠を先に保持し、正常明細を残枠へ保持する。全集計・finding数・省略数は打切り前に計算し、省略時はpartial/detail_limit_reached/omitted-display-detailsを明示。時刻・駅・scenario順、生成は日・駅順、route/date mapはkey順。digestは実行時計・処理時間・RSS・物理stat時刻を含めない。比較機能は未実装なのでunchanged分類は行わない。
+
+CLI: `python3 -B scripts/odpt_display_metrics.py --store <store> --source-dir <saved-source-dir>`。既定contextは旅程2026-10-28〜30、観測2026-10-29T03:00:00Z（JST正午）、4シナリオ、8駅=32表示セル。Snapshot ID・集計・状態・不変・digest・時間/RSSだけを表示し、原本/旅程/card本文を通常stdoutへ出さない。0=対象表示収集成立（DOM未評価のpartial許容）、2=局所未評価/条件差/明細省略/引数不正、3=入力不正/途中変更、4=入力・環境利用不能。APIは明示context/engine/上限/timeoutを受け取る。実時計で評価日を自動選択しない。
+
+
+**合成・回帰:** 新collectorの合成16テストで、入力/原本不変、4 scenario、3日envelope・実合成feedの補助日期間外、QA state欠損/UNKNOWNのstart_unconfirmed・terminal_unconfirmed伝播、直通alternative、bestのgroups外・cardLimit、既知0とunavailable、異常JSON/終了code/stderr/timeout/出力上限、原本途中変更、engine途中変更時の全値無効化、構造不正payloadのNode非送信、上限/全集計/優先保持、同一入力の結果/digest、CLI非漏えい・公開gate独立を確認。Python ODPT統合278件PASS（374.968秒）、追加4件と更新対象の再検証もPASS。既存を含むNode63件PASS。fixtureは合成だけをGit管理し、実sourceは追加しない。
+
+**実source非公開QA:** Phase 1C storeと対応原本7件をread-only使用。旅程context serviceDates=2026-10-28〜30、補助日=27・31を明示。必要日unionの27〜31を8駅それぞれ生成し、40駅日envelopeすべて構造検証成立。日別生成はG17,288/C16,604/E684（観測回数を掛けない）。事前確認で氷川台の10/29 route6は05:12〜24:13、route9は05:22〜24:11、任意昼候補はroute6 12:03を得てから観測リストを固定した。
+
+実際の固定観測日時は次の21件（すべてJST、contextは対応UTC秒精度）:
+- 10/28: 23:59:59。
+- 10/29: 00:00:00、00:10:59、00:11:00、00:12:59、00:13:00、00:13:01。
+- 10/29: 04:11:59、04:12:00、04:12:01、04:21:59、04:22:00。
+- 10/29: 11:02:59、11:03:00、11:03:01、12:00:00、23:59:59。
+- 10/30: 00:00:00、00:12:59、00:13:00、00:13:01。
+
+21時刻×8駅×4シナリオ=672表示セル（旅程品質48セルとは別単位）がすべてknown、unavailable/out-of-range/部分未評価セル0、findings0、省略0、入力ready、collectionStatus partial、終了0。items3,288=直通2,864+乗換424、cards1,688（route6 1,036/route9 652）。候補serviceDate別延べ件数は10/28 428、10/29 2,860。best存在/表示内/表示マークは各512、非表示best0、best整合672/672、既知0候補160セル。昼間既定CLIは1時刻×8駅×4=32セル、items576/cards192、best表示32/32、findings0、終了0。
+
+routeStatesは計4,032参照のうちrunning832/not_started2,016/ended1,056/data_insufficient128。terminalKnown=true3,904/false128。補助日10/31にcoverage insufficientがあり、補足の氷川台route9ではunique_match209/unmatched6・WARNINGあり3生成行を確認した（route6 complete、route9 insufficient）。収集処理はこの状態を補正せず、その路線の終電確定を抑制する。これは既知の表示状態の観測であり収集不能や全画面品質PASSではない。実sourceのUNKNOWN除外による抑止は0で、UNKNOWN始発/終電未確認は合成で確認した。実sourceでbestが表示上限外となるケースも今回0、合成で確認。
+
+JST午前0時を跨ぐ前後で候補を維持し、24時超便は元serviceDateを保持。00:12:59の32候補が00:13:00に0となる際、過去serviceDateのroute stateはended、観測暦日のboard serviceStateはnot_startedとなる既存挙動をそのまま記録した。全駅・全路線・全filterの固有境界時刻を網羅したものではなく、上記代表時刻による共通評価である。
+
+境界QAは独立inventory/engine走査込み629.257秒（回帰等と一部並行実行）、親process peak RSS426,160,128 bytes、Node子process最大RSS145,002,496 bytes（合計peakではない）。672成功requestの入力bytes合計425,470,096、応答4,759,700。各セルで既存runnerが3日payloadを再検証するため、反復コストが大きい。最終既定CLIは74.316秒、親peak RSS410,988,544 bytes。双方で原本7/store8 JSONのSHA-256/bytes/identity全15件、engine/runtime 26依存が前後一致。結果・candidate・原本コピーを保存しない。性能最適化、旧新比較、DOM/ブラウザー描画、鮮度/公開資格、serviceDate跨ぎ乗換探索は今回追加しない。

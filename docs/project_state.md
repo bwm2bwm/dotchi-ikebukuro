@@ -20,6 +20,8 @@ Phase 2C-2c-2で詳細98指標の比較を追加。基本metrics/summaryの意�
 
 Phase 2C-3b-1で独立表示context（schemaVersion 1）と非公開Node runnerを追加。固定UTC観測時刻・4シナリオ・JSTの必要3日を検証し、既存buildV2QaBoardの出力を正規化する。候補全体bestとgroups内カードを区別し、UNKNOWN・欠日・既知0件を混同しない。engine依存にrunner/context・selection・DOM JS/HTMLを追加。実source表示collector・旧新表示比較・DOM/視覚品質は未実装。原本/storeは使用せず合成QAのみ。
 
+Phase 2C-3b-2で非公開単一Snapshot表示collector `odpt_display_metrics.py` を追加。Source/Snapshot入力・engine/runtime・原本/store前後不変を検証し、メモリ内v2生成・厳密な除外監査・既存QA state・Node runnerを接続する。固定観測時刻×8駅×4シナリオでitems/cards/best/routeStates/UNKNOWNを収集し、候補0件と評価不能を区別する。CLI既定は2026-10-29 12:00 JSTの32表示セル。表示差分・DOM/視覚品質・公開資格は未評価。engine依存はcollectorを加え26ファイル。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。
