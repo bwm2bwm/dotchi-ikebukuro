@@ -80,37 +80,45 @@ def _date_text(value: Any) -> str:
         _fail("gtfs_date_invalid")
 
 
+def validate_gtfs_archive(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+    """Shared Phase 1B ZIP safety policy; never extracts members."""
+    infos = archive.infolist()
+    if len(infos) > 128:
+        _fail("zip_entry_count_limit_exceeded")
+    names = [info.filename for info in infos]
+    if len(names) != len(set(names)):
+        _fail("zip_duplicate_entry")
+    if any(not SAFE_GTFS_FILENAME.fullmatch(name) for name in names) or any(info.orig_filename != info.filename for info in infos):
+        _fail("zip_entry_path_unsafe")
+    total = 0
+    for info in infos:
+        if info.is_dir() or info.flag_bits & 0x1:
+            _fail("zip_entry_type_unsafe")
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if stat.S_IFMT(mode) not in {0, stat.S_IFREG}:
+            _fail("zip_entry_type_unsafe")
+        if info.file_size < 0 or info.file_size > MAX_ZIP_MEMBER_BYTES:
+            _fail("zip_member_size_limit_exceeded")
+        total += info.file_size
+        if total > MAX_ZIP_TOTAL_BYTES:
+            _fail("zip_total_size_limit_exceeded")
+        if info.file_size and info.compress_size == 0:
+            _fail("zip_compression_ratio_exceeded")
+        if info.compress_size and info.file_size / info.compress_size > MAX_ZIP_RATIO:
+            _fail("zip_compression_ratio_exceeded")
+    if archive.testzip() is not None:
+        _fail("gtfs_zip_invalid")
+    return infos
+
+
 def _read_gtfs_metadata(raw: bytes) -> dict[str, str]:
     if len(raw) > MAX_SOURCE_BYTES:
         _fail("source_size_limit_exceeded")
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            infos = archive.infolist()
-            names = [info.filename for info in infos]
-            if len(names) != len(set(names)):
-                _fail("zip_duplicate_entry")
-            if any(not SAFE_GTFS_FILENAME.fullmatch(name) for name in names):
-                _fail("zip_entry_path_unsafe")
-            if not GTFS_MEMBERS.issubset(set(names)):
+            infos = validate_gtfs_archive(archive)
+            if not GTFS_MEMBERS.issubset({info.filename for info in infos}):
                 _fail("gtfs_required_member_missing")
-            total = 0
-            for info in infos:
-                if info.is_dir() or info.flag_bits & 0x1:
-                    _fail("zip_entry_type_unsafe")
-                mode = (info.external_attr >> 16) & 0xFFFF
-                if stat.S_ISLNK(mode):
-                    _fail("zip_entry_type_unsafe")
-                if info.file_size < 0 or info.file_size > MAX_ZIP_MEMBER_BYTES:
-                    _fail("zip_member_size_limit_exceeded")
-                total += info.file_size
-                if total > MAX_ZIP_TOTAL_BYTES:
-                    _fail("zip_total_size_limit_exceeded")
-                if info.file_size and info.compress_size == 0:
-                    _fail("zip_compression_ratio_exceeded")
-                if info.compress_size and info.file_size / info.compress_size > MAX_ZIP_RATIO:
-                    _fail("zip_compression_ratio_exceeded")
-            if archive.testzip() is not None:
-                _fail("gtfs_zip_invalid")
             feed_raw = archive.read("feed_info.txt")
             if len(feed_raw) > MAX_ZIP_MEMBER_BYTES:
                 _fail("gtfs_feed_info_size_limit_exceeded")

@@ -1050,3 +1050,22 @@ adapterに一度だけpayloadを検証してカードを事前生成する `prep
 - 新4駅の直通候補射影はPhase 3旧出力と全代表日一致。直通発着、headsign、ODPT raw種別、typeSource、照合結果、駅IDを維持。
 - 各乗換は別trip、反対路線、同一service day、60〜600秒、小竹向原の乗降、目的地の停車・到着・降車を検証する。乗換待ちだけから同一車両や現実の接続可能性を判断しない。
 - Phase 4では1〜2分候補に対して、時刻表上の乗換候補であること、待ち時間、番線不明、接続保証なしをユーザーが短時間に認識できる説明を評価する。候補選定変更は別仕様として判断する。駅構造を踏まえても60秒一律除外は採用していない。
+
+
+### Phase 2B-2c-1 GTFS入力基盤（2026-11-04）
+
+`scripts/odpt_gtfs_loader.py` は profile `dotchi.odpt-gtfs.semantic` / `1.0.0` に接続する独立loader。旧新比較・公開判定・結果persistを行わない。根拠は[GTFS Schedule Reference](https://gtfs.org/documentation/schedule/reference/)（確認2026-11-04）。既存Phase 1B ZIP検査を `validate_gtfs_archive` として共有し、raw 128 MiB、member 64 MiB、非圧縮合計256 MiB、圧縮率1,000を維持。entry数128を追加上限とし、重複・flat .txt以外・暗号化・directory/symlink等特殊ファイル・CRC不整合を拒否する。ZIPを展開しない。flat .txt限定は本保存profileの制約であり、GTFS全形式の合法性を判定する規則ではない。
+
+11テーブル（agency/feed_info/routes/stops/trips/stop_times/calendar/calendar_dates/fare_attributes/fare_rules/translations）をUTF-8-sig、strict CSVと引用符検査で解析する。BOM・quoted改行・LF/CRLF/CRを受理し、header重複・欠落、列数差、壊れた引用符、型不正、実在しない日付等を固定codeで拒否する。optional table/columnは一律必須にしない。calendar_datesのみのサービス、single agencyのagency_id省略、空時刻、blank transfersを受理する。missing columnはcellsのkey欠落、空欄は空文字、文字列nullは文字列のまま。`cell_state` はmissing-column/empty/null-equivalent/valueを返し、fare_attributes.transfers空欄のGTFS上のnull相当も識別する。valuesのNoneは解析値なしを示すだけで、cellsを失わない。
+
+日付はISO date文字列、時刻はservice day基準秒（24時超保持）、sequenceは非負整数。整数の連番、文字列trim/大小文字/表記統合、補間、日付・timezone補完はしない。headerは名前順、rowsはtable key順（stop_timesはtrip_id+数値stop_sequence）に整列するが、全cellsと未知列を保持する。CSV物理行順を停車順とはしない。既知enumの未対応値は保持してpartial。未知テーブルは安全検査後のmember bytesをメモリに保持してpartial。追加の処理上限は100万rows/table、integer18桁、時刻hour6桁、CSV fieldはPython csv既定上限。これらは公式GTFS値域の主張ではない。
+
+keyはagency_id、feed_info単一、route_id、stop_id、trip_id、trip_id+numeric stop_sequence、service_id、service_id+date、fare_id。agency_id省略はimplicit keyとしてpartial。既存Phase 2B-1採用文書にはfare_rules/translationsの具体的keyが未記録だったため、以下をloaderの検査候補として明記する。fare_rulesはfare_id+route_id+origin_id+destination_id+contains_id（公式は全fieldによるkey）、translationsはtable_name+field_name+language+record_id+record_sub_id+field_value。optional selectorの列欠落と空欄を保持する。fare_rules候補重複は上書き・除去せず全行保持、件数とpartialを返す。未知列を含むfare_rulesやoptional selector表現を、後続比較でどう同一視するかは未確定でありprofileを無言で変更しない。その他key重複は入力不正。IDの世代間安定性は主張しない。
+
+trips→routes/service、stop_times→trips/stops、parent_station、routes/fare_attributes→agency、fare_rules→fare_attributes/routes/zones、translationsのfield_valueまたはrecord_id/record_sub_idを確認する。single agencyの暗黙参照、optional空参照、検証対象外参照を分離する。shape_id/block_id/level_id、flex、未対応translation target等は範囲外としてpartialを残す。本loaderは限定した構造・参照検証であり、GTFS仕様全条件・運行整合・同一ダイヤ・最新性の証明ではない。
+
+結果contractはodpt-gtfs-input/schemaVersion 1。profile、input hash/bytes/sourceIdentity、members、tables（headers/rows/cells/values/keyFields/recordCount/keyUnique/duplicateKeyCount/unknownColumns/issues）、unsupportedTables、referenceChecks、coverage、固定errorCodesを返す。`load_gtfs(absolute_zip_path, source_record)` はSource契約・sourceId・hash/bytesを照合し、読取前後とparse終了後のbytes/identity変更を拒否する。ZIPのpath traversal/symlinkも拒否。bytesだけのparse_gtfsではsourceIdentity=not-checked。
+
+独立CLI: `python3 -B scripts/odpt_gtfs_loader.py --zip <absolute-zip> --source-record <absolute-source-record-json>`。既存compare-semanticは変更せず、ODPT6件とGTFS not-evaluatedの結果契約も維持。CLIはsource同一性と構造検証、件数、一意性、参照集計、未知列数、固定codeのみを表示。終了0は構造検証完了（partialは明示して許容）、入力・同一性・構造不正と引数不正は2。本文・ID値・原本pathは出力しない。
+
+実GTFS自己検証はhash/bytes一致、11テーブル検出、未知列0、候補key重複0、参照resolved474,507/optional-absent68,061。shape_id/block_idの補助参照未評価によりcoverage partial。約7.842秒、process peak RSS 480,075,776 bytes（約458 MiB、macOS resource計測、Python/結果全体を含む）。原本7件/store8 JSONのhash/byte数は前後一致。異世代GTFS比較は未実施。

@@ -866,3 +866,14 @@
 - `tests/test_odpt_train_semantic_diff.py` 24件PASS（TrainTimetable既存ケース含む）。Railway stationOrder・未知field、Station属性・参照配列・ID変更候補、StationTimetable時刻・event追加削除/順序・train/type/destination・opaque key変更、内部/外部参照・必須参照構造を確認。source contract/inventory/store/compat/basic diff、train matcher、itinerary、snapshot QA、public v2を含む関連回帰156件も最終状態でPASS。先行する一括実行ではPhase 2Aのmetadata testが一度不安定に失敗したが、単独・suite再実行ではPASS。
 - 実store `/Users/takamiyakoji/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c` と `local_data/odpt/` の自己比較で、ODPT 6 sourceの処理成立、既知変更0。Railway/Station/TrainTimetable 2件はcomplete/equivalent、StationTimetable 2件はopaque extensionでpartial/indeterminate、GTFSはnot-evaluated、overall indeterminate。参照結果は両側それぞれresolved 29,069 / external 468 / unresolved internal 0。store8 JSONと原本7件のhash・byte数は前後一致（15 files）。異なる世代の比較成功とは扱わない。
 - `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。GTFS意味比較、取得/API、原本/store変更、公開資格、applicationPeriod/publicationApproved、既存取得・snapshot QA・public v2・synthetic/release-managed・CI・Cloudflare経路は変更なし。Commit/Push/Mergeなし。
+
+
+## 2026-11-04 — ODPT-2G Phase 2B-2c-1 GTFS入力基盤
+
+- 開始branch main、HEAD `45b91c0b8f5a2eb57d0fb59e94fc808a4894c42f`、Phase 2B-2b commit済み、cleanを確認。README・指定文書/コード・GTFS既存解析/QA・関連テストを確認した。
+- `scripts/odpt_gtfs_loader.py` と合成fixtureのみの `tests/test_odpt_gtfs_loader.py` を追加。11テーブルのread-only ZIP入力、Source契約/hash/bytes照合、strict CSV、正規化、key/参照検査、未知/未対応の保持、固定codeと独立CLIを実装。既存inventoryのZIP検査だけ共通関数へ抽出し既存サイズ/圧縮率上限を維持、entry数128と特殊file検査を追加した。
+- fare_rules/translationsの具体的複合keyが既存採用文書に未記録だった点を明示し、公式仕様に基づく候補key・重複保持・未確定事項をresearchへ記録。比較profile ID/versionは維持し、旧新比較は実装していない。
+- 合成fixture 11テストメソッド（subTestでCSV/ZIP/型/参照異常を網羅）PASS。BOM、引用符/改行、header/行/ZIP表現差、数値sequence、24時超、空時刻、optional列/table、未知列/enum/table、重複key保持、破損/CRC/暗号化/特殊entry/上限、原本hash/サイズ不一致、読取中変更、path拒否、CLI本文非表示を検証。
+- 新loaderと既存Source契約/inventory/store/compat/basic diff/ODPT6 source意味比較/matcher/itinerary/snapshot QA/public v2を合わせ167テストPASS（122.390秒）。git diff --check PASS。開始HEAD/branchは維持、変更は指定3文書・inventory・新loader・新testの6ファイル。
+- 実自己検証は既存Phase 1C storeに結びつくZIPをread-only利用。agency1/feed_info1/routes9/stops185/trips9,706/stop_times176,385/calendar2/calendar_dates20/fare_attributes8/fare_rules33,938/translations494。全key重複0、未知列0、参照resolved474,507、optional-absent68,061。shape_id/block_id補助参照未評価によりpartial。7.842秒、ピークRSS約458 MiB。15原本/storeファイルのhash/byte数は前後一致。
+- 変更文書はproject_state/research/devlogのみ。ODPT6件の比較、既存GTFS解析・snapshot QA、取得/public v2/synthetic/release-managed/Actions/Cloudflareは変更なし。API・新規取得・原本複製・結果persist・旧新GTFS比較・公開資格・Commit/Push/Mergeなし。
