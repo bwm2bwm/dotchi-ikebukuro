@@ -245,6 +245,14 @@ metadata比較ではODPT recordCountと`dc:date`/`dct:issued`値集合、GTFS fe
 
 比較profileは `dotchi.odpt-gtfs.semantic` / `1.0.0`。本節をPhase 2B-1レビューで採用した契約とし、初回実装は [`scripts/odpt_train_semantic_diff.py`](../scripts/odpt_train_semantic_diff.py) のTrainTimetable有楽町・副都心2 sourceだけに限定する。残るRailway、Station、StationTimetable 2件、GTFSは意味比較しない。世代別raw保管方式、GTFS table別キー・カレンダー比較、StationTimetableの動的boolean key等は後続工程で設計・確定し、今回実装しない。
 
+### Phase 2B-2b Railway・Station・StationTimetable意味比較（2026-11-04）
+
+Phase 2B-2aのprofile ID/version（`dotchi.odpt-gtfs.semantic` / `1.0.0`）を維持し、ODPT JSON 6 sourceを意味比較対象に拡張した。Railwayは`owl:sameAs`を主キー、`@id`を必須一意IDとして検証し、`stationOrder`の配列順・index・station ID・駅名を保持する。Stationは駅名、code、座標、路線・駅時刻表等の参照を比較し、connectingRailway / connectingStationの順序を保持する。StationTimetableは親recordと各eventの配列順を保持し、station・railway・railDirection・calendarを補助キーとして一意性検証に使う。親主キーの置換やtrain番号だけでの別世代列車同一視はしない。変更はfield path付きで分類し、差分詳細はsourceごと1,000件上限、打切りはindeterminateとなる。
+
+StationTimetableイベント内で親record `owl:sameAs` のsuffixと一致する動的boolean keyは意味未解明のopaque extensionとしてraw key/valueを比較する。変更・追加・削除・型差を検出するが意味解釈済みとは扱わず、存在するsourceは常にcoverage partial / semanticStatus indeterminateとする。その他未知フィールドも記録し、未対応を無視しない。内部のRailway→Station、Station→Railway、StationTimetable→Station/Railway/Train参照を検証する。既知のTokyoMetro IDで未解決は内部参照失敗、外部事業者等の参照はexternalとして許容し、推測補完しない。これらは参照存在確認であって同一ダイヤ整合性の証明ではない。
+
+`compare-semantic`はbaseline/candidate storeと原本directoryを明示し、両側固定7原本のhash・byte数をSource recordに照合する。実storeの同一Snapshot自己比較ではODPT 6件の処理が成立し、Railway、Station、TrainTimetable 2件の既知差分は0。StationTimetable 2件はopaque keyを理由にpartial、GTFSはnot-evaluated、全体indeterminate。参照確認は各側resolved 29,069、external 468、internal unresolved 0。15原本/storeファイルのSHA-256とbyte数は比較前後一致。これは自己比較であり世代間変更検出のQAではない。GTFS意味比較、source間の運行整合性証明、鮮度、公開資格、旅程品質差分は未実装・未評価。
+
 **採用した基本規則**
 
 - JSON objectのkey順・空白・escape表現を解析後の値で比較する。重複key、NaN/Infinity等の非標準定数、構造・型不正を拒否する。数値の解析はDecimalで精度を保持し、unknown値も型を保持して比較する。

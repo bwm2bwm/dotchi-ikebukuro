@@ -299,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
                                              args.baseline_source_dir, args.candidate_source_dir)
             print(f"compare_semantic={result['comparisonStatus']} semantic_status={result['semanticStatus']} "
                   f"profile={result['profile']['id']} version={result['profile']['version']}")
+            print("semantic_sources=train-timetables,railway,station,station-timetables; gtfs=not-evaluated")
             for row in result["sourceResults"]:
                 print(f"source_id={row['sourceId']} coverage={row['coverage']} "
                       f"semantic_status={row['semanticStatus']} categories={','.join(row['categories']) or 'none'} "
@@ -311,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"source_id={row['sourceId']} warning={code}")
             for error in result["inputErrors"]:
                 print(f"side={error['side']} source_id={error['sourceId']} error={error['code']}")
+            for check in result["referenceChecks"]:
+                print(f"reference_side={check['side']} status={check['status']} count={check['count']}")
             incomplete = any(row["coverage"] == "partial" for row in result["sourceResults"])
             return 2 if result["comparisonStatus"] == "failed" or incomplete else 0
         if args.command == "persist":

@@ -47,7 +47,7 @@ class TrainSemanticDiffTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_store(self, rows, *, raw=None, pretty=False, f_rows=None):
+    def make_store(self, rows, *, raw=None, pretty=False, f_rows=None, catalog=None):
         self.serial += 1
         source_dir = self.root / f"raw-{self.serial}"
         destination = self.root / f"store-{self.serial}"
@@ -56,7 +56,8 @@ class TrainSemanticDiffTests(unittest.TestCase):
         (destination / "sources").mkdir(mode=0o700)
         records = []
         for sid, filename in contract.SOURCE_FILES.items():
-            values = rows if sid == Y else f_rows if f_rows is not None and sid == F else [record("1", "Fukutoshin")] if sid == F else []
+            values = (catalog or {}).get(sid, rows if sid == Y else f_rows if f_rows is not None and sid == F
+                      else [record("1", "Fukutoshin")] if sid == F else [])
             data = raw if sid == Y and raw is not None else json.dumps(
                 values, indent=2 if pretty else None, sort_keys=pretty).encode()
             if sid == "metro.gtfs":
@@ -100,7 +101,7 @@ class TrainSemanticDiffTests(unittest.TestCase):
         self.assertEqual(len(result["sourceResults"]), 7)
         for row in result["sourceResults"]:
             self.assertEqual(set(row["inputBytesStatus"].values()), {"verified"})
-            self.assertEqual(row["coverage"], "complete" if row["sourceId"] in semantic.TARGETS else "not-evaluated")
+            self.assertEqual(row["coverage"], "not-evaluated" if row["sourceId"] == "metro.gtfs" else "complete")
         self.assertEqual(self.target(result)["semanticStatus"], "equivalent")
         self.assertEqual(self.target(result, F)["semanticStatus"], "equivalent")
 
@@ -110,6 +111,121 @@ class TrainSemanticDiffTests(unittest.TestCase):
         reversed_rows = self.target(self.compare(self.make_store(list(reversed(self.rows)))))
         self.assertEqual(reversed_rows["categories"], ["record-order-only"])
         self.assertEqual(reversed_rows["semanticStatus"], "equivalent")
+
+    @staticmethod
+    def catalog_fixture(dynamic=True):
+        station_id = "urn:station:one"
+        railway_id = "urn:railway:yurakucho"
+        timetable_id = "urn:station-timetable:one"
+        dynamic_key = timetable_id.split(":", 1)[-1]
+        railway = {"@context": "http://vocab.odpt.org/context_odpt_Railway.jsonld", "@type": "odpt:Railway",
+            "@id": "urn:rwy:id", "owl:sameAs": railway_id, "odpt:operator": "urn:operator:fixture",
+            "odpt:lineCode": "Y", "odpt:railwayTitle": {"ja": "有楽町"}, "dc:title": "Yurakucho",
+            "odpt:color": "ABCDEF", "odpt:ascendingRailDirection": "urn:direction:north",
+            "odpt:descendingRailDirection": "urn:direction:south",
+            "odpt:stationOrder": [{"odpt:index": 1, "odpt:station": station_id, "odpt:stationTitle": {"ja": "駅"}}]}
+        station = {"@context": "http://vocab.odpt.org/context_odpt_Station.jsonld", "@type": "odpt:Station",
+            "@id": "urn:st:id", "owl:sameAs": station_id, "dc:title": "駅", "odpt:operator": "urn:operator:fixture",
+            "odpt:railway": railway_id, "odpt:stationCode": "Y01", "odpt:stationTitle": {"ja": "駅"},
+            "geo:lat": 35.0, "geo:long": 139.0, "odpt:connectingRailway": ["urn:external:rail", "urn:external:rail2"],
+            "odpt:connectingStation": ["urn:external:station"], "odpt:stationTimetable": [], "odpt:passengerSurvey": []}
+        event = {"odpt:train": "urn:train:1", "odpt:trainNumber": "1", "odpt:departureTime": "06:00",
+            "odpt:trainType": "urn:type:local", "odpt:destinationStation": ["urn:station:three"],
+            "odpt:isOrigin": True, "odpt:isLast": False}
+        if dynamic:
+            event[dynamic_key] = True
+        second_event = copy.deepcopy(event)
+        second_event["odpt:departureTime"] = "06:10"
+        timetable = {"@context": "http://vocab.odpt.org/context_odpt_StationTimetable.jsonld",
+            "@type": "odpt:StationTimetable", "@id": "urn:stt:id", "owl:sameAs": timetable_id,
+            "odpt:station": station_id, "odpt:railway": railway_id, "odpt:railDirection": "urn:direction:north",
+            "odpt:calendar": "urn:calendar:weekday", "odpt:operator": "urn:operator:fixture",
+            "odpt:stationTimetableObject": [event, second_event]}
+        return {"metro.railway": [railway], "metro.station": [station],
+                "metro.station-timetable.yurakucho": [timetable],
+                "metro.station-timetable.fukutoshin": []}
+
+    def compare_catalog(self, mutate, source_id):
+        catalog = self.catalog_fixture()
+        self.a = self.make_store(self.rows, catalog=catalog)
+        candidate = copy.deepcopy(catalog)
+        mutate(candidate)
+        result = self.compare(self.make_store(self.rows, catalog=candidate))
+        return next(r for r in result["sourceResults"] if r["sourceId"] == source_id), result
+
+    def test_railway_order_index_and_station_entry_changes(self):
+        sid = "metro.railway"
+        for mutate, expected in (
+            (lambda c: c[sid][0]["odpt:stationOrder"].append({"odpt:index": 2, "odpt:station": "urn:station:two", "odpt:stationTitle": {"ja": "二"}}), "station-order-changed"),
+            (lambda c: c[sid][0]["odpt:stationOrder"][0].update({"odpt:index": 3}), "station-order-changed"),
+            (lambda c: c[sid][0]["odpt:stationOrder"][0]["odpt:stationTitle"].update({"ja": "改名"}), "station-order-changed")):
+            row, _ = self.compare_catalog(mutate, sid)
+            self.assertIn(expected, row["categories"])
+        row, _ = self.compare_catalog(lambda c: c[sid][0]["odpt:stationOrder"][0].update({"unexpected": "value"}), sid)
+        self.assertEqual(row["coverage"], "partial")
+        self.assertIn("unknown_fields_present", row["errorCodes"])
+
+    def test_station_properties_reference_order_and_identifier_candidate(self):
+        sid = "metro.station"
+        cases = [(lambda c: c[sid][0].update({"odpt:stationCode": "Y02"}), "reference-data-changed"),
+                 (lambda c: c[sid][0].update({"geo:lat": 35.1}), "reference-data-changed"),
+                 (lambda c: c[sid][0]["odpt:connectingRailway"].reverse(), "reference-data-changed"),
+                 (lambda c: c[sid][0]["odpt:connectingStation"].append("urn:external:two"), "reference-data-changed")]
+        for mutate, kind in cases:
+            row, _ = self.compare_catalog(mutate, sid)
+            self.assertIn(kind, row["categories"])
+        row, result = self.compare_catalog(lambda c: c[sid][0].update({"owl:sameAs": "urn:station:new", "@id": "urn:st:new"}), sid)
+        self.assertIn("possible-identifier-change", row["categories"])
+        self.assertEqual(result["semanticStatus"], "indeterminate")
+
+    def test_station_timetable_time_events_references_and_dynamic_opaque_field(self):
+        sid = "metro.station-timetable.yurakucho"
+        mutations = [
+            (lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({"odpt:departureTime": "06:01"}), "time-changed"),
+            (lambda c: c[sid][0]["odpt:stationTimetableObject"].append(copy.deepcopy(c[sid][0]["odpt:stationTimetableObject"][0])), "event-added"),
+            (lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({"odpt:train": "urn:train:2"}), "reference-data-changed"),
+            (lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({"odpt:trainType": "urn:type:express"}), "train-type-changed"),
+            (lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({"odpt:destinationStation": ["urn:station:four"]}), "destination-changed")]
+        for mutate, kind in mutations:
+            row, _ = self.compare_catalog(mutate, sid)
+            self.assertIn(kind, row["categories"])
+            self.assertEqual(row["coverage"], "partial")
+            self.assertEqual(row["semanticStatus"], "indeterminate")
+        row, _ = self.compare_catalog(lambda c: c[sid][0]["odpt:stationTimetableObject"].pop(), sid)
+        self.assertIn("event-removed", row["categories"])
+        moved = lambda c: c[sid][0]["odpt:stationTimetableObject"].reverse()
+        row, _ = self.compare_catalog(moved, sid)
+        self.assertIn("event-order-changed", row["categories"])
+        dynamic = self.catalog_fixture()[sid][0]["owl:sameAs"].split(":", 1)[-1]
+        for mutate in (lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({dynamic: False}),
+                       lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({"extension": True}),
+                       lambda c: c[sid][0]["odpt:stationTimetableObject"][0].pop(dynamic),
+                       lambda c: c[sid][0]["odpt:stationTimetableObject"][0].update({dynamic: "true"})):
+            row, _ = self.compare_catalog(mutate, sid)
+            self.assertEqual(row["coverage"], "partial")
+            self.assertIn("opaque_extension_uninterpreted", row["errorCodes"])
+
+    def test_catalog_internal_and_external_references(self):
+        result = self.compare(self.make_store(self.rows, catalog=self.catalog_fixture()))
+        checks = result["referenceChecks"]
+        self.assertTrue(any(r["status"] == "resolved" for r in checks))
+        self.assertTrue(any(r["status"] == "external" for r in checks))
+        catalog = self.catalog_fixture()
+        catalog["metro.railway"][0]["odpt:stationOrder"][0]["odpt:station"] = "odpt.Station:TokyoMetro.Missing"
+        self.a = self.make_store(self.rows, catalog=self.catalog_fixture())
+        result = self.compare(self.make_store(self.rows, catalog=catalog))
+        self.assertEqual(result["comparisonStatus"], "failed")
+        self.assertIn("internal_reference_unresolved", next(r for r in result["sourceResults"] if r["sourceId"] == "metro.railway")["errorCodes"])
+
+    def test_required_station_timetable_reference_structure(self):
+        sid = "metro.station-timetable.yurakucho"
+        self.a = self.make_store(self.rows, catalog=self.catalog_fixture())
+        candidate = self.catalog_fixture()
+        del candidate[sid][0]["odpt:calendar"]
+        result = self.compare(self.make_store(self.rows, catalog=candidate))
+        row = next(r for r in result["sourceResults"] if r["sourceId"] == sid)
+        self.assertEqual(row["comparisonStatus"], "failed")
+        self.assertIn("record_reference_required", row["errorCodes"])
 
     def test_add_remove_and_time_delta_paths(self):
         result = self.changed(lambda rows: rows.append(record("3")))
