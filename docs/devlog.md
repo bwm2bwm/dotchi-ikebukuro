@@ -960,3 +960,12 @@
 - unchanged metric件数の集約が結果契約へ保存されること、changed/not-evaluable明細の優先保持、actionable明細が1,000件を超えた際の省略数・partial・終了2を合成テストで確認。詳細評価範囲の回帰を含むODPT Python261件PASS、Node 12件PASS。自己比較QA約101.8秒、peak RSS 430,297,088 bytes。原本7件/store8 JSONのSHA-256・byte数・stat identity、およびengine/runtime依存19ファイルの前後一致を確認。
 - 最終実CLI111.958秒、process peak RSS432,611,328 bytes（約412.6 MiB、macOS）。独立inventory/engine走査込みQA全体116.234秒。原本7件/store8 JSONのSHA-256・byte数・identity全15件とengine/runtimeが前後一致。実異世代の検出能力は合成fixtureのみで確認。比較結果・candidate・原本コピーは保存しない。
 - 変更は比較module/基本比較test、新詳細helper/test、指定3文書の7ファイル。既存collector/generator/matcher/v2 gate、applicationPeriod/publicationApprovedは未変更。画面表示モデル、鮮度/公開資格は未評価。API/新規取得、原本/store変更・複製・移動、Actions/Cloudflare/Deploy、Commit/Push/Mergeなし。git diff --check PASS、branch/HEAD維持。
+
+
+## 2026-11-04 — ODPT-2G Phase 2C-3b-1 表示contextとNode runner
+
+- 開始main / 5f21868595d94f8733c38e6a244c011601a59378、cleanを確認。Phase 3aの固定観測時刻・独立context・既存adapter再利用を採用。
+- odpt_display_context.py / odpt_display_contract.mjs / odpt_display_runner.mjsを追加。旅程context schemaの意味を維持し、表示context・request/responseを各version 1で分離。固定UTC時刻とJST必要3日、4シナリオ、runtime/context hash、payload/QA state、boardを検証する。
+- itemsとgroups、bestのgroups内存在、実表示最早着マーク、terminalKnownを分離。欠日boardは別形のまま保持し、runnerの欠日入力は検証失敗で返す。JSON/stdin 8 MiB・深さ64・重複key拒否・固定stderr code。stdoutは非公開JSONプロトコル専用。
+- fingerprint依存へcontext/runner/selection/DOM JS/HTMLを追加し、root内相対importを解決。既存adapter/generator/collector/v2 gateとUIは未変更。原本/storeは使用せず、実source生成・Python表示collector・旧新表示比較・DOM/視覚品質・鮮度/公開資格は未評価。
+- 合成Node9件・既存Node54件PASS。ODPT統合Python265件PASS（184.046秒）、追加依存検査込みの表示context5件もPASS。祝日は既存generatorの_active_servicesへ通常平日・追加/除外・振替休日相当の合成例外を与える範囲で検証。runnerはservice_idを判定しない。engine依存25件を確認。原本/storeの読取・生成・書込みなし。git diff --check PASS、commit/push/merge/deployなし。

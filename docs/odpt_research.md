@@ -1249,3 +1249,22 @@ CLI: `python3 -B scripts/odpt_quality_diff.py --baseline-store <absolute-store> 
 UNKNOWN/WARNING・validatorの差分0。routeCoverageの両側complete48、complete→complete48、分類/不足理由の変化なし。scheduledTripCountは目的地/日/路線の延べ合計23,424で差分0（池袋発候補数ではない）。種別確定/補助/未確定・愛称のみ・種別source、行先確定/欠損/不明も全差分0。両側基本144×2=288、詳細3,696×2=7,392、計7,680算術checks PASS。inputReadiness ready、comparisonStatus partial、qualityDiffStatus indeterminate、基本/詳細の既知範囲はunchanged。詳細metric明細はchanged/not-evaluable、不整合を優先し、unchanged件数は集計へ保持する。baseline/candidate詳細metricもactionableな対象だけ個別保持するため、unchangedの集約は省略件数・partial・終了コードへ影響しない。自己比較CLIは終了0。画面表示モデル未評価によるpartial/indeterminateは維持する。修正後QAは約101.8秒、peak RSS 430,297,088 bytes。原本7件とstore8 JSON（計15ファイル）のSHA-256/byte数/stat identity、engine 19依存ファイルの前後一致を確認した。
 
 実CLI111.958秒、process peak RSS432,611,328 bytes（約412.6 MiB、macOS、メモリ内stdout捕捉込み）。独立inventory/engine前後走査を含むQA全体116.234秒。原本7件/store8 JSONのSHA-256・byte数・device/inode/size/mtime/ctimeが全15件で前後一致し、engine/runtimeも一致。比較digestは538a6b25f4cdd2d8c17a76a039b6c5f659c6edb38f1f36cc00a94685c6f3b082。結果・原本コピー・candidateは保存せず、実データ非公開/公開未承認を維持した。実異世代差分は合成fixtureでのみ確認。画面表示モデル・時刻/待ち時間4検査指標・各probeの最初のerror以降・全接続組の各leg品質・セル横断一意対象・鮮度/公開資格等は未評価のまま。
+
+
+### Phase 2C-3a採用設計 / Phase 2C-3b-1 表示context・Node runner（2026-11-04）
+
+Phase 2C-1の3段階のうち画面表示モデルへ進む入力基盤。既存旅程contextのdisplayEvaluation=not-evaluatedを維持し、独立contract `odpt-display-evaluation-context` / schemaVersion 1を追加した。qualityContextFingerprintで検証済み旅程contextを参照し、timezone=Asia/Tokyo、UTC秒精度のobservationInstants、4 displayScenarios、観測instant→必要3 serviceDateのrequiredServiceDatesを封印する。Python `odpt_display_context.py`が既存normalize_contextを再利用し、Node `odpt_display_contract.mjs`も参照・hash・条件を検証する。canonical JSONはUTF-8・key昇順・空白なし・非ASCIIをそのまま保持・有限safe integerのみ。fingerprintは自身を除いたSHA-256。instantsとscenario IDは昇順へ正規化、重複拒否、必要日配列はD-1/D/D+1固定順。必要日は旅程contextのserviceDates+auxiliaryServiceDatesに含まれることを要求する。実時計・実行日・暗黙の日付選択は使わない。
+
+採用scenarioはdeparture-all/departure-direct/line-all/line-direct。modeとdirectOnlyのみを切り替え、horizonSeconds=86400、lineLimit=3、departureLimit=6は既存adapterの規則を記述する固定値。任意cardLimitやrouteSeparatedは追加しない。v2 QAは各候補の発車60分前ゲートを使い、候補全体のbestをカード制限前に選ぶ。従来previewのearliestVisibleを流用せず、bestがgroups外になる場合もそのまま観測する。
+
+非公開 `node scripts/odpt_display_runner.mjs` はstdinに1 JSON request、stdoutに1 JSON response（本文を含む非公開IPC専用）を返す。request contract=`odpt-display-adapter-request` / schemaVersion 1、fields=qualityContext/displayContext/expectedNodeRuntime/payload/qaState/observationInstant/displayScenario。expectedNodeRuntimeは検証済みengine.environment.nodeをcallerが渡す。同じprobe形式でversions/platform/arch/Intlを完全比較する。8 MiB入力上限、UTF-8 strict、JSON重複key・深さ64超過を拒否。schema/context/runtime、payloadのちょうど必要3日・public ID、QA state、旅程contextの最大乗換待ち制限を検証してbuildV2QaBoardを呼ぶ。DOM本体はimportしない。成功0、失敗2。stderrは固定codeだけ、失敗応答にはboardを含めず、本文・例外メッセージをechoしない。
+
+response contract=`odpt-display-adapter-response` / schemaVersion 1。boardのfield・card・group順/上限・best参照・route stateを検証し、key順だけを正規化する。items/groupsの順序と既存label/IDを保持し、candidateCount/cardCount/bestInGroups/displayedBestMarkCount/terminalKnownByRouteDate/unknownRouteStateCountを別掲する。itemContentKeysはID/sourceIdを除いた表示内容のhashで、独立列車・世代間同一性を保証しない。boardDigestはgeneratedAtを除き、実行時間も含めない。欠日boardの別形はnormalizeBoardでunavailable/missingFieldsとして保持し、best等の欠落fieldを補完しない。runnerではその前の3日envelope検証で欠日requestを拒否する。既知items=0はvalidatedとして区別する。
+
+payload/QA stateはobject入力のため元candidate file bytesのhash照合は未評価（state内integrityは形だけ検証）。source/Snapshot binding・実engine artifact照合はcaller側の責任で次工程に残す。Node runtime一致だけで実sourceや公開適格性の確認とはしない。DOM文言・CSS・viewport/font・視覚品質・Python表示collector・旧新表示比較・公開資格は未評価。生成日時の固定envelope値は取得日時や適用期間の根拠ではない。
+
+品質engineのschemaVersionとhash方式を維持し、display context/runner/そのimport closure、selection、DOM JS、HTMLを明示依存へ追加した。静的ファイル名の参照をimport探索だけに任せない。相対importはroot内の../を解決し、root外と未知external importを拒否。Node crypto/urlはruntimeのbinary/versions証拠で扱う。依存範囲拡張でengineFingerprintは変わるため旧証拠は再採取する。DOM/CSSそのものの評価は今回行わない。
+
+実sourceのpayload生成・全駅収集は実施せず、原本/storeを読まない合成QAに限定。祝日・振替休日をrunnerが再判定しない。Python合成calendarで通常平日・例外切替・振替休日を模した固定例外を既存_active_servicesに適用し、実際の祝日feed・深夜境界の全駅QAは3b-2以降に残す。
+
+検証: 新Node runner合成9件、既存Node adapter/DOM/selection/timetable関連54件PASS。Python ODPT統合265件PASS（184.046秒）、追加の依存閉包検査を含む表示context単独5件PASS。4 scenario、UTC/JST、3日不足、24/25時、60分ゲート、発車同時刻、直通alternative、同着、bestのgroups外、8 route状態、UNKNOWN抑止、0/unavailable、schema/runtime/context hash、重複JSON/depth上限、結果決定性を確認。engine依存25ファイル。実source QA・性能評価は今回実施していない。

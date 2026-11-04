@@ -18,6 +18,8 @@ Phase 2C-2c-1で独立read-only `scripts/odpt_quality_diff.py` を追加。同�
 
 Phase 2C-2c-2で詳細98指標の比較を追加。基本metrics/summaryの意味を維持し、詳細差分・詳細集計・詳細状態を追加fieldに分離する。同一engine/context/runtimeでraw・native・集約matcher、区間/primary・alternative/延べ・セル内一意、診断体系別、coverage、種別・行先を比較する。率は分子/分母を併記し、分母件数の変化は許容して明示、定義差と率未定義は数値差にしない。時刻・待ち時間の検査対象/違反件数はcollector未実装のため未評価。詳細上限1,000件を維持し、changed/not-evaluable/inconsistency明細を優先、unchanged件数は集計へ保持する。実自己比較は比較可能な基本/詳細差分と確定findingが0、分母0の率はnull、CLI終了0、全体partial/indeterminate。確定差分があればchangedを保持する。画面表示モデルと公開資格は未評価。品質engine依存は19ファイル。
 
+Phase 2C-3b-1で独立表示context（schemaVersion 1）と非公開Node runnerを追加。固定UTC観測時刻・4シナリオ・JSTの必要3日を検証し、既存buildV2QaBoardの出力を正規化する。候補全体bestとgroups内カードを区別し、UNKNOWN・欠日・既知0件を混同しない。engine依存にrunner/context・selection・DOM JS/HTMLを追加。実source表示collector・旧新表示比較・DOM/視覚品質は未実装。原本/storeは使用せず合成QAのみ。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。

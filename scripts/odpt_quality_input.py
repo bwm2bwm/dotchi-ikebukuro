@@ -33,7 +33,10 @@ STATIONS = ('Kanamecho','Senkawa','KotakeMukaihara','Hikawadai','Heiwadai','Chik
 SEEDS = ('scripts/odpt_itinerary.py','scripts/odpt_train_matcher.py','scripts/odpt_stop_patterns.py',
          'scripts/odpt_public_v2.py','scripts/odpt_snapshot_qa.py','scripts/export_local_timetable_payload.py',
          'scripts/prepare_odpt_v2_qa.py','_local_preview/odpt_v2_qa_adapter.mjs','scripts/odpt_quality_input.py',
-         'scripts/odpt_quality_metrics.py','scripts/odpt_quality_details.py','scripts/odpt_quality_diff.py')
+         'scripts/odpt_quality_metrics.py','scripts/odpt_quality_details.py','scripts/odpt_quality_diff.py',
+         'scripts/odpt_display_context.py','scripts/odpt_display_runner.mjs',
+         '_local_preview/selection.mjs','_local_preview/preview_odpt_v2_qa.mjs',
+         '_local_preview/odpt_v2_qa.html')
 FIELDS = set('contract schemaVersion profile serviceDates auxiliaryServiceDates stationIds routeIds originStationId direction minimumWaitSeconds maximumWaitSeconds crossServiceDateSearch transferStationId journeyPolicy primaryRule observationInstants displayScenarios displayEvaluation engineFingerprint contextFingerprint'.split())
 NOT_EVALUATED = ['feed-service-availability','journey-generation','quality-metrics','quality-diff','display-model','browser-runtime',
                  'freshness','application-period','publication-eligibility','cross-source-consistency',
@@ -249,10 +252,13 @@ def build_engine(root=ROOT, environment=None):
                 fail('engine_station_mapping_invalid')
         if path.suffix=='.mjs':
             for spec in re.findall(r"(?:from\s*|import\s*\(?\s*)['\"]([^'\"]+)['\"]",raw.decode('utf-8')):
-                if not spec.startswith('./'): fail('engine_js_import_unresolved')
-                dep=path.parent/spec
-                if '..' in dep.parts: fail('engine_js_import_unresolved')
-                pending.add(dep.relative_to(root).as_posix())
+                if not spec.startswith(('./', '../')):
+                    if spec in {'node:crypto', 'node:url'}: continue
+                    fail('engine_js_import_unresolved')
+                dep=(path.parent/spec).resolve()
+                try: relative=dep.relative_to(root.resolve())
+                except ValueError: fail('engine_js_import_unresolved')
+                pending.add(relative.as_posix())
     for name in sorted(entries):
         raw,identity=_read(root/name)
         if identity!=identities[name] or hashlib.sha256(raw).hexdigest()!=entries[name]['sha256']: fail('engine_changed_during_scan','incomparable')
