@@ -1,10 +1,10 @@
 # プロジェクト状態
 
-最終整理: 2026-11-03。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
+最終整理: 2026-11-04。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
-ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validator、Phase 1B read-only inventory、Phase 1Cの非公開履歴store、Phase 1DのODPT-0 read-only互換確認を実装済み。Phase 1Dでは固定7 sourceのID/file/hash/byte数を照合し、新旧fingerprintを個別に再計算する。取得履歴は不明、source間のダイヤ整合は未評価。差分エンジン・公開資格gateは未実装。詳細と制限は `odpt_research.md` のODPT-2G節とdevlogを参照。
+ODPT-2G Phase 0のSource/Snapshot契約、Phase 1A validator、Phase 1B read-only inventory、Phase 1C非公開履歴store、Phase 1D ODPT-0 read-only互換確認、Phase 2AのSnapshot間基本差分を実装済み。Phase 2Aは固定7 sourceの保存hash/byte数とSource metadataのみを比較し、元source bytesを必要としない。取得履歴は不明、source間のダイヤ整合・公開資格は未評価。本文意味比較・旅程品質差分は未実装。詳細と制限は `odpt_research.md` のODPT-2G節とdevlogを参照。
 
 ## 現在の配信・QA経路
 
@@ -26,7 +26,7 @@ ODPT-2G Phase 0のSource/Snapshot契約を確定し、Phase 1A validator、Phase
 - 保存sourceの取得成功日時、最新性、ODPTとGTFSの同一ダイヤ版性。
 - 実データの承認済み `applicationPeriod` と、GTFS feed期間との整合規則。
 - ODPT Newsの確認頻度と担当運用、東京メトロGTFSへの `date=current/next/latest` 適用可否。
-- 7 sourceの新規取得履歴生成・差分検証・candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
+- 7 sourceの新規取得履歴生成・本文意味差分・candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
 - 公開payloadの再構成リスク、表示・クレジット条件の実データ公開適用確認。
 - release-managedのrollback実地確認、旧タブ・cache境界QA。
 - 運行日境界を跨ぐ乗換探索は未実装。
@@ -35,7 +35,7 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. 保存済みSnapshot間の差分検証を互換確認と分離して設計・レビューする。
+1. Phase 2Aの後続として、本文意味差分・旅程品質差分を独立したPhaseで設計する。
 2. Source取得履歴とapplicationPeriod根拠の検証を、差分処理・公開判断から分離して設計する。
 3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
 

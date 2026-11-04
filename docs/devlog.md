@@ -837,3 +837,12 @@
 - 合成テスト8件を追加。contract 10、inventory 7、store 13、compatibility 8、snapshot QA 15、v2 25、itinerary 28、train matcher 13、計119件PASS。source/store path/ID/hash/size/fingerprint/metadata破損、参照変更/欠落、symlink/traversal/incomplete storeを検証。
 - 実source compare-legacy PASS。7 source ID/file/hash/byte数一致、source bytes 7/7 match。新fingerprint `9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d`、ODPT-0 fingerprint `6e578d7b55f669e58dd3597dc151d9d0db7a6cbf7651d96f84036538c4ea430e`（別方式のため不一致）。共有metadata mismatch 0、射影/抽出差7。取得状態`historical-unknown`、cross-source consistency`not-evaluated`、公開承認は付与せず。実行前後で7 source原本とSnapshot store 8 JSONのhash/byte数が一致。
 - `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。`scripts/odpt_snapshot_qa.py`、取得コード、v2、synthetic/release-managed、CI、Cloudflare、applicationPeriod/publicationApprovedは未変更。Commit/Push/Mergeなし。
+
+## 2026-11-04 — ODPT-2G Phase 2A Snapshot基本差分
+
+- 開始前にbranch `main`、HEAD `9931f890127f19387cfb5762815391d603c2f4be`、clean statusを確認。Phase 0比較契約、Phase 1A〜1D資料・実装・関連テストを読み、配列順序を保持する規則とPhase 1C read-only readerを再利用した。
+- `scripts/odpt_source_diff.py` とinventory CLIの `compare --baseline-store ... --candidate-store ...` を追加。両storeの保存契約、7 source、record参照、schema、fingerprintを検証後、sourceごとのhash/byte数とGTFS/ODPT metadata fieldを比較する。比較は元source bytesを要求せず読み取らない。結果はメモリ内のみで、source本文やmetadata値をCLIに表示しない。
+- `tests/test_odpt_source_diff.py` に合成fixture 13件を追加し全件PASS。bytes同一、同byte数hash差、hash/size差、複数source差、metadata-onlyのGTFS・ODPT差、配列順序、unknown、不正store/参照/fingerprint/schema/path/symlink、元source参照不能を検証。
+- Phase 1C実store `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c`の同一store比較でoverall `identical`、固定7 sourceすべてhash/byte数一致、metadata差なし。CLIはraw bytes照合をせず、元source参照不要として明示。実store・sourceの書込みなし。
+- CLI終了コードは比較完了（identical/changed）0、比較不能/unavailable/不正store 2。Phase 2A statusはPhase 0総合分類から分離し、expected-change/publication approvalを付与しない。JSON/GTFS意味比較、旅程品質差分、公開資格判定、結果persistは未実装。
+- `docs/project_state.md`、`docs/odpt_research.md`、本devlogを更新。取得経路、`odpt_snapshot_qa.py`、public-display-v2、synthetic/release-managed、Actions/Cloudflare、applicationPeriod/publicationApprovedは変更なし。APIアクセス、source取得、Commit/Push/Mergeなし。

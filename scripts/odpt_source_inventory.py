@@ -252,11 +252,20 @@ def generate_inventory(source_dir: Path, observed_at: str | None = None,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", choices=("inspect", "persist", "verify", "compare-legacy"), default="inspect")
+    parser.add_argument("command", nargs="?", choices=("inspect", "persist", "verify", "compare-legacy", "compare"), default="inspect")
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SNAPSHOT)
     parser.add_argument("--store", type=Path)
+    parser.add_argument("--baseline-store", type=Path)
+    parser.add_argument("--candidate-store", type=Path)
     args = parser.parse_args(argv)
-    if args.command != "inspect" and args.store is None:
+    if args.command == "compare":
+        if args.store is not None or args.baseline_store is None or args.candidate_store is None:
+            parser.error("compare requires --baseline-store and --candidate-store; --store is not valid")
+        if not args.baseline_store.is_absolute() or not args.candidate_store.is_absolute():
+            parser.error("compare store paths must be absolute")
+    elif args.baseline_store is not None or args.candidate_store is not None:
+        parser.error("--baseline-store and --candidate-store are only valid for compare")
+    if args.command not in {"inspect", "compare"} and args.store is None:
         parser.error(f"--store is required for {args.command}")
     if args.command == "inspect" and args.store is not None:
         parser.error("--store is only valid for persist, verify, or compare-legacy")
@@ -275,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from odpt_source_store import StoreError
         from odpt_source_compat import CompatibilityError
+        from odpt_source_diff import SourceDiffError
         if args.command == "persist":
             from odpt_source_store import persist_snapshot
             result = persist_snapshot(args.store, args.source_dir)
@@ -291,10 +301,29 @@ def main(argv: list[str] | None = None) -> int:
                   f"missing={result['sourceBytes']['missing']} mismatched={result['sourceBytes']['mismatched']} "
                   f"content_fingerprint={result['contentFingerprint']}")
             return 0 if result["sourceBytesStatus"] == "match" else 2
+        if args.command == "compare":
+            from odpt_source_diff import compare_stores
+            result = compare_stores(args.baseline_store, args.candidate_store)
+            print(f"compare=PASS overall_basic_status={result['overallBasicStatus']} "
+                  f"baseline_snapshot_id={result['baselineSnapshotId']} "
+                  f"candidate_snapshot_id={result['candidateSnapshotId']}")
+            for row in result["sourceDiffs"]:
+                changed_fields = [item["field"] for item in result["metadataDiffs"]
+                                  if item["sourceId"] == row["sourceId"] and item["status"] == "different"]
+                metadata_summary = ",".join(changed_fields) if changed_fields else "none"
+                print(f"source_id={row['sourceId']} status={row['status']} "
+                      f"hash_match={row['hashMatch']} byte_count_match={row['byteCountMatch']} "
+                      f"metadata_changes={metadata_summary}")
+            print("original_source_bytes=not-required; not-read")
+            print("publication_approval=not-assessed")
+            return 0 if result["overallBasicStatus"] != "unavailable" else 2
         from odpt_source_compat import compare_legacy
         result = compare_legacy(args.store, args.source_dir)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0 if result["status"] == "PASS" else 2
+    except SourceDiffError as exc:
+        print(f"compare=FAIL error={exc.code}")
+        return 2
     except (InventoryError, StoreError, CompatibilityError) as exc:
         operation = "persist" if args.command == "persist" else "verify"
         print(f"{operation}=FAIL error={exc.code}")

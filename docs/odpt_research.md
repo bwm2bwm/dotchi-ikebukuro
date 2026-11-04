@@ -3,7 +3,7 @@
 > Phase 2の実データ解析結果は文書末尾を参照。
 > 利用条件に関する2026-10-26の事務局回答は、過去の未確認事項を更新する情報として文書末尾の「T11 ODPT事務局回答」を参照する。回答の適用範囲を超える包括的許可とは解釈しない。
 
-## 現在の確定事項・未解決事項（2026-11-03）
+## 現在の確定事項・未解決事項（2026-11-04）
 
 ### 確定事項
 
@@ -228,6 +228,18 @@ metadata比較ではODPT recordCountと`dc:date`/`dct:issued`値集合、GTFS fe
 実source QAはPhase 1C store `~/Library/Application Support/dotchi-ikebukuro-source-snapshot-20261103-phase1c`を指定し、同じ保存済み7 sourceに対して実行。新Snapshot fingerprint `9392342c929297f98c1e8124a563e13dc35764c0f19df17454e11870d3196c6d`とODPT-0 fingerprint `6e578d7b55f669e58dd3597dc151d9d0db7a6cbf7651d96f84036538c4ea430e`は独立検証PASS、値は異なる（方式差）。ODPT-0値は過去devlog記録値と一致するが、既定・記録上のQA JSON reportが存在しないためreport fileとの直接比較はしていない。inventory一致PASS、現物bytes 7/7 match。取得状態は`historical-unknown`、source間整合は`not-evaluated`、公開statusはこの比較では未評価・承認付与なし。実行前後でsource 7件とstore JSON 8件のhash/byte数が一致。
 
 合成fixtureは [`tests/test_odpt_source_compat.py`](../tests/test_odpt_source_compat.py)。一致/metadata射影差、inventory欠落/余剰/重複/誤mapping、hash/byte数不一致、Snapshot fingerprint不正、metadata型不正、source変更/欠落、symlink/traversal/不完全store、ODPT-0 fingerprint出力不正を検証する（8件）。互換確認はread-onlyで、ダイヤ最新版・同一ダイヤ・公開可能性の判定を行わない。
+
+### Phase 2A Snapshot基本差分（2026-11-04）
+
+[`scripts/odpt_source_diff.py`](../scripts/odpt_source_diff.py) とinventory CLIの `compare --baseline-store <absolute-path> --candidate-store <absolute-path>` を追加した。既存のPhase 1C `load_store_contract()`を両storeに適用し、Source/Snapshot validator、固定7件、record参照、schema version、canonical contentFingerprintを検証してから比較する。不正・欠落・symlink storeはsideを含む固定error codeで失敗し、差分なしとは扱わない。保存recordの検証と元source bytesの現物照合は分離し、比較に元source directoryを要求せず、現物bytesを読み取らない。
+
+各sourceの結果にbaseline/candidate SHA-256・byte数、hash一致、byte数一致、`identical` / `different` / `unavailable`を記録する。hash一致かつbyte数一致で保存representationを同一とし、同じ長さでhashだけ異なる場合も`different`。異なるsnapshotIdや取得履歴はbytes判定へ影響しない。metadataはSource recordからGTFSのfeedVersion/validFrom/validThrough、ODPTのrecordCount/dcDates/issuedDates/欠損件数をfield単位で比較し、`same` / `different` / `both-unknown` / `one-unknown`を記録する。Phase 0契約どおり配列順序を保持する。構造不正はstore契約検証で拒否する。保存metadata不明が残れば総合状態は`unavailable`、既知のbytesまたはmetadata差があれば`changed`、全比較項目が既知で一致すれば`identical`。
+
+結果はメモリ上だけで生成する。CLIは7 sourceの状態とmetadata変更field名のみを表示し、raw本文・metadata値を出さない。終了コード0は比較完了（identical/changed）、2は比較不能または引数不正。`FAIL error=<code>`と`PASS overall_basic_status=unavailable`を区別する。結果はPhase 2A専用でPhase 0分類、expected-change、公開承認に接続しない。
+
+合成fixture testは [`tests/test_odpt_source_diff.py`](../tests/test_odpt_source_diff.py) に追加した。7件同一、snapshotId差、同byte数hash差、hash/byte数差、metadata-only差、GTFS3 field、ODPT日付/件数/欠損数、配列順序、unknown metadata、元source参照不能、欠落/破損・selectedRecords・fingerprint・record参照・metadata schema・未知schema・path/symlinkを検証する（13件）。Phase 1C実storeを同一path同士でread-only比較し、7 sourceとmetadataが一致して`identical`。この比較は元source bytes照合を行っていない。
+
+本文のJSON/GTFS意味比較、旅程品質差分、総合公開資格判定、結果永続保存は未実装。hash一致は保存bytesの同一性を強く確認するが、取得日時・ダイヤ有効性・source間の同一版性を証明しない。
 
 ### 推奨する全体フロー
 
