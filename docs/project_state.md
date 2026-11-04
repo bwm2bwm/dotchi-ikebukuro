@@ -1,6 +1,6 @@
 # プロジェクト状態
 
-最終整理: 2026-11-04。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
+最終整理: 2026-11-05。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
@@ -25,6 +25,8 @@ Phase 2C-3b-2で非公開単一Snapshot表示collector `odpt_display_metrics.py`
 Phase 2C-3c-1で独立した非公開表示モデル基本差分CLI `odpt_display_diff.py` を追加。同じ凍結engine/旅程・表示contextで既存collectorをbaseline→candidateの順に実行する。IDを除いた選択journey内容の多重集合・順序、groupsとbest/表示マークを比較し、重複の曖昧性と評価不能を保持する。unchangedは集計し、actionable明細だけ上限保持。routeStates/始発終電UNKNOWN詳細分類とDOM/視覚品質は未評価なので全体partial/indeterminate、確定差分があればchanged。engine依存は比較自身を加え27ファイル。
 
 Phase 2C-3c-2で同CLIへboard観測範囲の詳細状態差分を追加。日×路線のrouteStates/terminalKnown、board serviceState、始発/終電案内・終電候補のgroups内/上限外表示・UNKNOWN抑止・JST暦日とserviceDate/発車epochの対応を比較する。基本summary/items/groups/bestの意味は維持し、stateSummary/stateDiffs/stateTransitions/stateChecksと統合displaySummaryを追加。欠損・未知状態値・不整合と確定差分を独立に保持し、品質悪化や公開資格に変換しない。全件集計、明細リスト別既定1,000件上限、unchanged集約、決定的digestと終了コード0/2/3/4を維持。既定32セルの実source自己比較は基本・全状態差分0、整合2,304 checks PASS・終了0。終電/日付境界4時刻の追加128セルも全差分0・9,216 checks PASS・終了0。DOM/視覚品質、board外の最終候補、生coverage dataState/WARNING件数、鮮度・公開資格は未評価、全体partial/indeterminateを維持。helperの自動依存追跡でengineは28ファイル。実データ公開未承認・既存generator/matcher/adapter/公開gateは維持。
+
+Phase 2C-3d-2で合成専用の固定時計DOM harness・表示整合テストを追加。既存Fake DOM、メモリ内fetch、実candidate bytes/hash・公開ID検証、Web Crypto、手動intervalを利用し、同じepochのreference board.groupsとDOMカードの構造・順序・文言・classを検証する。4シナリオ、直通alternative、上限内外best/終電、countdownのミリ秒境界、8 routeState、UNKNOWN/INFO/補助日coverage、24/25時、空表示・検証失敗、後始末・反復決定性を確認。実HTMLの接続は標準HTMLParserによる別検査。最終の関連Node57件（v2 DOM20件含む）・Python20件（HTML3件含む）がPASS。途中失敗はテストがIntlのcomma区切り日時をdatetime-localへ渡したことが原因で、境界観測を固定Date.now＋手動intervalへ修正した。既存adapter/DOM/UI・品質比較・公開gate・engine 28依存は未変更。Node意味表示の合成QAを追加した範囲であり、既存比較のpartial/indeterminateは維持。実source接続は3d-3、ブラウザー実描画・CSS/フォント/safe-area・focus/アクセシビリティ・HTTP/CSP/cache・鮮度/公開資格は未評価。
 
 ## 現在の配信・QA経路
 

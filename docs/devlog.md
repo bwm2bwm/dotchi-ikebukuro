@@ -1002,3 +1002,16 @@
 - 既存21時刻の境界集合からJST10/29 23:59:59、10/30 00:00:00・00:12:59・00:13:00を追加。4×8×4=128セルも基本・全状態差分/未評価/不整合/確定finding/省略0、9,216 checks PASS、終了0。items/cards332・best96、候補の元serviceDate10/29を維持。補助日31のcoverage不足96参照をdata_insufficient/terminalKnown falseとして保持。baseline175.641秒/candidate187.940秒/全体369.693秒、独立照合込み372.256秒。親peak426,311,680 bytes/Node子最大144,195,584 bytes、各側32駅日生成/128 runner起動。15原本/store実体とengine/runtimeの前後一致も確認。
 - 新規合成13件を追加。ODPT Python313件一括PASS（571.732秒）、追加WARNINGを含む状態12件を再実行PASS（追加後のODPT対象314件）、追記した合成Snapshot異世代検証も再実行PASS。QA準備Python7件・関連Node83件PASS。QA準備のlocalhost bindはsandboxで拒否されたため、許可されたsandbox外再実行でPASSを確認。全8状態、certainty/service遷移、始発60分・発車/終電境界、直通/上限外ラベル、INFO/WARNING/UNKNOWN、欠日・欠損・未知値、日付/ID非依存、1,000件上限・決定性と基本差分/CLI/gate回帰を検証。
 - 変更は比較module/test、新helper/test、指定3文書の7ファイル。DOM/描画・board外最終候補・生coverage dataState/WARNING件数・鮮度/公開資格は未評価。実公開未承認を維持し、API/新規取得/原本store変更・コピー/公開gate・applicationPeriod・publicationApproved変更/CI/Deploy/Commit/Push/Mergeなし。git diff --check PASS、branch/HEAD維持。
+
+
+## 2026-11-05 — ODPT-2G Phase 2C-3d-2 固定時計DOM harness・表示整合テスト
+
+- 前回未完了分を維持して継続。開始main / `19ae54384fd2dde30ac5b5b987ce9b68d675c305`、3c-2 commit済み。開始時の未コミット変更はtests/odpt_v2_qa_dom.test.mjsのみで、破棄/reset/stashなし。
+- countdown境界失敗を再現（期待03:01、実測05:00）。Intl en-CAの日時formatがcomma区切りで、parseJstInputのT区切り条件に合わず時計設定が拒否されたことを確認。ミリ秒精度も入力欄を経由せず、固定Date.now＋手動interval・同一epochのreference boardへ修正。期待値とadapter/DOMは変更していない。
+- 既存FakeElement/FakeText・メモリ内fetch・Web Crypto・候補bytes/ID/hash・QA stateを再利用。非同期初期化完了を待ち、全4scenarioとmode/filter属性、groupsの構造/枚数/順序・種別/行先/発着/運行日・直通/乗換・待ち約分/接続保証なし・best/終電を比較。直通alternativeは同じIDの到着内容変更として確認する。
+- T-181秒、T-180秒±1msとちょうど、T-1ms/T/T+1ms、60分前ゲート±1ms、24/25時・元serviceDate、8 routeStateと空案内、UNKNOWN両路線伝播・限定best・terminalKnown false、INFO正常、coverage不足・補助日warning、必要日欠落・bytes/schema/QA state検証失敗を検証。上限外bestはマーク0、上限外終電はバッジ0、補助日不足の個別ラベルなし、unavailable通知okは現行挙動として固定し、改善候補をresearchへ記録。
+- finallyで元global descriptor/Date.nowを復元し、仮interval・全生成nodeのlistener/children・storage・fetch参照を破棄する。assert失敗、entry import guard失敗、既存globalへの復元、反復結果一致も確認。Node ESM cacheのmodule自体はprocess寿命まで保持されるが、毎回異なる連番queryで新規entry状態を初期化する。新規外部依存・常駐runner・実source接続は追加しない。
+- tests/test_odpt_v2_qa_html.pyを追加。標準HTMLParserで必須ID一意性・タグ、module/CSS参照、datetime-local/checkbox/mode/status/ariaの初期値、dialog/label参照を実HTMLから検査。Fake DOMとの接続を別checkとして扱い、HTML/CSS本体は未変更。
+- 最終関連Node57件PASS（16.991秒、v2 DOM20件含む）。対象はodpt_v2_qa_dom/adapter/display_runner/preview_selection/terminal_ui/preview_runtime_dom_qa。Python20件PASS（10.717秒、HTML3/context5/状態差分12）。スキップ・失敗0。git diff --check PASS。
+- 変更はDOMテスト、HTML検査テストと指定3文書の計5ファイル。generator/matcher/adapter/DOM/UI、既存公開gate・品質比較・engine 28依存、applicationPeriod/publicationApprovedは未変更。原本/storeを使用せず、API/新規取得/実データ公開/Deploy/Commit/Push/Mergeなし。
+- ブラウザー実描画、CSS cascade・フォント/折返し/safe-area、dialog focus/アクセシビリティ、HTTP/CSP/cache、実source接続QA、鮮度/公開資格は未評価。テストPASSを実機表示品質の保証とせず、既存partial/indeterminateを維持。3d-3以降の実装なし。

@@ -1364,3 +1364,18 @@ baseline73.368秒、candidate83.507秒、比較全体164.729秒、独立照合�
 **合成・回帰:** 状態helperの合成12テストを追加し、既存比較testへ局所未評価と確定状態差分の併存検証を追加（新規計13件）。既存adapterで全8状態・始発60分/発車ちょうど/最終候補前後・直通終電/上限外カード・UNKNOWN両路線伝播・INFO/WARNING非昇格・QA欠損/coverage不足/欠日・23:59→00:00と24時超・未知値保持・ID/フォーマット非依存・1,024セルの全件集計/1,000件上限・決定性/digestを検証。既存基本items/groups/best、条件/engine/runtime差、途中変更、CLI終了コード、公開gate独立も回帰した。ODPT Python313件一括PASS（571.732秒）、追加WARNINGテストを含む状態12件を再実行PASS（追加後ODPT対象314件）、追記した合成異世代Snapshot検証も再実行PASS。QA準備Python7件・関連Node83件PASS。QA準備のlocalhost bind検査はsandbox制限で失敗したため、許可されたsandbox外再実行で7件PASSを確認した。
 
 変更は比較module/test、新helper/test、指定3文書の7ファイルのみ。実データ公開未承認を維持し、DOM/CSS/描画・性能最適化・Phase 2C-3d以降・鮮度/公開資格は対象外。API/新規取得、原本/store変更・複製・移動、applicationPeriod/publicationApproved変更、Actions/Cloudflare/Deploy、Commit/Push/Mergeは行っていない。
+
+
+### Phase 2C-3d-2 固定時計DOM表示整合テスト（2026-11-05）
+
+前回の未完了変更を維持して継続。開始main / 19ae54384fd2dde30ac5b5b987ce9b68d675c305（3c-2 commit済み）、未コミットはtests/odpt_v2_qa_dom.test.mjsだけ。失敗を再現し、期待03:01・実測05:00を確認した。テストのIntl.DateTimeFormat('en-CA').format()は「2026-10-29, 05:01:59」を返し、parseJstInputが要求するYYYY-MM-DDTHH:mm:ssと異なるためnullになり、仮想時計設定が拒否されていた。加えてdatetime-localの秒精度ではミリ秒観測を保持できない。adapter/DOMの不具合ではなくテスト入力経路の問題であり、公開規則は変更しない。
+
+境界テストは実時間modeへ戻した上で固定Date.nowを観測epochへ変更し、手動intervalを1回呼ぶ。reference buildV2QaBoardも同じepochで評価する。発車TについてT-181秒とT-180秒-1msは03:01/redなし、T-180秒とT-180秒+1msは03:00/redあり、T-1msは00:01/redあり、TおよびT+1msはカード除去を確認。根拠はcountdownTextのceil、remaining<=180、およびadapterのdepartureAtMs<=nowMs除外。60分前ゲートは維持し、既存表示contextのUTC秒精度を拡張しない。JST秒入力、仮想時計進行・不正入力・実時間復帰は既存テストを維持する。
+
+harnessはテストファイル内の小さいhelperへ整理。import前に時計・globalを設定し、非同期初期化完了（interval登録または検証error）を待つ。待機はsetImmediateと単調時計の資源timeoutを使い、観測時刻を実sleepで進めない。候補bytesは全8駅分の合成payloadから作り、公開IDとSHA-256/bytesを実際に検証する。fetch監査もstate内integrityと照合する。importごとの連番queryでentryの再初期化を保証し、finallyで元global property descriptor・Date.nowを復元、仮interval・全生成nodeのlistener/children・storage・fetch参照を破棄。import guard失敗・assert失敗にも復元を検証する。ESM module cacheそのものを削除する仕組みはなく、queryごとのmoduleはNodeテストprocess終了まで保持される。常駐runnerや実source再生機能は追加しない。
+
+表示契約はboard.items全体ではなくgroupsごとのカード数・ID順序・section/見出しを基準とする。4シナリオのmode/checked/aria/class、直通alternativeによる同一IDの到着変更、直通のみで候補が減ること、種別/行先/発着時刻/元serviceDate、乗換駅・接続路線・待ち約分・接続保証なし、最早着/限定ラベル、終電/直通終電を確認。8 routeStateと空表示の文言、UNKNOWN両路線伝播とterminalKnown false、INFO非warning、coverage不足warningを確認する。HTMLはFake DOMが読み込まないため、別途標準html.parser.HTMLParserで必須IDの一意性・タグ・module/CSS参照・初期属性・dialog/label参照を検査する。HTML/CSS本体は変更しない。
+
+現行挙動の固定と改善候補：bestはitems全体で選びgroups上限外ならマーク0件、終電も上限外ならバッジ0件となる。補助日の不足は全体warningへ反映するが個別ラベルは今日の2路線だけ。必要日欠落のunavailableでは通知data-stateがokになる場合がある。これらを修正せず回帰期待として記録する。表示改善の判断は別工程で行う。
+
+検証は関連Node57件PASS（16.991秒、v2 DOM20件を含む）、Python20件PASS（10.717秒、HTML3/context5/状態差分12）。Nodeはodpt_v2_qa_dom・adapter・display_runner・preview_selection・terminal_ui・preview_runtime_dom_qaの6ファイル。Pythonはtest_odpt_v2_qa_html・test_odpt_display_context・test_odpt_display_state_diff。結果はdevlogにも記録する。テストPASSはブラウザー実描画・視覚品質の保証ではない。CSS cascade、フォント・折返し・safe-area、dialog focus/アクセシビリティ、HTTP/CSP/cache、実source接続QA、鮮度・公開資格は未評価。既存collector/比較の結果状態をcompleteへ昇格しない。generator/matcher/adapter/DOM、公開v2 gate、applicationPeriod/publicationApproved、原本/store、engine定義は未変更。API・新規取得・Deploy・Commit/Push/Mergeなし。
