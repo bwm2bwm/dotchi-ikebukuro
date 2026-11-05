@@ -32,6 +32,8 @@ Phase 2C-3d-3aで独立read-only `scripts/odpt_dom_metrics.py`（`dotchi.odpt.do
 
 Phase 2C-3d-3bでは既存DOM QA API/CLIに明示的な全8駅選択を追加し、引数なしの既定2駅×4scenario＝8セルを維持した。2026-10-29 12:00 JSTの32セルを同一engine/contextで2回実行し、両方complete・352 checks PASS・同一digest。各runで8駅×3日=24駅日を一度ずつ生成し、Node runnerは32回起動。10/31は必要日10/30・31・11/1を原本から生成でき、氷川台4scenarioの実source DOM QAで副都心線insufficient、data_insufficient、terminalKnown=false、warningを確認。既知状態の合成fixtureも既存テストで確認。現engineは32駅DOM対象の追加により3d-3a時からfingerprintが変化しているため旧engine間比較は不可。3d-3a節の未評価範囲は引き続き未評価であり、実ブラウザー描画や公開資格をcompleteに含めない。詳細と計測は [odpt_research.md](odpt_research.md) と [devlog.md](devlog.md)。
 
+Phase 2C-3d-4では固定実source観測時刻4点（JST 10/29 23:59:59、10/30 00:00:00/00:12:59/00:13:00）で、氷川台・千川×4scenarioの計32 DOMセルを確認。全run complete・88 checks PASS/run、境界前後のcards/terminal/serviceStateと日付envelopeを記録し、原本/store不変。10/31 generator診断を単日集計で再確認し、6 unmatchedのうち3件がWARNING除外、残る3件は候補に含まれることを特定。adapterのroute9 candidateEligible=false、terminalKnown=false、DOMデータ不足表示まで証拠を区別した。品質比較は同じSnapshot/入力条件・完全一致engine fingerprint/runtime/contextを必要とする。基盤はNode DOM意味整合までで、異世代実データ比較の実績、鮮度/正確性/公開資格、実ブラウザー・視覚・アクセシビリティ・HTTP評価は未成立。公開前未解決事項と品質レイヤーの到達点はresearchに記録する。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。

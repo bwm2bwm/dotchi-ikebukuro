@@ -1423,3 +1423,44 @@ engine依存へ新collector/runnerを明示seed追加し、harness/normalization
 **10/31 coverage例外:** 保存済みGTFS feed periodは2026-09-19〜2027-03-12。固定観測2026-10-31 12:00 JSTの必要日10/30・31・11/1を元sourceから生成し、Hikawadai×4 scenarioで実source DOM QAを実行。全8駅QA state 24/24駅日PASS、対象4セルknown、PASS44、findings0、省略0、complete/終了0、4 runner起動、56.152秒、原本/store inventory不変。Hikawadai 10/31 generatorはG405=C402+E3、primary direct240/transfer162、excluded 3件すべてquality WARNING、routeCoverage route6 complete(385 scheduled trips)/route9 insufficient(475 scheduled trips)。既存3b-2の保存済みgenerator診断ではroute9 `unique_match=209`, `unmatched=6`。DOMでは副都心線`データ不足`警告、10/31と11/1 route9=`data_insufficient`・terminalKnown=false、10/30 route9=`ended`を4 scenarioすべてで確認。serviceStateはrunning、始発・終電の断定なし、terminal badge0。collectorの現在の公開観測項目にはraw matcher行明細を追加していないため、unmatched 6は既存の保存済み診断を根拠とし、このDOM結果から再推定した値ではない。
 
 既存synthetic DOM suiteはrunning/not_started/ended/no_candidates/unknown/data_insufficient/start_unconfirmed/terminal_unconfirmed各表示、両routeへのUNKNOWN伝播、INFO-only正常、coverage警告、上限外best/terminal、24時超、既知0とunavailable等を含む。3bでfixture規則の重複追加は行わず、PythonのDOM collector 18件、関連Node runner/adapter/DOM 50件PASS。全source例外が実データで現れたという意味ではない。現engine fingerprintは前3d-3aの31依存engine `8dd8a21a...`から変更され、3b内のdefault/32/10-31 runsではNode24.15.0/ICU78.2/CPython3.14.5の同一runtimeと同engine/contextを使用した。旧fingerprintとの結果比較は同条件比較に使わない。ブラウザー実描画、CSS/フォント/safe-area、focus/アクセシビリティ、HTTP/CSP/cache、全駅×全境界、鮮度・公開資格は引き続き未評価。
+
+### Phase 2C-3d-4 総合QAと評価範囲（2026-11-05）
+
+開始時の`main`/HEAD `d2325dc67811463381f476e275a829a0c41cf5ed`、3d-3b commit済み・cleanを確認。3d-3bのengine fingerprint `1cf13c8139e04e2c74c93280fc7eb926a0035c2118457c954e14625be52e7dcb`（31依存）、quality context `6aa60b19bf2806d256473975df5dd8c1dda1a27d8816d549d8c2852592352a43`、display context `5444f795e6ef652fe56ad61c0a895956ccc4f011c967cb00f7b833a495f8106f`、Node24.15.0/ICU78.2/CPython3.14.5を軽量入力検証で再確認。Snapshot ID/content fingerprint、原本7件・store8件のSource hash/bytesとpost-validationはPASS。同一fingerprintの3b実source結果は再利用し、既定8/32と10/31 DOM全体生成は重複実行しない。
+
+**既存3b実source健全性:** 引数なし既定8セルは8/8 known、88 checks PASS、groups/cards48、best mark8、terminal badge0、findings0、complete/exit0。32セルは32/32 known、352 PASS、groups/cards192、best mark32、terminal badge0、findings/省略0、complete/exit0。resultDigest両run一致、scope・checks・findings一致。known/0・missing・unavailableは各既存契約で別状態。CLIの8セル既定を維持し、32セルは`--all-stations`で明示する。`complete`はこのNode DOM意味評価範囲だけであり、基盤全体・実画面品質のcompleteではない。
+
+**境界DOM実source:** 固定時刻、氷川台・千川の2駅×4scenario、各時刻で日付D−1/D/D+1を含む別の3日envelopeを使用。時刻はJST 10/29 23:59:59（UTC `2026-10-29T14:59:59Z`）、10/30 00:00:00（`2026-10-29T15:00:00Z`）、00:12:59（`2026-10-29T15:12:59Z`）、00:13:00（`2026-10-29T15:13:00Z`）。quality contextはauxiliary 10/31を加えた同一context fingerprint `4d0f5fa36318d51a9009092fd05bbe309594968e6af346d7c5c016ba5177fe56`。必要serviceDateは順に10/28–30、10/29–31、10/29–31、10/29–31。4点すべて8/8 known、88 PASS、findings0、complete/exit0、DOM groupsとcards一致、best mark8。00:12:59では合計8 cards/8 terminal badges、00:13:00では8セルすべてknown/0で0 card・0 terminal badge、serviceState not_started。JST日付変更前後の23:59:59/00:00でもitems38/cards38・best8・terminal badge16を維持し、元date envelope/route stateが変わることを確認した。各評価はNode8起動・24 station-days生成、generatorはscenarioごとには再生成しない。
+
+各境界resultDigest（順に上記4時刻）は `8bb0ce1bb064161f41ba20a9d9b9d577d42692c52dc497a1672fa35013940f24`、`a4c2a74273106b8026c59e38f469e6700c598bb86f7220cc599c41651aa2d4cb`、`42c0e4c39ef1e8821151aa228a85c256c021ec16dc6b5fe0c94e3f8df81f4c53`、`8ddc014d31ef222f355508e57b7d56f586d30cd56579eff15d4db3c1a00616a4`。4時刻は異なるevaluation context/scopeなので、互いのdigest一致は期待せず、3b 32-cell repeatを同条件決定性証拠とする。
+
+境界4 runの合計263.025秒、32 Node cell起動、96 station-day生成（各instant別に8駅×3日）。4runを行った単一親processのpeak RSSは434,241,536 bytes（約414 MiB）、Node child peakは393,064,448 bytes（約375 MiB）。いずれも入力のstart/end inventory不変、Node timeout/失敗/再試行0、engine/runtime不変。単一instantを個別呼出しする現契約のため、複数時刻でstation-day cacheを共有せず、各instantで24件生成する。これは最適化ではなく測定した実行境界であり、常駐runner等は追加しない。3bの既定8セル約66秒、32セル約124秒/Node子peak約372 MiBと同じ環境実測を比較基準にする。実行負荷とRSSは環境/並行処理で変動し、実測時間はdigestに含まれない。
+
+**10/31 exceptionのsource層別根拠:** 既存の10/31 DOM評価はJST正午、必要日10/30・31・11/1、Hikawadai×4でcomplete/4 cells/44 checks PASS。今回DOM全体を再生成せず、10/31 Hikawadai generatorを1駅日だけ再実行してraw row数の関係を集計した（trip ID/本文は出力・保存しない）。generatorは全405 rows、route9は215 rowsで`unique_match=209`、`unmatched=6`。そのunmatched6のうち3 rowsはdiagnostic WARNINGかつprimaryなし（v2から除外）、残る3 rowsはWARNINGでなくprimary候補に残る。従ってG405=C402+E3、E3はすべて`quality_warning`/WARNING、C402にunmatched3が残る。unmatched6とWARNING3は重複3件であり独立件数として加算しない。
+
+v2 routeCoverageはroute9 scheduledTripCount475、originTripCount215、dataInsufficientCount0、transferDataInsufficientCount0、directCandidateCount111、transferCandidateCount212だが`insufficient`。`_route_state`はrow WARNINGまたはmatched/unique_match以外をinsufficientにするため、対象215件中のWARNING3とunmatched6の両方がcoverage条件に関係する。各原因を除いた反実仮想や元データが不完全になった発生機序はこの調査で判定しない。候補payloadにroute9行が存在しても、adapterは`routeCoverage !== complete`のため10/31および11/1 route9を`candidateEligible=false`にしてitemsへ出さず、`terminalKnown=false`とする。10/30 route9はended。DOMは「副都心線：データ不足」、通知warningを表示し、終電バッジを付けない。これは既存の記録・コード伝播であり、品質不合格/公開承認判定を新設するものではない。補助日不足は必要serviceDateの欠落としてunavailable/validation failureに分け、候補0扱いしない。synthetic DOM testsで不足補助日warning/no extra route labelと必要日のfail-closedを確認。
+
+**固定境界のsynthetic補完:** `odpt_v2_qa_dom.test.mjs`でcountdown T−181s/T−180s−1ms/T−180s/T−180s+1ms/T−1ms/T/T+1ms、秒切り上げ・180秒class、発車epochでのcard removalを検査。別harnessテストで60分gate境界、24/25時台、serviceDate保持、全8 routeState、UNKNOWN両路線伝播、INFO-only正常、coverage不足、上限外best/終電を確認する。実source固定境界は23:59:59、midnight、00:12:59/13:00のみ。始発境界の実source、時刻別全8駅、全境界時刻集合のDOM再生は未評価。既存3b-2/3c-2の全駅表示model・state境界結果をDOM実source結果へ読み替えない。
+
+### 品質検証基盤の到達点と比較契約
+
+| レイヤー | 判定できる範囲 | 実データで確認済み | 限界・公開資格との関係 |
+|---|---|---|---|
+| 2A input/source | Source/Snapshot契約、7原本hash/bytes、store8 JSON、fingerprint/context/runtime一致、途中変更 | 同一保存Snapshotのread-only再検証 | 取得時刻/鮮度、異世代Source差分はこの実行では未実証。readyは入力条件のみ |
+| 2A/2B JSON・GTFS semantics | ODPT JSON/GTFS正規化と構造・意味差分、曖昧/opaque coverage | Phase 2Bの同一Snapshot比較と既存テスト | 同一Snapshot差分0は異世代同一性を示さない。opaque GTFS補助関係/StationTimetable keyはpartial |
+| 2C generator/matcher | G、raw match status、primary/alternative、診断と理由分類、直接/乗換内訳 | 保存Snapshotの10/29–31集計、10/31 Hikawadai route9を単日再集計 | source correctnessや全運行日を証明しない。比較対象の異世代実Snapshotは未評価 |
+| 2C v2 candidate/audit | G=C+E、strict exclusion reason/classification、candidate hash/bytes/ID、routeCoverage、QA state | 8駅32セル、10/31 exception | `insufficient`/UNKNOWN/WARNINGの由来と表示制御は観測するが、内容の正当性を確定しない。public validator条件とは別 |
+| 3b adapter board/model | horizon/60分gate/direct filter/cardLimit/best/group/routeStates/terminalKnownとmodel diff/state diff | 既定/32セル・境界表示model自己比較、10/31不足 | model self-diffは別世代一致性/ユーザー利用品質/公開資格を保証しない |
+| 3d DOM意味 | 同じ候補bytes/nowMsのboard.groups→DOM構造・順序・文言・class/countdown/状態 | 3b全8駅32セル、10/31 4セル、境界2駅×4点、合成例外 | Fake DOMでCSS/layout/browser/focus/networkは評価しない。`domQaStatus=complete`は宣言scope内のみ |
+
+比較可能な結果には、同じsource Snapshot/同一の両side snapshot契約、同じevaluationContext（service dates、station/route、transfer wait、policy）、明示timezone/observation instant/scenario、同じengineFingerprintと依存bytes、runtime/Node/ICU/Python/tzdata、必要3日データが必要。source世代比較では異なるSnapshot自体を許すが、同じcollector/engine/context/runtimeと両側で可用な同じ評価セルが揃うことが条件であり、missing/unavailable/partialはzeroへ置換せずindeterminate/partialとして残す。resultDigestから実行時間/RSSを除外し、異なるengine fingerprintの結果は同条件の再現性証拠に混ぜない。
+
+### 公開前に残る事項
+
+- **データ来歴/鮮度:** 新しい異世代Snapshotの取得・比較、取得成功時刻と取得方法の証跡、ODPT News/GTFS版・有効開始日の根拠、実ダイヤ切替時点。
+- **承認/ライセンス:** 実データ表示条件・クレジット/再構成リスク/配信条件の確認、承認者・承認範囲・期限を含む`publicationApproved`手順と、実データ用`applicationPeriod`根拠。現状未承認・未設定。
+- **coverage/運行日:** insufficient/unknownをpublic bundleでどう拒否/限定するかの運用、祝日・振替休日・臨時改正・運休/例外日データの網羅性、D±1不足時の更新手順。
+- **実画面/配信:** 対象端末の実ブラウザー画像、CSS cascade/viewport/font/折返し/safe-area、dialog focus/keyboard/accessibility、HTTP/CSP/cache/offline/失敗時表示を実測する。
+- **運用復旧:** 取得→検証→隔離→人手承認→公開→期限切れの実更新runbook、異常通知と担当、誤った更新のrollback/旧版復帰と検証。
+
+公開gate/承認workflowはこのPhaseで変更していない。source hash一致、意味差分0、display/DOM self-check completeのいずれも鮮度・正確性・public eligibilityを保証しない。公開v2 gateとpublication approvalを独立に通過するまでは実sourceは非公開のまま扱う。
