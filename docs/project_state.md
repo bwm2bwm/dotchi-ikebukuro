@@ -30,6 +30,8 @@ Phase 2C-3d-2で合成専用の固定時計DOM harness・表示整合テスト�
 
 Phase 2C-3d-3aで独立read-only `scripts/odpt_dom_metrics.py`（`dotchi.odpt.dom-qa`/schemaVersion 1）を追加。既存collectorの駅日生成・厳密除外監査・envelope・bounded Node transportと3d-2 DOM harnessを共有し、全8駅×必要3日をメモリ内で一度ずつ生成・監査して全駅QA stateを構成する。DOM対象は固定2026-10-29 12:00 JSTの千川・氷川台×4scenario＝8セルに限定。候補object/canonical bytes/hash/IDを同一入力として既存Node adapterとDOM entryへ渡し、groups/内容/状態/countdownを照合する。generator/matcher/v2射影/QA state/adapter/DOM/UI・公開gateの規則は維持。completeは宣言したNode DOM意味評価範囲のみを表し、既存比較のpartial/indeterminateは変更しない。runtime/engine条件差はincomparable、欠損・利用不能・既知0・不整合をreason/availabilityとnullで区別する。engineは新collector/runner/harnessを加え31依存となり、旧engineの結果は同一条件比較不可。実source smoke、合成/回帰結果と実測値はresearch/devlogに記録。全駅・全境界へのDOM評価拡大、旧新DOM比較、実ブラウザー/CSS等の視覚品質、鮮度・公開資格は未評価。
 
+Phase 2C-3d-3bでは既存DOM QA API/CLIに明示的な全8駅選択を追加し、引数なしの既定2駅×4scenario＝8セルを維持した。2026-10-29 12:00 JSTの32セルを同一engine/contextで2回実行し、両方complete・352 checks PASS・同一digest。各runで8駅×3日=24駅日を一度ずつ生成し、Node runnerは32回起動。10/31は必要日10/30・31・11/1を原本から生成でき、氷川台4scenarioの実source DOM QAで副都心線insufficient、data_insufficient、terminalKnown=false、warningを確認。既知状態の合成fixtureも既存テストで確認。現engineは32駅DOM対象の追加により3d-3a時からfingerprintが変化しているため旧engine間比較は不可。3d-3a節の未評価範囲は引き続き未評価であり、実ブラウザー描画や公開資格をcompleteに含めない。詳細と計測は [odpt_research.md](odpt_research.md) と [devlog.md](devlog.md)。
+
 ## 現在の配信・QA経路
 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。

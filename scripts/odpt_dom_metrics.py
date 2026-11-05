@@ -82,9 +82,19 @@ def _response(response, request):
 
 
 def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=None, engine=None,
-                   root=quality.ROOT, detail_limit=1000, timeout=20):
+                   root=quality.ROOT, detail_limit=1000, timeout=20, station_ids=None):
     if type(detail_limit) is not int or not 0 <= detail_limit <= 10000: raise ValueError('detail_limit_invalid')
     if type(timeout) not in (int,float) or not math.isfinite(timeout) or not 0 < timeout <= 120: raise ValueError('timeout_invalid')
+    if station_ids is None:
+        target_stations = list(STATIONS)
+    else:
+        if (not isinstance(station_ids, (list, tuple)) or not station_ids
+            or any(not isinstance(s, str) for s in station_ids)
+            or len(set(station_ids)) != len(station_ids)
+            or not set(station_ids) <= set(quality.STATIONS)):
+            raise ValueError('station_ids_invalid')
+        selected = set(station_ids)
+        target_stations = [s for s in quality.STATIONS if s in selected]
     store, source_dir, root = Path(store), Path(source_dir), Path(root)
     started = time.perf_counter()
     report = dict(contract=CONTRACT, schemaVersion=1, snapshotId=None, contentFingerprint=None,
@@ -100,15 +110,17 @@ def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=N
         quality._validate_engine(frozen_engine)
         q = quality.normalize_context(quality_context if quality_context is not None else quality.initial_context(frozen_engine['engineFingerprint']))
         d = display.normalize_context(display_context, q) if display_context is not None else display.create_context(q,[INSTANT])
-        # Phase 3d-3a evaluates one explicit instant and only these two stations.
+        # DOM cells are selectable while the shared QA state always covers all eight stations.
         if len(d['observationInstants']) != 1: quality.fail('dom_smoke_scope_invalid')
         instant = d['observationInstants'][0]; days = d['requiredServiceDates'][instant]
         report.update(qualityContextFingerprint=q['contextFingerprint'], displayContextFingerprint=d['contextFingerprint'],
             engineFingerprint=frozen_engine['engineFingerprint'], environment=copy.deepcopy(frozen_engine['environment']),
-            evaluationScope=dict(kind='node-dom-semantics', observationInstants=[instant], stationIds=list(STATIONS),
+            evaluationScope=dict(kind='node-dom-semantics', observationInstants=[instant], stationIds=list(target_stations),
                 scenarioIds=[s['id'] for s in d['displayScenarios']], timezone='Asia/Tokyo',
                 qaStateStationIds=sorted(quality.STATIONS), requiredServiceDates=days),
             qualityEvaluationContext=q, displayEvaluationContext=d)
+        if set(target_stations) == set(quality.STATIONS):
+            report['notEvaluated'].remove('all-station-dom-evaluation')
         before = model.itinerary_metrics._inventory(store,source_dir)
         start = validate(); report['checks']['inputStart'] = start
         report.update(snapshotId=start['baselineSnapshotId'], contentFingerprint=start['baselineContentFingerprint'])
@@ -140,7 +152,7 @@ def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=N
                 report['checks']['allStationQaState'] = dict(status='FAIL', reasonCode=exc.code)
             del cache
             epoch = int(datetime.strptime(instant,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()*1000)
-            for station in STATIONS:
+            for station in target_stations:
                 for scenario in d['displayScenarios']:
                     cell = dict(stationId=station, observationInstant=instant, scenarioId=scenario['id'],
                         availability='unavailable', reasonCodes=[], metrics=None)
@@ -205,7 +217,7 @@ def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=N
             reasonCodes=sorted({code for _,code in errors}),cells=[],summary=None,findings=[])
         report['checks']['generation'] = []; report['checks']['generationTotals'] = None
     elif any(c['availability']=='failed' for c in cells): report['domQaStatus'] = 'failed'
-    elif len(known) == 8 and not report['omittedDetails']: report['domQaStatus'] = 'complete'
+    elif len(known) == len(target_stations) * len(report['displayEvaluationContext']['displayScenarios']) and not report['omittedDetails']: report['domQaStatus'] = 'complete'
     elif known or report['omittedDetails']: report['domQaStatus'] = 'partial'
     if report['omittedDetails']: report['reasonCodes'].append('detail_limit_reached')
     report['timings'] = dict(elapsedSeconds=time.perf_counter()-started)
@@ -230,8 +242,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--store',type=Path,required=True)
     parser.add_argument('--source-dir',type=Path,required=True)
+    parser.add_argument('--all-stations',action='store_true',help='evaluate all eight stations instead of the default Senkawa/Hikawadai smoke')
     args = parser.parse_args(argv)
-    report = collect_dom_qa(args.store,args.source_dir)
+    report = collect_dom_qa(args.store,args.source_dir,station_ids=quality.STATIONS if args.all_stations else None)
     # Safe summary only; observations, candidate IDs and journey text stay inside private IPC/memory.
     import json
     for key in ('snapshotId','contentFingerprint','engineFingerprint','qualityContextFingerprint','displayContextFingerprint','evaluationScope','summary','domQaStatus','reasonCodes','notEvaluated','resultDigest','timings','resources'):

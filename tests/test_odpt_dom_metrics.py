@@ -50,6 +50,22 @@ class DomMetricsTests(unittest.TestCase):
         self.assertEqual(totals['generatedCount'],totals['candidateCount']+totals['excludedCount'])
         self.assertEqual(totals['candidateCount'],totals['primaryDirectCount']+totals['primaryTransferCount'])
 
+    def test_explicit_all_station_scope_is_32_cells_and_keeps_one_24_day_generation_pass(self):
+        r=self.collect(station_ids=list(dom.quality.STATIONS))
+        self.assertEqual(r['domQaStatus'],'complete');self.assertEqual(dom.exit_code(r),0)
+        self.assertEqual(r['evaluationScope']['stationIds'],list(dom.quality.STATIONS))
+        self.assertEqual(r['evaluationScope']['scenarioIds'],['departure-all','departure-direct','line-all','line-direct'])
+        self.assertEqual(r['checks']['generationCount'],24)
+        self.assertEqual(r['checks']['nodeStarts'],32)
+        self.assertEqual(r['summary']['evaluatedCellCount'],32)
+        self.assertEqual(r['summary']['checkCounts'],{'PASS':352})
+        self.assertNotIn('all-station-dom-evaluation',r['notEvaluated'])
+
+    def test_station_selection_rejects_duplicates_unknown_empty_and_wrong_container(self):
+        for value in ([],('Senkawa','Senkawa'),['NoSuchStation'],{'Senkawa'}):
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'station_ids_invalid'):
+                self.collect(station_ids=value)
+
     def test_actual_synthetic_generator_zero_is_known_not_unavailable(self):
         r=self.collect(fake=False)
         self.assertEqual(dom.exit_code(r),0)
@@ -132,6 +148,19 @@ class DomMetricsTests(unittest.TestCase):
             self.assertEqual(dom.main(['--store',str(self.store),'--source-dir',str(self.source)]),0)
         self.assertNotIn('p2-',out.getvalue());self.assertNotIn('departureServiceSeconds',out.getvalue())
         self.assertIn('domQaStatus="complete"',out.getvalue())
+
+    def test_cli_all_stations_is_explicit_and_default_remains_smoke(self):
+        r=self.collect()
+        captured=[]
+        def fake_collect(*args,**kwargs): captured.append(kwargs.get('station_ids'));return r
+        out=io.StringIO()
+        with patch.object(dom,'collect_dom_qa',side_effect=fake_collect),redirect_stdout(out):
+            self.assertEqual(dom.main(['--store',str(self.store),'--source-dir',str(self.source),'--all-stations']),0)
+        self.assertEqual(captured,[dom.quality.STATIONS])
+        captured.clear()
+        with patch.object(dom,'collect_dom_qa',side_effect=fake_collect),redirect_stdout(io.StringIO()):
+            self.assertEqual(dom.main(['--store',str(self.store),'--source-dir',str(self.source)]),0)
+        self.assertEqual(captured,[None])
 
     def test_new_engine_closure_and_measurements_excluded_from_digest(self):
         paths={f['path'] for f in self.engine['files']}
