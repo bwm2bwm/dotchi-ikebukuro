@@ -1708,3 +1708,21 @@ QA専用`preview_odpt_v2.mjs`の駅payload取得上限を1,500,000 bytesから25
 実取得batchから評価範囲2026-11-09〜2026-12-08（30日）、前後buffer込みserviceDays 2026-11-08〜2026-12-09（32日）を生成。source fingerprint一致、candidate pipeline/bundle validator PASS、prepare QA PASS。全256 station-date・512 route-dateがcomplete、105,272候補、4,392除外。ODPT QA statusはWARNINGを保持し、未照合480件とwarning480件は原数=解決数、未解決0。分類A=240/B=240/C=0/D=0。`applicationPeriod=null`、`publicationApproved=false`。生成477.55秒、max RSS 526,942,208 bytes（約503 MiB）、payload合計52,416,217 bytes、最大駅file 7,547,220 bytes。中間期・月境界（JST 2026-11-30 23:59:59 / 2026-12-01 00:00:00）を実batch candidateでDOM評価し、いずれも正常な候補表示を確認。
 
 これは長範囲の生成・検証機能が実装されたことと、125日一括実行が完了したことを区別する。次の最小作業は生成の重複処理/性能を計測して、QAを保ったまま小さな日付chunk単位で全期間の品質・coverageを確認できるか判断すること。chunkを単純連結して公開可能と見なさず、範囲・fingerprint・日付の隙間/重複・累積payloadサイズを再検証する。`applicationPeriod`設定・publication approvalは別判断。
+
+## v2公開接続 Phase 1：承認入力・公開データ契約（2026-11-07）
+
+これは実装上の契約であり、新たな公式仕様の確認・実データ公開承認ではない。v2 candidateをv1へ変換せず、内側payload（schemaVersion 2/dataScope public-display-v2/applicationPeriod null）をenvelope schema 1で包む。外側manifestはschemaVersion 2、runtimeContract `dotchi-odpt-public-v2`、artifactKind `release-data-only`。全8駅・manifestだけの9 filesで、HTML/JSは含めない。既存full-site validator/runtime/assemblyへの接続は次Phaseとし、この出力単独をdeploy可能と扱わない。既存v1入口はv1専用のまま。Pythonのopt-in `validate_versioned_manifest`だけが1/2を明示dispatchし、未知schemaを拒否する。
+
+公開builderは`build_odpt_public_release.py --candidate <private-bundle> --source <explicit-raw-dir> --approval <separate-input-json> --output <new-private-dir>`。承認JSONを自動生成する機能はない。入力はexact fieldsで`candidateDigest`、`sourceFingerprint`、`applicationPeriod`（zoned startsAt/endsAt、終了を含まない）、`approval`（approved=true、公開用recordId、approvedAt）、`codeCommit`（実行HEAD一致）、`retrievedAt`、`attribution`、`evidenceKind`を要求する。recordIdに個人名・秘密情報を入れない。取得日時は確認済み取得記録から人が指定し、mtime/生成日時から推定しない。synthetic正常系はsynthetic feed/evidenceKindとし、実取得sourceをsyntheticと偽装しない。テスト時計のbuilder注入はsynthetic限定で、CLIには時計上書き引数を設けない。
+
+candidateDigestはprivate manifestと固定8 candidate fileの各raw bytesから作るpath/bytes/SHA-256 record集合をpath順にJCS化したSHA-256。取得元は固定7原本をread-only inventoryし、既存方式のsourceFingerprintとcandidate sourceFilesに完全一致させる。公開metadataにはその7件の固定名/hash/bytes、raw GTFS feed_info由来version/有効日、固定出典（東京メトロ/ODPT、https://www.odpt.org/）、乗換探索policyと公開用品質集計のみを追加する。private manifest全体・raw本文・列車ID・ローカルpathは公開しない。
+
+品質集計は元status（WARNINGを保持）、FAIL=0、未照合/警告原数、A/B/C/Dとoriginal/resolved/unresolved、全駅日resolution、除外監査の数値分類・理由別件数と照合状態別件数。既存validatorの算術・scope検証を再利用し、C/D・未解決・追加不整合を拒否する。除外監査は終電判定に必要なno_valid_arrival/primary_arrival_missing/unknown等を保ち、次Phaseのruntimeで0補完しない。承認・metadata・品質集計のJCS hashと8 payloadのJCS hashからdescriptorを構成し、既存形式`r1-<SHA-256>`でrelease IDを決定する。manifest station recordは最終envelope raw bytes/hashに一致する。
+
+独立validator `validate_odpt_public_release.py <artifact> --candidate <bundle> --source <raw> --approval <input> --expected-candidate-digest <digest> --expected-source-fingerprint <fingerprint>` はbuilderをimportしない。原candidate・承認入力・原本を別途読み、公開payload/集計/出典feed/metadataの一致、release ID、canonical JSON、bytes/hash、全駅/全日/complete coverageを再検証する。ファイル余剰・symlink・25 MiB/file・256 MiB全体超過は拒否する。builderは新規repo外出力だけを許可し、検証成功後に確定。入力変化・失敗時は出力を確定しない。hashは内容の結合であり、人の承認者の真正性を署名で証明する機能ではない。
+
+期間検査は実行時刻が`startsAt <= now < endsAt`であることと、承認期間の全JST日について前日〜翌日のserviceDaysが連続収録され、GTFS有効日内であることを要求する。承認期間自体をGTFS期限から自動決定しない。期間外artifactのvalidatorは停止する。公開runtimeの継続的な期限判定は次Phase。
+
+実取得30日candidateは承認なしのread-only preflightのみPASS。candidateDigest `5f331ad0eb8c9550e22818ce259656418857574bd93df3e11681af07cde859fc`、sourceFingerprint `d948b3265975a55cd7f38f08bfcab971e88883dfb554e529bdeae6f04d508b41`、32 serviceDays、QA WARNING、A240/B240/C0/D0、未照合/警告とも原数480・解決480・未解決0を確認。実取得用承認入力・公開artifactは作成せず、candidate/Snapshotはnull/falseのまま。
+
+世代保持policyは未変更。既存`retention_deadline`は`max(退役+7日, 適用終了+48時間) <= 退役+14日`を要求する。残る適用期間が12日を超える時点での更新は停止する。例として（未承認の仮定）11/9〜12/8を案内する版を11/10に更新する場合、12/9終了+48時間の12/11まで保持が必要で、11/24の14日capを超える。次Phaseでは承認された最大残存期間に必要な有限上限を明示審査し、最低7日/適用終了+48時間と総容量上限を維持する案が最小。今回のPhase 1では延長・旧世代削除・既存assembly変更を行わない。

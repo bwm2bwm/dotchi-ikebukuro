@@ -2,6 +2,8 @@
 
 最終整理: 2026-11-07。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
 
+v2公開接続Phase 1: `odpt_release_contract.py`、`build_odpt_public_release.py`、独立`validate_odpt_public_release.py`を追加。明示したcandidate/rawと別入力の承認・期間・取得日時を検証し、candidate内のnull/falseを変更せず、metadata・品質集計・8駅payloadをrelease IDに結び付ける。出力は`artifactKind=release-data-only`（画面・deploy機能なし）で、既存v1公開validator/runtimeは受理しない。syntheticのみで正常系を検証。実取得30日candidateは読取preflight PASS、承認入力も公開artifactも未作成。次Phaseは公開runtime・UIとfull-site検証/世代assemblyの接続。現行14日retention上限は変更していない。
+
 ODPT非公開candidate pipelineは明示した長期間service-date範囲と前後1日のbufferを扱い、range指定時に明示snapshotと期待source fingerprintを要求する。旧3日方式は維持。2026-11-07取得batch（fingerprint `d948b326…508b41`）から評価30日・serviceDays 32日のcandidateを生成し、全日品質/coverage、bundle validator、QA staging、代表日・月境界DOM harnessをPASS。payload合計約52.4 MB、最大駅file約7.55 MB、生成約8分・max RSS約503 MiB。QA loader上限をrelease file capの25 MiBに合わせたが、production runtimeは未変更。先行する5/9/16日candidate PASSは旧`local_data/odpt`由来で、取得batch検証としては無効。125日最大候補と全期間DOM QAは未完了。実データ公開・applicationPeriod・publication approvalへは進めていない。詳細は [odpt_research.md](odpt_research.md) と [devlog.md](devlog.md)。
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。

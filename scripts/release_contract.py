@@ -140,6 +140,17 @@ def _valid_release_id(value: Any) -> bool:
     return isinstance(value, str) and RELEASE_ID_RE.fullmatch(value) is not None
 
 
+def validate_versioned_manifest(value: dict[str, Any], *, now=None) -> dict[str, Any]:
+    """Explicit opt-in dispatch; legacy v1 entrypoints/runtime stay v1-only."""
+    if isinstance(value, dict) and type(value.get("schemaVersion")) is int:
+        if value["schemaVersion"] == 1:
+            return validate_manifest(value)
+        if value["schemaVersion"] == 2:
+            from odpt_release_contract import validate_manifest as validate_v2_manifest
+            return validate_v2_manifest(value, now)
+    _fail("manifest_schema", "unsupported manifest schemaVersion")
+
+
 def build_release_descriptor(*, runtime_contract: str, builder_contract_version: str,
                              payloads: dict[str, dict[str, Any]],
                              assets: dict[str, bytes]) -> dict[str, Any]:

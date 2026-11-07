@@ -1157,3 +1157,13 @@
 - QA専用payload上限を25 MiBへ引き上げ、bytes/SHA-256・schema・ID検証と上限超過fail-closedを維持。実batch由来7,532,954-byte payloadはDOM harnessで読込・表示、25 MiB超合成payloadは拒否。production runtimeは未変更。
 - 実取得batchの小範囲（評価11/9〜11/11、serviceDays 11/8〜12）と30日範囲（評価11/9〜12/8、serviceDays 11/8〜12/9）はfingerprint一致・quality/coverage/validator/prepare QA PASS。30日は256 station-date/512 route-date complete、payload 52,416,217 bytes、最大file 7,547,220 bytes、477.55秒、max RSS 526,942,208 bytes。ODPT QA WARNINGと480未照合/480 warningの元数は保持し、A240/B240/C0/D0、未解決0。
 - 実candidate payloadによるDOM harnessはJST 11/9 06:00、11/30 23:59:59、12/1 00:00で表示正常。これは実ブラウザー視覚検証ではない。`applicationPeriod=null`、`publicationApproved=false`、取得batch/Snapshot read-only。外部通信・APIキー・公開操作なし。
+
+## 2026-11-07 — v2公開接続Phase 1（公開データ契約のみ）
+
+- 開始main / HEAD `656344f91477158e4c9501803fb44e7f4eb1871b`、tracked差分なし、referencesのみ未追跡。`odpt_release_contract.py`、`build_odpt_public_release.py`、独立`validate_odpt_public_release.py`とsynthetic testを追加。既存release_contractにopt-in schema 1/2 dispatchだけ追加し、既存v1 builder/runtime/validator/workflow/retentionは変更しない。
+- v2内側payloadを変換・変更せず、公開metadataをdescriptor hashへ結合。承認入力はcandidateDigest/sourceFingerprint/期間/承認記録/実行HEAD/取得日時/固定出典/evidenceKindを要求。private manifestは公開せず、品質status、未照合/警告原数、A/B/C/D、駅日別解決区分・除外監査件数を抽出。元数・合算・全日/全駅・buffer/GTFS期間・complete coverage・bytes/hashを検査する。
+- 新出力はschemaVersion 2/dataScope public-display-v2/runtimeContract dotchi-odpt-public-v2/artifactKind release-data-onlyのmanifestと8 envelope。公開サイトのHTML/JSを含めずdeployable=false。legacy v1公開入口が誤受理しないことをテスト。次Phaseのruntime/画面/full-site validator/assembly接続なしにdeployできると扱わない。独立validatorはbuilderをimportせず、原candidate・raw・別承認入力との一致を再検証し、期間外は拒否する。
+- 新規13 tests PASS（欠落/誤承認、digest/fingerprint/commit、期間/前後日不足、未知schema、metadata/品質/bytes改変、C/D、元WARNING/未照合の保持、source/candidate破損、symlink/余剰file/容量/上書き境界、v1互換）。既存回帰84 tests PASS：Python release群39（164.179秒）、public群23（12.084秒）、Node release contract/runtime/workflow22。正常系承認は明示synthetic fixtureのみ。実データ用の承認・期間を作成していない。
+- 実取得30日candidateはread-only `inspect_candidate`のみPASS。digest `5f331ad0eb8c9550e22818ce259656418857574bd93df3e11681af07cde859fc`、期待fingerprint `d948b3265975a55cd7f38f08bfcab971e88883dfb554e529bdeae6f04d508b41`、serviceDays 11/8〜12/9の32日、QA WARNING、A240/B240/C0/D0、未照合/警告ともoriginal480/resolved480/unresolved0を再確認。実取得からの公開artifact生成なし。candidate/batch/Snapshotのnull/falseは維持。
+- read-only照合開始時から検証終了時まで、取得batch・旧原本・既存store8件・30日candidateの57 filesはSHA-256/bytes/inode/mtime/ctime一致。生成はsyntheticテストの/private/tmp配下だけ。API通信/キー使用/Deploy/Commit/Push/Mergeなし。references未操作。
+- 14日retention capは未変更。残存適用期間が12日を超える退役でassemblyは安全停止する。次Phaseでは実承認期間に必要な有限上限を審査し、最低7日/適用終了+48時間/総容量256 MiBを維持する最小変更を検討する。Phase 1完了は公開承認を意味しない。
