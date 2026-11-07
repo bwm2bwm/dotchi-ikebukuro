@@ -34,8 +34,7 @@ SITE_ASSETS = {
 }
 
 
-def site_asset_bytes(contact_url, evidence_kind):
-    """Pinned public allowlist; no private source, QA UI, or arbitrary input tree."""
+def validate_contact_url(contact_url, evidence_kind):
     require(isinstance(contact_url, str) and 0 < len(contact_url) <= 2048
             and "\\" not in contact_url and not any(ord(ch) < 33 for ch in contact_url), "contact_url_required")
     url = urlsplit(contact_url)
@@ -44,6 +43,11 @@ def site_asset_bytes(contact_url, evidence_kind):
     if evidence_kind != "synthetic":
         require(url.hostname not in {"example.invalid", "example.com", "example.org", "example.net", "localhost"}
                 and not url.hostname.endswith(".invalid"), "contact_placeholder_rejected")
+
+
+def site_asset_bytes(contact_url, evidence_kind):
+    """Pinned public allowlist; no private source, QA UI, or arbitrary input tree."""
+    validate_contact_url(contact_url, evidence_kind)
     assets = {name: read_file(path) for name, path in SITE_ASSETS.items()}
     marker = b'data-contact-url=""'
     require(assets["index.html"].count(marker) == 1, "contact_template_invalid")
@@ -248,12 +252,17 @@ def release_id(descriptor):
 
 
 def validate_manifest(manifest, now=None):
+    require(isinstance(manifest, dict), "manifest_invalid")
+    published = "publication" in manifest
     exact(manifest, {"schemaVersion", "artifactKind", "releaseId", "releaseDescriptor", "runtimeContract",
-                     "payloadSchemaVersion", "dataScope", "serviceDates", "metadata", "stations", "retainedReleases"})
+                     "payloadSchemaVersion", "dataScope", "serviceDates", "metadata", "stations", "retainedReleases"}
+          | ({"publication"} if published else set()))
     require(type(manifest["schemaVersion"]) is int and manifest["schemaVersion"] == 2
             and type(manifest["payloadSchemaVersion"]) is int and manifest["payloadSchemaVersion"] == 2
             and manifest["dataScope"] == SCOPE and manifest["runtimeContract"] == RUNTIME
-            and manifest["artifactKind"] in {KIND, SITE_KIND} and manifest["retainedReleases"] == [], "manifest_profile_invalid")
+            and manifest["artifactKind"] in {KIND, SITE_KIND}
+            and isinstance(manifest["retainedReleases"], list)
+            and (published and manifest["artifactKind"] == SITE_KIND or manifest["retainedReleases"] == []), "manifest_profile_invalid")
     now = now or datetime.now(timezone.utc)
     require(now.tzinfo is not None, "validation_time_invalid")
     validate_metadata(manifest["metadata"], manifest["serviceDates"], now)
@@ -267,6 +276,9 @@ def validate_manifest(manifest, now=None):
         require(row["url"] == f"/releases/{manifest['releaseId']}/{filename}", "station_url_invalid")
         hash_value(row["sha256"])
         require(type(row["bytes"]) is int and 0 < row["bytes"] <= MAX_FILE_BYTES, "station_bytes_invalid")
+    if published:
+        from odpt_generation_contract import validate_history
+        validate_history(manifest, now)
     return manifest
 
 

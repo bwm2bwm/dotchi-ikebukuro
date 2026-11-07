@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Independently validate one current v2 full-site against its approved inputs/toolchain.
 
-No assembly or network calls. Retained v2 generations are deliberately deferred.
+No assembly or network calls. This is the clean/current-toolchain gate;
+published/retained transitions use validate_odpt_generations.
 """
 import argparse
 from pathlib import Path
@@ -34,12 +35,13 @@ class SiteHtml(_HtmlReferences):
             self.contact.append(values.get("data-contact-url"))
 
 
-def validate_site_assets(root, manifest, contact_url):
+def validate_site_assets(root, manifest, contact_url, *, trusted_toolchain=True, asset_prefix=""):
     """Asset records + trusted toolchain bytes + public entry/import graph."""
-    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=c.ROOT, check=True,
-                            capture_output=True, text=True).stdout.strip()
-    c.require(manifest["metadata"]["codeCommit"] == commit, "site_toolchain_commit_mismatch")
-    contents = {name: c.read_file(root / name) for name in c.SITE_ASSETS}
+    if trusted_toolchain:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=c.ROOT, check=True,
+                                capture_output=True, text=True).stdout.strip()
+        c.require(manifest["metadata"]["codeCommit"] == commit, "site_toolchain_commit_mismatch")
+    contents = {name: c.read_file(root / asset_prefix / name) for name in c.SITE_ASSETS}
     parser = SiteHtml()
     parser.feed(contents["index.html"].decode("utf-8"))
     parser.close()
@@ -51,14 +53,16 @@ def validate_site_assets(root, manifest, contact_url):
               and parser.metas.get("dotchi-payload-profile") == c.SCOPE, "public_profile_invalid")
     c.require(len(parser.contact) == 1, "contact_missing")
     c.require(parser.contact[0] == contact_url, "contact_input_mismatch")
-    expected = c.site_asset_bytes(contact_url, manifest["metadata"]["evidenceKind"])
+    c.validate_contact_url(contact_url, manifest["metadata"]["evidenceKind"])
+    expected = c.site_asset_bytes(contact_url, manifest["metadata"]["evidenceKind"]) if trusted_toolchain else None
     records = manifest["releaseDescriptor"]["assets"]
     for row in records:
         raw = contents[row["path"]]
         c.require(len(raw) == row["bytes"] and c.digest(raw) == row["sha256"], "asset_integrity_mismatch")
-        c.require(raw == expected[row["path"]], "site_toolchain_asset_mismatch")
-    # Exact source equality above also forbids arbitrary inline code, CSS URLs,
-    # QA controls, root mocks and private markers from an untrusted input tree.
+        if trusted_toolchain:
+            c.require(raw == expected[row["path"]], "site_toolchain_asset_mismatch")
+    # Clean releases match the selected source. Historical use is limited to
+    # descriptor-bound bytes from an externally anchored, previously validated tree.
     modules = {name for name in contents if name.endswith((".js", ".mjs"))}
     reached, pending = set(), ["preview_public_v2.js"]
     while pending:

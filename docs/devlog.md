@@ -1193,3 +1193,16 @@
 - 新規Node full-site3 tests PASS、Phase 2 runtime/v1 runtime/DOM/Actions回帰38 tests PASS（Node合計41、全125 tests）。12 assetのbytes/hash、8駅世代URL、公開entrypointからのDOMを確認。ローカルHTTPはsandboxのlisten EPERMで一度停止し、許可されたsandbox外実行で127.0.0.1の一時serverだけを使用して再実行PASS。asset12/manifest1/station8の21 requestsを確認し、serverを終了。外部Web/ODPT通信なし。実Chrome/Safari描画の検証ではない。
 - 世代assemblyはcurrent 1世代/retained空に限定。既存v1 assembler/Actions・最低7日/適用終了+48時間/最大14日の保持期限は変更しない。旧世代/余分なrelease treeを黙って削除・正常化しない。v2 retained metadata/descriptor、旧toolchain検証、旧タブ/rollbackと30日版の途中更新時の14日cap問題はPhase 3Bへ残す。実問い合わせURL・スマホ実機/HTTP cache QA・正式承認/期間・Production操作も未実施。
 - 保護対象の原本/batch/既存store/candidate57 filesはSHA-256/bytes/inode/mtime/ctimeが前後一致。参照資料未操作。ODPT再取得/キー使用、公開承認変更、Deploy/Commit/Push/Mergeなし。git diff --check・新規file空白検査PASS。
+
+
+## 2026-11-07 — Phase 3B v2世代管理・更新・rollback（ローカルのみ）
+
+- 開始main / HEAD `dd85cac6423b5982d66666947d4c1579aafdd12e`、tracked差分なし、referencesのみ未追跡。generation contract/assembler/独立transition validatorを追加。Phase 1/3Aの承認・source/candidate照合とasset検証を再利用し、v1 assembler/Actionsは変更しない。
+- publication contract dotchi-odpt-generations-v1とcurrent/retainedを明示化。retainedには各metadata/descriptor/8 JSONと12 assetを保持し、旧JSON URLを変えず旧tabへ供給。rollbackはtrusted previous tree内の検証済みretainedだけを元metadata/asset/IDで復元し、現currentも退役保存。旧toolchainを現在HEADのassetへ置換せず、元descriptor・外部のtrusted artifact digestで検証する。元runtimeのwire contract対応も要求する。
+- 初回は存在する空snapshotと既知の空digestを明示し、既存/legacy/manifest欠落を空状態へfallbackしない。更新/rollbackはexpected previous ID/tree digestを必須化。new full-siteは原candidate/raw/承認入力と現toolchainで再検証し、旧世代は旧asset/metadataそのものを検証。元snapshot/new releaseの途中変化を確定直前にも再照合し、stage破棄・出力なしを確認した。
+- v2保持期限はmax(退役+7日, 実効適用終了+48時間)。有限capは退役+max(7日, 当該承認期間長+48時間)へ変更。30日版の途中更新では実際に必要な残存期間だけ保持し、固定30/60日への変更はしない。48時間は既存運用余裕であり新しいODPT公式要件とは扱わない。v1の14日capは不変。削除は明示IDかつ期限+24時間安全margin以降だけ許可し、自動pruneなし。25 MiB/file・256 MiB/tree超過は停止。
+- synthetic A初回→B更新→A rollbackを`/private/tmp/dotchi-phase3b-synthetic-final`に生成。initial21 files/451,890 bytes、updated41/903,445 bytes、rollback41/903,447 bytes。30日synthetic承認範囲11/9〜12/8、旧世代retainUntilは12/11 JST00:00、prune解放は12/12 JST00:00。初回/更新/rollbackのdeploymentPerformed=false、deploymentPreflightRequired=trueを維持。実取得の仮承認・期間・公開artifactは作成しない。
+- 新Python世代テスト12件PASS（129.773秒）と旧toolchain/旧tabのNode2件PASS。初回/legacy区別、30日期限、rollback、未検証/承認期限切れtarget、hash/metadata/asset/欠損/混在、不正deadline、期限+24時間の秒境界、明示prune/自動削除なし、25 MiB境界・合計容量、元入力の途中変化、上書き拒否を確認。実時計の通常経路も明示syntheticで確認し、再検証時にassembly時刻を作り直さない。24時間超の未公開計画は再assemblyを要求するが、公開中アプリの更新周期にはしない。legacy拒否と前/新入力の最終変化は追加の対象テストでもPASS。
+- 回帰：Phase 3A full-site9、Phase 1公開契約13、v1 release/assembly39（161.899秒）、公開builder/validator/profile23、Node runtime/DOM/Actions38がPASS。新規込み合計136 tests PASS。旧v1経路・保持条件は維持。保存rollbackは独立validator CLIからも検証してPASS。公開moduleをNodeで実行した範囲で、実Chrome/SafariやProduction実環境の証明ではない。
+- ローカルassemblyは切替計画で、publication時刻も実Deployの証明ではない。実Productionの空確認・直前再取得/ID/tree digest照合・単一writer・実切替時刻/成功記録は公開工程へ残す。未検証snapshotから自分で計算したdigestだけをtrusted recordとみなさない。正式な期間/公開承認・問い合わせ先・実機/cache QA・Direct Uploadは未実施。
+- 保護対象57 filesのSHA-256/bytes/inode/mtime/ctime一致、git diff --check・新規file空白検査PASS。ODPT再取得/キー使用・公開承認変更・Cloudflare設定/Deploy・Commit/Push/Mergeなし、references未操作。

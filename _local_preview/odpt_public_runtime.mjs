@@ -2,6 +2,7 @@
 import { validateV2Payload, buildV2QaBoard, serviceDateAt } from './odpt_v2_qa_adapter.mjs';
 
 export const V2_PROFILE = 'public-display-v2';
+export const GENERATION_CONTRACT = 'dotchi-odpt-generations-v1';
 const RUNTIME = 'dotchi-odpt-public-v2';
 const FILES = Object.freeze({ Kanamecho: 'timetable-Kanamecho.json', Senkawa: 'timetable-Senkawa.json',
   KotakeMukaihara: 'timetable-KotakeMukaihara.json', Hikawadai: 'timetable.json', Heiwadai: 'timetable-Heiwadai.json',
@@ -124,12 +125,13 @@ function validateQuality(q, dates) {
 }
 
 export async function validateV2ReleaseManifest(m, cryptoImpl = globalThis.crypto) {
+  const published = object(m) && Object.hasOwn(m, 'publication');
   exact(m, ['schemaVersion', 'artifactKind', 'releaseId', 'releaseDescriptor', 'runtimeContract',
-    'payloadSchemaVersion', 'dataScope', 'serviceDates', 'metadata', 'stations', 'retainedReleases']);
+    'payloadSchemaVersion', 'dataScope', 'serviceDates', 'metadata', 'stations', 'retainedReleases', ...(published ? ['publication'] : [])]);
   const fullSite = m.artifactKind === 'release-full-site';
   check(m.schemaVersion === 2 && m.payloadSchemaVersion === 2 && m.dataScope === V2_PROFILE
     && m.runtimeContract === RUNTIME && (fullSite || m.artifactKind === 'release-data-only')
-    && Array.isArray(m.retainedReleases) && m.retainedReleases.length === 0, 'runtime_incompatible');
+    && Array.isArray(m.retainedReleases) && (published && fullSite || m.retainedReleases.length === 0), 'runtime_incompatible');
   const dates = m.serviceDates;
   check(Array.isArray(dates) && dates.length >= 3 && dates.length <= 366, 'service_dates_invalid');
   dates.forEach((d, i) => { validDate(d); if (i) check(d === plusDay(dates[i - 1], 1), 'service_dates_invalid'); });
@@ -186,6 +188,41 @@ export async function validateV2ReleaseManifest(m, cryptoImpl = globalThis.crypt
     const record = exact(m.stations[id], ['url', 'sha256', 'bytes']); hash(record.sha256);
     check(record.url === `/releases/${m.releaseId}/${filename}` && count(record.bytes) > 0 && record.bytes <= MAX_BYTES, 'station_record_invalid');
     totalBytes += record.bytes;
+  }
+  if (published) {
+    check(fullSite, 'publication_requires_full_site');
+    const p = exact(m.publication, ['contract', 'publishedAt', 'assembledAt', 'operation', 'previousReleaseId',
+      'previousArtifactDigest', 'prunedReleaseIds']);
+    check(p.contract === GENERATION_CONTRACT && ['initial', 'update', 'rollback'].includes(p.operation), 'generation_contract_unknown');
+    hash(p.previousArtifactDigest);
+    const first = timestamp(p.publishedAt), assembled = timestamp(p.assembledAt);
+    check(start <= first && first <= assembled && assembled < end && timestamp(meta.approval.approvedAt) <= first, 'publication_time_invalid');
+    check(Array.isArray(p.prunedReleaseIds) && p.prunedReleaseIds.every(r => typeof r === 'string' && /^r1-[0-9a-f]{64}$/.test(r))
+      && same(p.prunedReleaseIds, [...new Set(p.prunedReleaseIds)].sort())
+      && p.prunedReleaseIds.every(r => r !== m.releaseId && r !== p.previousReleaseId), 'prune_ids_invalid');
+    if (p.operation === 'initial') check(p.previousReleaseId === null && !m.retainedReleases.length && !p.prunedReleaseIds.length, 'initial_state_invalid');
+    else check(typeof p.previousReleaseId === 'string' && /^r1-[0-9a-f]{64}$/.test(p.previousReleaseId)
+      && p.previousReleaseId !== m.releaseId, 'previous_release_invalid');
+    const ids = new Set([m.releaseId]); const ordered = [];
+    for (const entry of m.retainedReleases) {
+      exact(entry, ['releaseId', 'releaseDescriptor', 'metadata', 'serviceDates', 'stations', 'publishedAt', 'retiredAt', 'retainUntil']);
+      check(!ids.has(entry.releaseId), 'duplicate_generation'); ids.add(entry.releaseId); ordered.push(entry.releaseId);
+      const old = { schemaVersion: 2, artifactKind: 'release-full-site', runtimeContract: RUNTIME, payloadSchemaVersion: 2,
+        dataScope: V2_PROFILE, retainedReleases: [], releaseId: entry.releaseId, releaseDescriptor: entry.releaseDescriptor,
+        metadata: entry.metadata, serviceDates: entry.serviceDates, stations: entry.stations };
+      await validateV2ReleaseManifest(old, cryptoImpl);
+      const retired = timestamp(entry.retiredAt), publishedAt = timestamp(entry.publishedAt);
+      const oldStart = timestamp(entry.metadata.applicationPeriod.startsAt), oldEnd = timestamp(entry.metadata.applicationPeriod.endsAt);
+      check(oldStart <= publishedAt && publishedAt < oldEnd && timestamp(entry.metadata.approval.approvedAt) <= publishedAt
+        && publishedAt <= retired && retired <= assembled && entry.metadata.evidenceKind === meta.evidenceKind, 'retained_time_invalid');
+      const feedEnd = validDate(entry.metadata.feed.validThrough) + 86400000 - 9 * 3600000;
+      const required = Math.max(retired + 7 * 86400000, Math.min(oldEnd, feedEnd) + 48 * 3600000);
+      check(timestamp(entry.retainUntil) === required
+        && required <= retired + Math.max(7 * 86400000, oldEnd - oldStart + 48 * 3600000), 'retention_deadline_mismatch');
+      totalBytes += entry.releaseDescriptor.assets.reduce((n, r) => n + r.bytes, 0)
+        + Object.values(entry.stations).reduce((n, r) => n + r.bytes, 0);
+    }
+    check(same(ordered, [...ordered].sort()) && (p.operation === 'initial' || ids.has(p.previousReleaseId)), 'retained_order_or_previous_invalid');
   }
   check(totalBytes <= 256 * 1024 * 1024, 'release_oversize');
   return validateQuality(meta.quality, dates);

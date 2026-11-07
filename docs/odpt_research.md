@@ -1762,3 +1762,26 @@ browser runtimeはdata-only/full-siteを明示判別し、full-siteでは12 asse
 既存v1 synthetic builder/validator/runtime/Actionsと世代保持policyは変更しない。現Phaseのv2 full-siteはcurrent 1世代、retainedReleases空のみ。旧世代や余分なrelease directoryを黙って落とさず拒否する。既存v1世代assemblerがv2を受理したと扱わず、v2 retained metadata/descriptorの独立検証・旧toolchainの扱い・旧タブ参照・rollbackをPhase 3Bで接続する。最低7日/適用終了+48時間/最大14日は維持し、残存期間12日超での更新が停止することを回帰確認した。
 
 synthetic full-siteを`/private/tmp/dotchi-phase3a-synthetic-full-site`へ生成。21 files/496,614 bytes、12 asset、8駅、6 serviceDates（10/28〜11/02）、synthetic承認範囲10/29〜11/01。siteComplete=true/deploymentPerformed=falseであり、Production承認を意味しない。HTTPは127.0.0.1だけで12 asset/manifest/8 stationの21 requestを確認。コピーされた公開moduleをNodeで実行して8駅の候補とDOMを確認し、実Chrome/Safari描画とは区別する。実取得candidateへの仮承認・期間・公開artifactは作成しない。問い合わせ先の実設定と実機/HTTP cache QAは公開前に残る。
+
+
+## Phase 3B：v2世代管理・更新・rollback（2026-11-07）
+
+実装上の契約であり、実取得データの公開承認・公式資料の追加確認ではない。`odpt_generation_contract.py`、`assemble_odpt_generations.py`、独立`validate_odpt_generations.py`を追加。既存v1の世代assembler・retention・Actionsは変更しない。Phase 1 data-only/Phase 3A clean full-siteの入口も維持し、publication付き成果物をclean入力へ混入させない。
+
+publication contractは`dotchi-odpt-generations-v1`。currentのrelease IDは元descriptorのまま、切替計画のpublishedAt/assembledAt/operation/previousReleaseId/previousArtifactDigest/prunedReleaseIdsをmanifestへ追加する（ID preimage外）。retainedは各世代固有のmetadata/descriptor/serviceDates/station recordsとpublishedAt/retiredAt/retainUntilを保持。旧JSONは同じ`releases/<id>/...`へ残し、rollbackに必要な旧HTML/JS/CSSは`releases/<id>/assets/`へ保存。旧世代をcurrentへ戻すとroot assetはその元bytesとなり、metadata・適用期間・release IDを作り直して延命しない。現在HEADのassetで旧世代を代用しない。
+
+旧toolchainは、以前に検証したProduction artifact全体のtrusted tree digestを外部入力として照合したうえで、元descriptorのasset/payload hashesとmetadata hash・厳密schema・品質算術・公開graphで検証する。旧metadataのcodeCommitを現在HEADと同一視しない。新releaseだけはPhase 3A独立validatorで原candidate/raw/別承認入力・現在の選択toolchainを再検証。現在runtime/保存旧runtimeの両方に同じgeneration contract対応を要求し、未対応の旧runtimeを推測でrollback可能にしない。browserもpublication/retainedのmetadata・deadline・各世代hash記録と容量を検査し、セッションpin/no-cache再読込/期間外停止は維持する。
+
+旧タブはpinした旧manifestから目的地切替時に旧JSONを取得するため、少なくとも承認期間終了までは同じURLが必要。終了後は現在時刻による候補停止がある。既存の「終了+48時間」は鉄道/ODPT固有の必須値として確認されたものではなく、既存設計の保守的な運用猶予（archive設計§5.1）である。今回短縮せず、最低7日とともに維持する。
+
+v2 deadlineは`max(retiredAt+7日, min(applicationPeriod.endsAt, feed期限翌日JST00:00)+48時間)`。14日capの代わりに、世代ごとの有限capを`retiredAt+max(7日, 承認期間長+48時間)`とする。退役は適用開始以降なので必要期限がこのcapを超えない。30日承認なら理論上の上限は退役+32日だが、実際の期限は残存期間で計算し、一律32日保持にはしない。例：synthetic 11/9〜12/8を11/10 UTCに退役するとretainUntilは12/11 JST00:00。48時間の新しい公式根拠を推定したり、GTFS全期間を承認期間に採用したりしない。serviceDays境界と25 MiB/file・256 MiB/treeの上限を維持し、超過時は自動削除や上限緩和で通さない。
+
+旧世代は期限切れでも黙って削除しない。`--prune-release-id <id>`の明示指定があり、current/直前currentでなく、retainUntil+既存24時間安全marginに到達した場合だけ成果物から除く。元Production snapshotは変更しない。rollbackは保持済み・検証済みのIDのみ、元の承認期間内かつ保持期限内に限定し、退役させる現currentも保存する。承認期限切れ・未知ID・欠損・余剰/混在・不正deadline・C/Dや未解決品質は停止する。
+
+初回は`--operation initial --previous <存在する空snapshot-dir> --expected-previous-digest <空tree digest> --new-release <clean-v2-site> --validation-inputs <private-json> --output <new-dir>`。空dirのtree digestは`4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`。既存ファイル/dirやprevious release IDがあれば拒否し、manifest不在をlegacy/空Productionとみなさない。legacy/v1移行は別の既存経路であり、v2初回配置で上書きしない。
+
+更新はoperation updateにexpected-previous-release-idとtrusted expected-previous-digestを必須化。validation-inputsはcandidate/source/approvalの絶対path、contact_url、expected_candidate_digest、expected_source_fingerprintの6項目。rollbackはoperation rollbackとrollback-release-idだけで、任意の新artifact/承認入力を受けず元archiveを復元する。独立validatorは同じ前提入力に`--artifact <assembled-site>`を指定する。元snapshotと新releaseを開始/検証後/確定直前に再hashし、途中変化なら新出力を確定しない。期待digestを未検証download自身から計算しただけではtrusted inputにならない。
+
+assemblyはローカル切替計画であり、publication timestampも実Deployの証明ではない。validatorは記録されたassembledAtを用いて計画を再検査し、現在時刻でも承認期間内であることを要求する。24時間の削除安全marginより古い未公開計画は再assemblyを要求し、古い計画の再利用による退役時刻のずれを防ぐ。この24時間は準備物のpreflight条件であり、公開中アプリやデータの再取得/再公開周期ではない。公開前には実Productionの空状態/現在ID/tree digestを直前に再取得・照合し、他writerを止め、実切替時刻・成功を別途記録する必要がある。receiptのdeploymentPreflightRequired=true/deploymentPerformed=falseを維持。今回remote snapshot取得/CAS/Direct Uploadを実行・自動化したとは扱わない。
+
+synthetic A→B→A rollbackをrepo外で検証。旧toolchainを模したAのasset/commitも元のまま復元し、旧タブA/新タブB/rollback後の新タブがそれぞれ正しい世代JSONを取得、適用終了時には旧候補を停止。保存先`/private/tmp/dotchi-phase3b-synthetic-final`。実取得batch・原本・Snapshot・candidateへの書込/複製/仮承認・公開期間設定はない。

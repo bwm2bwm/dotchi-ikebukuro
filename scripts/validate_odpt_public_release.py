@@ -20,6 +20,7 @@ def validate_artifact(root, *, candidate, source, approval, expected_candidate_d
         c.require(isinstance(manifest, dict) and manifest.get("metadata", {}).get("evidenceKind") == "synthetic",
                   "test_clock_requires_synthetic")
     c.validate_manifest(manifest, now)
+    c.require("publication" not in manifest and manifest["retainedReleases"] == [], "clean_release_required")
     c.require(manifest["artifactKind"] == (c.SITE_KIND if full_site else c.KIND), "artifact_kind_mismatch")
     meta = manifest["metadata"]
     request = c.load_json(c.read_file(approval))
