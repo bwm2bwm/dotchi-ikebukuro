@@ -1066,3 +1066,14 @@
 - 最終の新規manual fetch 20件＋既存Source contract/inventory/store/diff、semantic/GTFS loader 61件、計81件PASS（4.107秒）。HTTP4xx/5xx、timeout、TLS、redirect、サイズ/形式/部分失敗、中断/retry、各保存境界の失敗、上書き/symlink、不正path、raw改変/不足/途中変更、source/batch不整合、秘密echo/例外/header/署名URL/不正CLI引数、通信guardを合成/mocked transportだけで検証。実HTTP/TLS疎通は未検証。
 - 2D-2B残件はbatch/全attemptと既存2A〜2C評価への接続。strict store readerは7記録だけのためretry親履歴を含む本batchを直接読めない。契約変更やretry情報破棄で回避しない。公開資格・実v2公開対応は対象外。
 - 変更は前回と同じ6ファイル。既存raw/storeは一切操作せず、新規合成一時データだけを使用。原本の開始前後hash計測は実施していない。Cloudflare/公開builder/runtime/広告変更、APIアクセス、実取得、Commit/Push/Merge/Deployなし。git diff --check PASS。
+
+## 2026-11-07 — ODPT Phase 2D-2B fetch Snapshotと既存品質評価の接続
+
+- 開始branch `main`、HEAD `1bf77a2619dcda085cb6a9ea646b7ac33a22e509`、status clean。2D-2A commitがmanual fetch/testと4文書の6ファイルを含むことを確認。
+- read-only `odpt_evaluation_input.py`を追加。旧storeは既存strict readerへ委譲し、fetch batchは全attempt/retry・証拠・成功選択一意・strict Snapshot参照/fingerprint・固定7 raw/hash/bytes/形式/metadataを再検証する。履歴を破棄したstoreやrawコピーは作らず、schemaを緩和しない。壊れたbatchからlegacyへのfallbackなし。
+- 2A source diff、2B train/GTFS semantic、2C quality inputの読込だけをadapterへ接続。品質/表示/DOMのphysical inventoryとmetadata件数を全attempt/evidence対応へ変更した。比較ロジック・generator/matcher/v2/board/DOMと公開gateは維持。自動import追跡でengine fingerprintが変わるため過去engineとの結果比較は不可。
+- `odpt_fetch_evaluate.py`はstage別入口。2A/2Bでは既存差分処理、2Cでは明示日付/UTC観測1点/DOM駅と固定4scenarioで、同じ凍結engine/context/runtimeの品質差分・board差分・両側DOM意味QAを実行する。開始前差替え/途中変更は停止。stdoutはscopeと状態だけ、レポートはメモリのみ。partial/indeterminate/ready/completeを公開資格へ変換しない。
+- 合成fixtureの正常retry、batch混在・重複・親不整合・失敗誤選択・raw/bytes/fingerprint/参照不一致、2A差分有無、2B差分有無とopaque partial、2C実generator→v2→board→Node DOM、原本/metadata不変、公開状態不変、CLI非漏えいを確認するテストを追加。2Cの実generator fixtureは既知0候補の合成条件であり、実ダイヤの正確性や非0候補の運用品質を証明しない。非0候補・例外表示は既存合成回帰の範囲。
+- 2D-3へは公式endpoint/selector・改正切替・期間/鮮度/版整合の根拠と、明示的に許可された隔離取得が必要。ライブ通信は無効のまま。異世代実Snapshot、実ブラウザー描画/HTTP、公開資格は未評価。既存実原本/storeは操作・コピーせず、テストの一時合成fixtureだけを使用。実原本の開始前後hash計測は実施していない。Cloudflare/公開配信/広告変更、APIアクセス、新実取得、Commit/Push/Merge/Deployなし。
+- 最終版の新規接続テスト11件PASS（113.284秒、関連回帰と並行実行）。CLI help確認とgit diff --checkもPASS。実generatorの2C接続は旧新とも同じ固定contextでDOM complete、入力treeのhash/inode/mtime不変を確認。
+- 関連一括回帰271件PASS（893.703秒、新規接続8件を含む開始時のsuite）。対象はmanual fetch、Source/Snapshot、2A/2B、品質入力/基本/詳細/差分、表示context/metrics/diff/state、DOM collector。最終版の追加3条件を含む接続11件は上記の別runで全PASS。一括runと新規runには重複がある。テスト中に仕様変更や実通信有効化は行わない。

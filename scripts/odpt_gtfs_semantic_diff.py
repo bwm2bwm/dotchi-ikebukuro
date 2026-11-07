@@ -17,12 +17,14 @@ from pathlib import Path
 if __package__:
     from . import odpt_gtfs_loader as loader
     from .odpt_source_contract import SOURCE_FILES
-    from .odpt_source_store import load_store_contract, StoreError
+    from .odpt_source_store import StoreError
+    from .odpt_evaluation_input import load_input as load_store_contract
     from .odpt_train_semantic_diff import compare_train_timetables, SemanticDiffError, _root, _read_bytes
 else:
     import odpt_gtfs_loader as loader
     from odpt_source_contract import SOURCE_FILES
-    from odpt_source_store import load_store_contract, StoreError
+    from odpt_source_store import StoreError
+    from odpt_evaluation_input import load_input as load_store_contract
     from odpt_train_semantic_diff import compare_train_timetables, SemanticDiffError, _root, _read_bytes
 
 TABLES = ('routes', 'stops', 'trips', 'stop_times', 'calendar', 'calendar_dates')

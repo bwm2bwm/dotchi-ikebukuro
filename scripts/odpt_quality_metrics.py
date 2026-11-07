@@ -132,9 +132,11 @@ def _inventory(store, source_dir):
     """Bind byte hashes and stable file identities, including store serialization."""
     quality.load_store_contract(store)
     files = [('source', name, source_dir / name) for name in sorted(quality.SOURCE_FILES.values())]
-    files += [('store', 'snapshot.json', store / 'snapshot.json')]
-    files += [('store', 'sources/' + sid + '.json', store / 'sources' / (sid + '.json'))
-              for sid in sorted(quality.SOURCE_FILES)]
+    if __package__:
+        from .odpt_evaluation_input import metadata_files
+    else:
+        from odpt_evaluation_input import metadata_files
+    files += [('store', name, store / name) for name in metadata_files(store)]
     entries, identities = [], []
     for role, name, path in files:
         raw, identity = quality._read(path)
@@ -226,7 +228,7 @@ def collect_metrics(store, source_dir, *, context=None, engine=None, root=qualit
         after = _inventory(store, source_dir)
         same = before == after
         report['checks']['inputImmutability'] = {
-            'status': 'PASS' if same else 'FAIL', 'sourceFileCount': 7, 'storeFileCount': 8,
+            'status': 'PASS' if same else 'FAIL', 'sourceFileCount': 7, 'storeFileCount': sum(e['role'] == 'store' for e in before[0]),
             'before': before[0], 'after': after[0]}
         if not same:
             report['reasonCodes'].append('inputs_changed_during_collection')

@@ -1487,3 +1487,15 @@ v2 routeCoverageはroute9 scheduledTripCount475、originTripCount215、dataInsuf
 CLIの実通信は常時終了2で、実adapterにも通信無効guardがある。テストのTLS adapter検証はHTTPSConnection全体をmockへ置換して行う。実API、実データ、既存raw/store、Cloudflareにはアクセスしない。実TLS/転送/公式endpoint・適用期間・版整合・公開資格は未評価。
 
 2D-2Bでは、このbatch履歴と必要7原本を既存2A/2B/2Cへ安全に渡す入口を用意する。既存store readerは`sources/`7記録＋snapshotのみを受理し、retry親が欠けると契約検証で失敗するため、本batchを直接渡さない。Source/Snapshot schemaの意味を変えず全attempt契約を検証するadapterが必要。新規評価engine、実v2公開builder/runtime、公開承認は今回の対象外。
+
+## ODPT-2D-2B 手動取得batchと既存評価の接続
+
+`odpt_evaluation_input.load_input()`は従来strict storeを既存readerで読む。`batch.json`がある場合は専用read-only validatorへ進み、壊れたbatchをlegacy扱いへfallbackしない。完成Snapshotが必須で、全attemptの開始/結果・補助証拠とretry親関係を保持して`validate_snapshot(snapshot, all_attempts)`を実行する。sourceごとに単一root・非分岐chain・成功leaf一意・Snapshot選択一致を要求し、失敗/中断を成功に置換しない。固定7 rawとsourceId対応・hash/bytes・JSON/GTFS形式/metadataを二巡照合し、metadata bytesの前後hashも比較する。外部原本をコピーせず選択済み7 Source recordと全履歴をメモリ上で既存評価へ渡す。
+
+2A source diff、2B train/GTFS semantic diff、2C quality inputのstore読込参照だけをadapterへ接続した。既存strict schema・store reader・比較アルゴリズム・generator/matcher/v2射影/board/DOM規則は維持する。2Cのphysical inventoryは旧storeの8 JSON固定から、batch/全attempt/evidence/Snapshotを列挙する方式へ拡張。件数表示も実数とし、同じmetadata bytes・identityの前後不変を検証する。新規adapter/取得処理等も自動import依存追跡でengine fingerprintへ入るため、旧engineの検証結果と同条件比較しない。
+
+`odpt_fetch_evaluate.py`はstage別の非公開入口。2Aでは旧rawも明示照合して既存bytes/hash差分を呼び、2Bでは統合7 source意味差分を呼ぶ。2Cでは明示service dates・固定UTC観測1点・DOM対象駅を受け取り、同じ凍結engine/context/runtimeで品質差分、board/model/state差分、旧新それぞれのNode DOM意味QAを順に実行する。旅程生成/QA stateの対象は既存契約の全8駅、scenarioは固定4種。必要3日不足は補完しない。入力矛盾・readiness不成立・失敗・途中変更は停止し、未評価を0件や正常へ変換しない。partial/indeterminateは既存範囲の限界として保持する。これは異世代DOM専用diff engineではなく、両側が同じboard→DOM規則を満たすことを別々に検証するもの。
+
+結果はメモリのみ、CLIは状態とscopeだけを出す。終了0も公開資格・鮮度・同一ダイヤ版性を意味しない。終了2は失敗・比較不能またはpartial。raw/旅程本文・field値・秘密・local pathをCLI結果へ出さない。batchのpublicationApproved=false/applicationPeriod=nullとSnapshotのcrossSourceConsistency=not-evaluatedを要求・維持する。生の評価APIの結果は非公開QA専用であり、公開物に含めない。
+
+実APIアクセス、新規実取得、実異世代Snapshot、実ブラウザー/CSS/HTTP/CSP/cache、公開承認・適用期間・ダイヤ版根拠の審査は行わない。2D-3では公式取得先/認証/selector・切替時点を確認し、別途許可された隔離取得と鮮度/期間/版整合の根拠を揃える。ライブ通信は引き続き無効。

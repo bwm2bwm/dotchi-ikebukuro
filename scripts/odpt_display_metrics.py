@@ -405,7 +405,7 @@ def collect_display_models(store, source_dir, *, quality_context=None, display_c
                     for code in end['reasonCodes']: stop(code,end['comparisonReadiness'])
                 after = itinerary_metrics._inventory(store,source_dir)
                 report['checks']['inputImmutability'] = {'status':'PASS' if before == after else 'FAIL',
-                    'sourceFileCount':7,'storeFileCount':8,'before':before[0],'after':after[0]}
+                    'sourceFileCount':7,'storeFileCount':sum(e['role'] == 'store' for e in before[0]),'before':before[0],'after':after[0]}
                 if before != after: stop('inputs_changed_during_display_collection')
             except (quality.QualityInputError, quality.StoreError) as exc:
                 stop(exc.code,getattr(exc,'category','invalid'))

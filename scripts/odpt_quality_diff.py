@@ -286,7 +286,7 @@ def compare_quality(baseline_store, candidate_store, baseline_source_dir, candid
             try:
                 same = before[side] == collector._inventory(store, source)
                 result['checks'][side + 'InputImmutability'] = {
-                    'status': 'PASS' if same else 'FAIL', 'sourceFileCount': 7, 'storeFileCount': 8}
+                    'status': 'PASS' if same else 'FAIL', 'sourceFileCount': 7, 'storeFileCount': sum(e['role'] == 'store' for e in before[side][0])}
                 if not same:
                     problems.append(('invalid', [side + '_inputs_changed_during_comparison']))
             except (quality.QualityInputError, quality.StoreError) as exc:

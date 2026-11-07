@@ -436,7 +436,7 @@ def compare_display_models(baseline_store,candidate_store,baseline_source_dir,ca
             if side not in before:continue
             try:
                 same=before[side]==collector.itinerary_metrics._inventory(store,source)
-                result['checks'][side+'InputImmutability']={'status':'PASS' if same else 'FAIL','sourceFileCount':7,'storeFileCount':8}
+                result['checks'][side+'InputImmutability']={'status':'PASS' if same else 'FAIL','sourceFileCount':7,'storeFileCount':sum(e['role'] == 'store' for e in before[side][0])}
                 if not same:problems.append(('invalid',[side+'_inputs_changed_during_display_comparison']))
             except (quality.QualityInputError,quality.StoreError) as exc:
                 result['checks'][side+'InputImmutability']={'status':'not-confirmed'}

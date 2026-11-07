@@ -12,10 +12,12 @@ if str(SCRIPT_DIR) not in sys.path:
 
 if __package__:
     from .odpt_source_contract import SOURCE_IDS
-    from .odpt_source_store import StoreError, load_store_contract
+    from .odpt_source_store import StoreError
+    from .odpt_evaluation_input import load_input as load_store_contract
 else:
     from odpt_source_contract import SOURCE_IDS
-    from odpt_source_store import StoreError, load_store_contract
+    from odpt_source_store import StoreError
+    from odpt_evaluation_input import load_input as load_store_contract
 
 
 class SourceDiffError(ValueError):

@@ -43,7 +43,15 @@ find local_data/odpt -maxdepth 1 -type f -print
 
 Python API `acquire(batch, sourceId, credential_provider, exchange=mock)` は1回の手動attempt、同sourceへの再呼出は失敗・中断後だけretryを記録します。`capture_mock_batch()`も同じtransport/journalを使います。テストは `python3 -m unittest tests.test_odpt_manual_fetch`。実環境の認証注入用`env_credential()`は環境変数`ODPT_API_KEY`だけを読む関数ですが、現在のCLIはこれを呼びません。`.env.local`は読みません。
 
-rawは再整形せず保存し、attempt別の開始記録・結果・補助証拠を0700/0600で保持します。Snapshot確定前に全7件を再読・再検証します。保存失敗後の孤立rawや壊れた履歴は上書きで修復せず停止し、別途調査してください。`publicationApproved=false`、`applicationPeriod=null`、ダイヤ版整合`not-evaluated`を維持します。Phase 2A〜2Cとの評価接続は2D-2Bで対応します。
+rawは再整形せず保存し、attempt別の開始記録・結果・補助証拠を0700/0600で保持します。Snapshot確定前に全7件を再読・再検証します。保存失敗後の孤立rawや壊れた履歴は上書きで修復せず停止し、別途調査してください。`publicationApproved=false`、`applicationPeriod=null`、ダイヤ版整合`not-evaluated`を維持します。Phase 2A〜2Cとの評価接続は下記2D-2Bの入口を使います。
+
+### Phase 2D-2B オフライン評価入口
+
+`python3 -B scripts/odpt_fetch_evaluate.py --help`。必要引数は `--baseline-store`（旧strict storeまたは確定済みfetch batch）、`--baseline-raw`（旧7原本のdirectory）、`--candidate-batch`（確定済み新fetch batch）、`--stage 2a|2b|2c`。入力はすべて絶対pathで指定します。原本/storeのコピー・変更やQAレポートの永続化は行いません。実APIへの接続・取得機能はありません。
+
+`2a`は既存bytes/hash・metadata差分、`2b`は既存6 JSON＋GTFS全11テーブル意味差分、`2c`は既存旅程品質差分・board表示/状態差分・両側Node DOM意味QAを実行します。`2c`では `--service-date YYYY-MM-DD` を必要日数分、`--observation-instant YYYY-MM-DDTHH:MM:SSZ` を1点、`--dom-station Senkawa --dom-station Hikawadai` 等を明示してください。JST観測日の前日/当日/翌日をservice-dateに含めます。旅程生成・QA stateは既存契約の全8駅、DOMは明示した駅、scenarioは既存固定4種です。暗黙の評価日・現在時刻は使いません。
+
+stdoutは状態・scopeの要約だけです。終了0は実行範囲の正常終了、2は入力/実行失敗・比較不能またはpartialであり、公開資格を示しません。partial/indeterminate、ready/completeの意味は既存通りです。公開承認false・適用期間null・版整合not-evaluatedを維持し、鮮度・実ブラウザー描画・公開資格は評価しません。
 
 ### ローカル実ダイヤpreview
 

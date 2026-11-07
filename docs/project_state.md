@@ -1,6 +1,6 @@
 # プロジェクト状態
 
-最終整理: 2026-11-05。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
+最終整理: 2026-11-07。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
 
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
@@ -69,4 +69,6 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 この文書は状態の要約であり、履歴の数値や手順を重複管理しない。
 
-Phase 2D-2A: 既存manual fetchに、TLS検証・接続/読取timeout・制限付きredirect・サイズ/status/contentType検査、注入可能transport、attempt別開始/結果/非秘密証拠、手動retry、Snapshot確定前の全raw二巡照合を追加。実通信はCLI/real adapterとも無効。取得完了は公開資格を意味せず、publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluatedを維持する。合成テストのみで検証。2D-2Bにはattempt履歴付きbatchと既存Phase 2A〜2C評価の接続を残す。既存store readerへ直接渡す形式ではなく、retry親記録も含めて検証する必要がある。公式取得仕様・実TLS/転送・現行データでの動作は未検証。
+Phase 2D-2A: 既存manual fetchに、TLS検証・接続/読取timeout・制限付きredirect・サイズ/status/contentType検査、注入可能transport、attempt別開始/結果/非秘密証拠、手動retry、Snapshot確定前の全raw二巡照合を追加。実通信はCLI/real adapterとも無効。取得完了は公開資格を意味せず、publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluatedを維持する。合成テストのみで検証。2D-2Bの評価接続は下記の専用adapterを使う。既存store readerへ直接渡す形式ではなく、retry親記録も含めて検証する。公式取得仕様・実TLS/転送・現行データでの動作は未検証。
+
+Phase 2D-2B: 読取専用`odpt_evaluation_input.py`で確定済みfetch batchの全attempt/retry・成功選択・strict Snapshot参照/fingerprint・raw hash/bytes/形式を検証し、選択7件を既存2A/2B/2Cへ渡す。旧store reader/schemaと取得処理は維持。品質collectorの物理inventoryはattempt/証拠を含む可変数metadataへ対応。`odpt_fetch_evaluate.py`で評価stageと、2Cのservice dates/UTC観測1点/DOM対象駅を明示する。生成/QA stateは全8駅、scenario4種、同一凍結engine/context/runtimeを要求。原本コピー・レポート保存なし。公開承認/期間/版整合を変更しない。異世代実Snapshot・鮮度・公開資格・実ブラウザー描画は未評価。2D-3で実取得へ進むには公式経路/selector・期間/版整合根拠と明示的取得許可が必要。

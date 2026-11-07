@@ -184,7 +184,7 @@ def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=N
                 end = validate(); report['checks']['inputEnd'] = end
                 if end['comparisonReadiness'] != 'ready': errors.extend((end['comparisonReadiness'],code) for code in end['reasonCodes'])
                 same = before == model.itinerary_metrics._inventory(store,source_dir)
-                report['checks']['inputImmutability'] = dict(status='PASS' if same else 'FAIL',sourceFileCount=7,storeFileCount=8)
+                report['checks']['inputImmutability'] = dict(status='PASS' if same else 'FAIL',sourceFileCount=7,storeFileCount=sum(e['role'] == 'store' for e in before[0]))
                 if not same: errors.append(('invalid','inputs_changed_during_dom_qa'))
             except (quality.QualityInputError, quality.StoreError) as exc: errors.append(('invalid',exc.code))
     report['checks']['generationCount'] = len(generation)

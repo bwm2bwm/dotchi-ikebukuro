@@ -20,11 +20,13 @@ from zoneinfo import TZPATH
 
 if __package__:
     from .odpt_source_contract import SOURCE_FILES
-    from .odpt_source_store import StoreError, load_store_contract
+    from .odpt_source_store import StoreError
+    from .odpt_evaluation_input import load_input as load_store_contract
     from .odpt_train_semantic_diff import SemanticDiffError, _read_bytes, _root
 else:
     from odpt_source_contract import SOURCE_FILES
-    from odpt_source_store import StoreError, load_store_contract
+    from odpt_source_store import StoreError
+    from odpt_evaluation_input import load_input as load_store_contract
     from odpt_train_semantic_diff import SemanticDiffError, _read_bytes, _root
 
 ROOT = Path(__file__).resolve().parents[1]
