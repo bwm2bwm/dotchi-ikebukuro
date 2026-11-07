@@ -163,6 +163,7 @@ class OdptEnrichment:
     unscoped_through_service_type: str | None = None
     match_method: str | None = None
     match_reason: str | None = None
+    passenger_match_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -549,7 +550,8 @@ class ItineraryGenerator:
         if match.status != "confirmed" or match.odpt_record is None:
             status = "ambiguous" if match.status == "ambiguous" else (
                 "unavailable" if match.status == "unavailable" else "unmatched")
-            return OdptEnrichment(status, match_method=match.method, match_reason=match.reason)
+            return OdptEnrichment(status, match_method=match.method, match_reason=match.reason,
+                                  passenger_match_verified=(match.reason == "destination_has_no_independent_gtfs_crosswalk"))
 
         record = match.odpt_record
         raw_type = record.get("odpt:trainType")

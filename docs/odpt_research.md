@@ -1671,3 +1671,13 @@ U1 p. 8では検索結果がシステム上限を超えると上限以下に絞�
 - **利用者影響:** B554K/B689S/B733Sは未照合のまま、小竹向原・和光市の直通および有効な乗換候補を維持。急行停車パターンを通勤急行へ置換せず、途中駅の通過も維持する。B771M/B1673M/B1975Mは乗車不可として除外し、他列車の表示まで止めない。未知の列車を利用可へ昇格する処理ではない。
 
 QA結果は同日のdevlogを参照。coverage completeは、保存済み入力に対する旅客候補判定の状態であり、API全件性・鮮度・版整合・公開資格の承認ではない。publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluatedは維持する。
+
+## ODPT-0品質ゲートの解決区分（2026-11-07）
+
+先行するroute9旅客coverageの根拠判定をODPT-0にも共有する。元のQA status、ODPT照合状態、WARNING/INFO診断と件数は変更しない。列車IDの例外リストは使わない。resolutionは、問題のある生成行をA（厳密な公式ルールで池袋乗車不可、旅程なし、想定2診断のみ）、B（独立した列車候補/運行日/池袋時刻/停車順検証済みで行先crosswalkだけ未確定、有効旅程または明示通過、他WARNINGなし）、C（不明/想定外）、D（衝突/曖昧/矛盾、明示的な種別と停車パターンのconflictを含む）に分類する。正常照合行は分類件数に含めない。
+
+Bの停車順検証を通したことはgenerator内部のpassenger_match_verifiedで明示する。判定文字列だけで安全とは扱わない。Aは既存の公式乗降ルール証拠に加え、実際のODPT未照合理由、候補旅程なし、診断集合完全一致も要求する。追加警告、証拠欠損、C/Dは阻害する。原本・GTFS値とODPT confirmed条件は変えない。
+
+各駅日のQA reportにresolutionとrouteCoverageを追加し、summaryに分類とunmatched/warningCodesのoriginal/resolved/unresolvedを合算する。QA status=WARNINGは保持する。候補生成ゲートは、scope/fingerprint/構造FAIL、24駅日の重複・欠落、全route complete、C/D=0、unresolved=0、原数=解決数+未解決数、駅日別と総計の一致を検証する。Aは1行2WARNING、BはWARNINGなしという原数の関係も検証する。単純にWARNINGを無視する許可フラグは設けない。
+
+private manifestのodpt0には、元status/未照合数/診断集計と、全体および駅日別resolutionを記録する。既存bundle validatorはこの新しいmetadataがあるbundleで同じ算術・scope・総計とODPT照合数の一致を検証し、候補hash/bytes/schema/旅程/routeCoverage検証を維持する。旧private bundleの検証互換は維持するが、新しいpipelineは新しいQA根拠を必須とする。非公開候補生成の成功は公開承認ではなく、applicationPeriod=null/publicationApproved=falseを維持する。

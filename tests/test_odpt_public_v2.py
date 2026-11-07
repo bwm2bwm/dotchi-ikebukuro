@@ -389,6 +389,14 @@ class PublicV2Tests(unittest.TestCase):
             report = v2.validate_bundle(bundle_dir, manifest, list(v2.DESTINATIONS), dates, "a" * 64)
             self.assertEqual(report["candidateDepartureCount"], 24)
 
+    def test_warning_bundle_cannot_remove_resolution_metadata(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            bundle_dir, manifest, dates = _bundle(Path(directory))
+            manifest["odpt0"] = {"status": "WARNING"}
+            (bundle_dir / "private-generator-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(v2.V2Error, "odpt0_resolution_required"):
+                v2.validate_bundle(bundle_dir, manifest, list(v2.DESTINATIONS), dates, "a" * 64)
+
     def test_digest_excludes_generated_at_but_not_payload_content(self):
         first = {"Hikawadai": _payload("Hikawadai", "2026-10-29T12:00:00Z")}
         second = {"Hikawadai": _payload("Hikawadai", "2026-10-30T12:00:00Z")}
@@ -408,13 +416,16 @@ class PublicV2Tests(unittest.TestCase):
                 dates = ["2026-10-28", "2026-10-29", "2026-10-30"]
                 days = [{"stationId": station, "serviceDate": day, "journeyCount": 2,
                          "primaryDirectCount": 2, "primaryTransferCount": 0,
-                         "odptMatchStatusCounts": {"unique_match": 2}}
+                         "odptMatchStatusCounts": {"unique_match": 2}, "status": "ok",
+                         "diagnosticSeverity": {"WARNING": {"codeOccurrences": 0}},
+                         "resolution": odpt_snapshot_qa._resolution_summary([]),
+                         "routeCoverage": {r: {"dataState": "complete"} for r in v2.ROUTES}}
                         for station in v2.DESTINATIONS for day in dates]
                 return {"status": "PASS", "sourceFingerprint": fingerprint,
                         "serviceDate": "2026-10-29",
                         "requestedServiceDates": ["2026-10-28", "2026-10-29", "2026-10-30"],
                         "stationCount": 8, "dayResultCount": 24, "dayResults": days,
-                        "summary": {"unmatchedOdptJourneyCount": 0,
+                        "summary": {"resolution": odpt_snapshot_qa._resolution_summary([]), "unmatchedOdptJourneyCount": 0,
                                     "diagnosticSeverity": {"WARNING": {"codeOccurrences": 0},
                                                            "FAIL": {"failGateCount": 0}}},
                         "generationDigest": "c" * 64, "generatorFingerprint": "d" * 64}
@@ -443,13 +454,16 @@ class PublicV2Tests(unittest.TestCase):
                 dates = ["2026-10-28", "2026-10-29", "2026-10-30"]
                 days = [{"stationId": station, "serviceDate": day, "journeyCount": 2,
                          "primaryDirectCount": 2, "primaryTransferCount": 0,
-                         "odptMatchStatusCounts": {"unique_match": 2}}
+                         "odptMatchStatusCounts": {"unique_match": 2}, "status": "ok",
+                         "diagnosticSeverity": {"WARNING": {"codeOccurrences": 0}},
+                         "resolution": odpt_snapshot_qa._resolution_summary([]),
+                         "routeCoverage": {r: {"dataState": "complete"} for r in v2.ROUTES}}
                         for station in v2.DESTINATIONS for day in dates]
                 return {"status": "PASS", "sourceFingerprint": fingerprint,
                         "serviceDate": "2026-10-29",
                         "requestedServiceDates": ["2026-10-28", "2026-10-29", "2026-10-30"],
                         "stationCount": 8, "dayResultCount": 24, "dayResults": days,
-                        "summary": {"unmatchedOdptJourneyCount": 0,
+                        "summary": {"resolution": odpt_snapshot_qa._resolution_summary([]), "unmatchedOdptJourneyCount": 0,
                                     "diagnosticSeverity": {"WARNING": {"codeOccurrences": 0},
                                                            "FAIL": {"failGateCount": 0}}},
                         "generationDigest": "c" * 64, "generatorFingerprint": "d" * 64}

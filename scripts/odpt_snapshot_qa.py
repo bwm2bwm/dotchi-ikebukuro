@@ -172,6 +172,60 @@ def _classify_diagnostics(result: Any) -> dict[str, set[str]]:
     return {"INFO": info, "WARNING": warning}
 
 
+def _resolution_class(result: Any) -> str | None:
+    """Evaluate evidence, not diagnostic names alone. Original records stay intact."""
+    if getattr(getattr(result, "type_resolution", None), "validation", None) == "conflict":
+        return "D"
+    warnings = _classify_diagnostics(result)["WARNING"]
+    unmatched = result.odpt.status not in {"matched", "unique_match"}
+    codes = set(result.data_quality)
+    if (result.odpt.status == "unmatched"
+            and getattr(result.odpt, "match_reason", None) == "no_route_calendar_number_and_exact_departure_candidate"
+            and getattr(result, "origin_boarding_prohibited_rule", None)
+            == "s_train_saturday_holiday_seibu_bound_ikebukuro_alight_only"
+            and result.primary_itinerary is None and result.direct_alternative is None
+            and result.best_transfer_alternative is None
+            and codes == {"origin_boarding_prohibited_official_rule", "kotake_alighting_prohibited"}):
+        return "A"
+    if (unmatched and result.odpt.status == "unmatched" and not warnings
+            and getattr(result.odpt, "passenger_match_verified", False) is True
+            and result.odpt.match_reason == "destination_has_no_independent_gtfs_crosswalk"
+            and (result.primary_itinerary is not None or "destination_explicit_pass" in codes)):
+        return "B"
+    if unmatched or warnings:
+        reason = getattr(result.odpt, "match_reason", "") or ""
+        return "D" if result.odpt.status == "ambiguous" or any(word in reason or any(word in c for c in codes)
+                          for word in ("conflict", "ambiguous", "collid")) else "C"
+    if (result.primary_itinerary is None and not codes
+            and not getattr(result, "transfer_wait_policy_excluded", False)):
+        return "C"
+    return None
+
+
+def _resolution_summary(results: list[Any]) -> dict[str, Any]:
+    out = {"classes": dict.fromkeys("ABCD", 0),
+           "unmatched": dict.fromkeys(("original", "resolved", "unresolved"), 0),
+           "warningCodes": dict.fromkeys(("original", "resolved", "unresolved"), 0)}
+    for row in results:
+        category = _resolution_class(row)
+        if category:
+            out["classes"][category] += 1
+        for key, count in (("unmatched", int(row.odpt.status not in {"matched", "unique_match"})),
+                           ("warningCodes", len(_classify_diagnostics(row)["WARNING"]))):
+            out[key]["original"] += count
+            out[key]["resolved" if category in {"A", "B"} else "unresolved"] += count
+    return out
+
+
+def _merge_resolutions(values):
+    total = _resolution_summary([])
+    for value in values:
+        for group in total:
+            for key in total[group]:
+                total[group][key] += value[group][key]
+    return total
+
+
 def _diagnostic_summary(results: list[Any]) -> dict[str, Any]:
     code_occurrences = {"INFO": collections.Counter(), "WARNING": collections.Counter()}
     code_itineraries = {"INFO": collections.defaultdict(set),
@@ -271,6 +325,10 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
                 raise QAError("itinerary_generation_failed") from None
             metrics = _journey_metrics(results)
             metrics["diagnosticSeverity"] = _diagnostic_summary(results)
+            metrics["resolution"] = _resolution_summary(results)
+            from odpt_public_v2 import _route_state
+            metrics["routeCoverage"] = {r: _route_state(r, generator.last_destination_status["routes"][r], results)
+                                        for r in ("6", "9")}
             destination_status = getattr(generator, "last_destination_status", {}) or {}
             status = "ok" if results else "no_candidates"
             if not results and not generator.active_service_ids(day):
@@ -339,6 +397,7 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
                                  "perStationDateResultDigests": result_digests},
             "summary": {"outsideFeedRangeOrMissingDates": failures, "noCandidateOrNoActiveServiceStationDates": warnings,
                         "unmatchedOdptJourneyCount": unmatched,
+                        "resolution": _merge_resolutions(row["resolution"] for row in day_rows if "resolution" in row),
                         "diagnosticSeverity": severity_summary,
                         "severityDecisionReasons": severity_reasons,
                         "note": "Counts are descriptive; no minimum journey or ODPT-match threshold is imposed."},

@@ -131,29 +131,11 @@ def _route_state(route_id: str, route_metrics: Any, results: list[Any]) -> dict[
         state = "insufficient"
     else:
         from odpt_snapshot_qa import _classify_diagnostics
-        # Keep all match/WARNING evidence in audits. A proven boarding ban is
-        # outside passenger coverage, not a successful ODPT match. Refuse a
-        # contradictory row that still contains a journey.
-        relevant = [row for row in route_results if not (
-            getattr(row, "origin_boarding_prohibited_rule", None)
-            == "s_train_saturday_holiday_seibu_bound_ikebukuro_alight_only"
-            and row.primary_itinerary is None and row.direct_alternative is None
-            and row.best_transfer_alternative is None
-            and set(row.data_quality) <= {"origin_boarding_prohibited_official_rule",
-                                          "kotake_alighting_prohibited"})]
+        from odpt_snapshot_qa import _resolution_class
+        relevant = [row for row in route_results if _resolution_class(row) != "A"]
         warnings = any(_classify_diagnostics(row)["WARNING"] for row in relevant)
-        # A missing independent destination/headsign crosswalk affects ODPT
-        # enrichment only. GTFS journey/access checks and diagnostics above
-        # still gate passenger coverage. Other unresolved/conflicting matches
-        # remain blocking; unknown data is never inferred to be a pass.
-        unresolved_match = any(
-            row.odpt.status not in {"matched", "unique_match"}
-            and not (row.odpt.status == "unmatched"
-                     and getattr(row.odpt, "match_reason", None)
-                     == "destination_has_no_independent_gtfs_crosswalk"
-                     and (row.primary_itinerary is not None
-                          or "destination_explicit_pass" in row.data_quality))
-            for row in relevant)
+        unresolved_match = any(row.odpt.status not in {"matched", "unique_match"}
+                               and _resolution_class(row) != "B" for row in relevant)
         state = "insufficient" if warnings or unresolved_match else "complete"
     return {"scheduledTripCount": scheduled, "dataState": state}
 
@@ -607,9 +589,35 @@ def validate_bundle(bundle_dir: Path, manifest: dict[str, Any],
         raise V2Error("route_coverage_not_complete")
     if manifest.get("applicationPeriod") is not None:
         raise V2Error("public_application_period_must_remain_unapproved")
+    if manifest.get("odpt0", {}).get("status") == "WARNING" and "resolution" not in manifest["odpt0"]:
+        raise V2Error("odpt0_resolution_required")
+    if "resolution" in manifest.get("odpt0", {}):
+        resolution = manifest["odpt0"]["resolution"]
+        if not isinstance(resolution, dict):
+            raise V2Error("odpt0_resolution_invalid")
+        _validate_resolution(resolution, resolution.get("unmatched", {}).get("original"),
+                             resolution.get("warningCodes", {}).get("original"))
+        details = manifest["odpt0"].get("stationDateResolution", [])
+        if (not isinstance(details, list) or not all(isinstance(d, dict) for d in details) or len(details) != len(expected_station_ids) * len(dates)
+                or {(d.get("stationId"), d.get("serviceDate")) for d in details}
+                   != {(s, d) for s in expected_station_ids for d in dates}):
+            raise V2Error("odpt0_resolution_scope_invalid")
+        for d in details:
+            r = d.get("resolution", {})
+            _validate_resolution(r, r.get("unmatched", {}).get("original"),
+                                 r.get("warningCodes", {}).get("original"))
+        if resolution != snapshot_qa._merge_resolutions(d["resolution"] for d in details):
+            raise V2Error("odpt0_resolution_totals_mismatch")
     quality = manifest.get("quality")
     if not isinstance(quality, dict):
         raise V2Error("private_quality_manifest_invalid")
+    if "resolution" in manifest.get("odpt0", {}):
+        _validate_resolution(manifest["odpt0"]["resolution"],
+            manifest["odpt0"].get("unmatchedOdptJourneyCount"),
+            manifest["odpt0"].get("diagnosticSeverity", {}).get("WARNING", {}).get("codeOccurrences"))
+        if sum(n for k, n in quality.get("odptMatchStatusCounts", {}).items()
+               if k not in {"matched", "unique_match"}) != manifest["odpt0"]["resolution"]["unmatched"]["original"]:
+            raise V2Error("odpt0_resolution_totals_mismatch")
     expected_generated = quality.get("itineraryResultCount")
     expected_candidates = quality.get("candidateDepartureCount")
     if (not _safe_nonnegative_int(expected_generated)
@@ -655,23 +663,60 @@ def _manifest_digest_payloads(payloads: dict[str, dict[str, Any]]) -> str:
 
 def _validate_odpt0_report(report: dict[str, Any], anchor: date,
                           requested_dates: list[str], source_fp: str) -> None:
-    if (report.get("status") != "PASS" or report.get("sourceFingerprint") != source_fp
+    if (report.get("status") not in {"PASS", "WARNING"} or report.get("sourceFingerprint") != source_fp
             or report.get("serviceDate") != anchor.isoformat()
             or report.get("requestedServiceDates") != requested_dates
             or report.get("stationCount") != len(DESTINATIONS)
             or report.get("dayResultCount") != len(DESTINATIONS) * len(requested_dates)):
         raise V2Error("odpt0_quality_gate_failed")
     summary = report.get("summary")
-    if not isinstance(summary, dict) or summary.get("unmatchedOdptJourneyCount") != 0:
+    if not isinstance(summary, dict):
         raise V2Error("odpt0_quality_gate_failed")
     severity = summary.get("diagnosticSeverity")
     if not isinstance(severity, dict):
         raise V2Error("odpt0_quality_gate_failed")
     warning = severity.get("WARNING", {})
     failure = severity.get("FAIL", {})
-    if (not isinstance(warning, dict) or warning.get("codeOccurrences") != 0
-            or not isinstance(failure, dict) or failure.get("failGateCount") != 0):
+    if (not isinstance(warning, dict) or not isinstance(failure, dict)
+            or failure.get("failGateCount") != 0):
         raise V2Error("odpt0_quality_gate_failed")
+
+    expected = {(s, d) for s in DESTINATIONS for d in requested_dates}
+    days = report.get("dayResults", [])
+    if (len(days) != len(expected)
+            or {(d.get("stationId"), d.get("serviceDate")) for d in days} != expected):
+        raise V2Error("odpt0_quality_gate_failed")
+    for day in days:
+        _validate_resolution(day.get("resolution"),
+            sum(v for k, v in day.get("odptMatchStatusCounts", {}).items() if k not in {"matched", "unique_match"}),
+            day.get("diagnosticSeverity", {}).get("WARNING", {}).get("codeOccurrences"))
+        if (day.get("status") != "ok" or set(day.get("routeCoverage", {})) != {"6", "9"}
+                or any(c.get("dataState") != "complete" for c in day["routeCoverage"].values())):
+            raise V2Error("odpt0_quality_gate_failed")
+    resolution = summary.get("resolution")
+    _validate_resolution(resolution, summary.get("unmatchedOdptJourneyCount"), warning.get("codeOccurrences"))
+    if resolution != snapshot_qa._merge_resolutions(d["resolution"] for d in days):
+        raise V2Error("odpt0_resolution_totals_mismatch")
+
+
+def _validate_resolution(value, unmatched, warnings):
+    expected = {"classes": set("ABCD"), "unmatched": {"original", "resolved", "unresolved"},
+                "warningCodes": {"original", "resolved", "unresolved"}}
+    if not isinstance(value, dict) or set(value) != set(expected):
+        raise V2Error("odpt0_resolution_invalid")
+    for group, keys in expected.items():
+        if (not isinstance(value[group], dict) or set(value[group]) != keys
+                or not all(_safe_nonnegative_int(x) for x in value[group].values())):
+            raise V2Error("odpt0_resolution_invalid")
+    for group, original in (("unmatched", unmatched), ("warningCodes", warnings)):
+        row = value[group]
+        if (not _safe_nonnegative_int(original) or row["original"] != original
+                or row["original"] != row["resolved"] + row["unresolved"] or row["unresolved"]):
+            raise V2Error("odpt0_resolution_unresolved")
+    c = value["classes"]
+    if (c["C"] or c["D"] or not c["B"] <= value["unmatched"]["resolved"] <= c["A"] + c["B"]
+            or value["warningCodes"]["resolved"] != 2 * c["A"]):
+        raise V2Error("odpt0_resolution_unresolved")
 
 
 def _assert_odpt0_generation_matches(report: dict[str, Any], metrics: dict[str, Any]) -> None:
@@ -791,6 +836,11 @@ def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dic
             "sourceFingerprint": source_fp,
             "sourceFiles": source_files,
             "odpt0": {"status": qa_report["status"],
+                      "resolution": qa_report["summary"]["resolution"],
+                      "unmatchedOdptJourneyCount": qa_report["summary"]["unmatchedOdptJourneyCount"],
+                      "diagnosticSeverity": qa_report["summary"]["diagnosticSeverity"],
+                      "stationDateResolution": [{"stationId": d["stationId"], "serviceDate": d["serviceDate"],
+                                                 "resolution": d["resolution"]} for d in qa_report["dayResults"]],
                       "generationDigest": qa_report["generationDigest"],
                       "generatorFingerprint": qa_report["generatorFingerprint"]},
             "generatorFingerprint": _source_generator_fingerprint(),

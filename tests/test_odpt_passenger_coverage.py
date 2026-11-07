@@ -33,7 +33,7 @@ class PassengerCoverageTests(unittest.TestCase):
     def row(self, **kwargs):
         values = dict(route_id="9", primary_itinerary=object(), direct_alternative=None,
                       best_transfer_alternative=None, data_quality=[],
-                      odpt=NS(status="unmatched", match_reason="destination_has_no_independent_gtfs_crosswalk"))
+                      odpt=NS(status="unmatched", match_reason="destination_has_no_independent_gtfs_crosswalk", passenger_match_verified=True))
         values.update(kwargs)
         return NS(**values)
 
@@ -104,6 +104,7 @@ class PassengerCoverageTests(unittest.TestCase):
         r = self.row(primary_itinerary=None, origin_boarding_prohibited_rule=
                      "s_train_saturday_holiday_seibu_bound_ikebukuro_alight_only",
                      data_quality=["kotake_alighting_prohibited", "origin_boarding_prohibited_official_rule"])
+        r.odpt = NS(status="unmatched", match_reason="no_route_calendar_number_and_exact_departure_candidate")
         self.assertTrue(_classify_diagnostics(r)["WARNING"])
         self.assertEqual(self.state(r), "complete")
         r.data_quality.append("destination_stop_record_ambiguous")

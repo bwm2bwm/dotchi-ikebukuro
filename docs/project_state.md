@@ -80,3 +80,6 @@ Phase 2D-3B: 2026-11-07に公式API仕様PDF pp. 7–10、API補足pp. 1/6、東
 Phase 2D-3C: 既存manual fetchへ通信なしplanと保存先/固定source/retry履歴の確認値、fetch/retry両方の明示許可経路を実装。許可後だけ環境providerを接続し、不正credentialは通信前に拒否。JSONの非空/@type/識別子/operator/指定railway検査を成功記録前・raw確定前に追加し、既存ZIP/TLS/HTTP/保存/retry/評価を再利用。承認状態・strict schemaは維持。テストはdummy/mockのみで、ライブ許可contextは発動せず、許可後のdispatch/native adapterをmock化して検証。実通信・実キーの使用なし。
 
 2026-11-07 route9 coverage修正: 旅客利用可否とODPT照合品質を限定的に分離。利用者確認済みの土休日西武方面S-TRAIN池袋降車専用ルールを、rawの路線/日種/方向/種別/行先/一意番号/到着時刻/小竹向原乗降不可で絞って適用。対象行・未照合・WARNINGを保持しつつ乗車不可として候補から除く。独立行先crosswalk欠落だけの未照合は、有効旅程または明示通過がある場合に旅客coverageを阻害しない。未知/衝突/独立WARNINGとvalidatorのfail-closedを維持。根拠と限定条件はresearch、QA結果はdevlogを参照。公開承認・適用期間・外部通信・原本/storeは変更しない。
+
+2026-11-07 ODPT-0ゲート修正: route9の証拠判定をQAと共有し、A/B解決区分とC/D阻害区分を追加。QA status=WARNING、原診断・未照合数を維持し、scope/fingerprint/全route complete/構造FAIL=0/未解決=0/駅日別と原数の算術一致で非公開候補生成を判定する。manifestに原集計・駅日別解決根拠を保存し再検証する。公開承認・適用期間は未設定。検証結果と保存先はdevlog参照。
+非公開候補生成とbundle validator PASS（11/6〜8、8駅、9,576候補、48路線日complete）。QA status=WARNING、原未照合/原WARNINGは各96のままA48/B48/未解決0。回帰149件とDOM 176セル/1,936 checks PASS。候補/元QAレポートのprivate保存先はdevlogに記録。鮮度・版/適用期間・公開資格と公開承認は未確定。
