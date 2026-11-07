@@ -22,6 +22,7 @@ else:
     from odpt_source_store import _safe_new_store_path, PRIVATE_MODE, FILE_MODE, _safe_existing_store_path, _load_json_object, _json_bytes
 
 LIVE_TRANSPORT_ENABLED = False
+TRANSPORT_MODES = frozenset({'offline-injected', 'live-https'})
 ENDPOINT_IDS = {s: "odpt-" + s.replace(".", "-") for s in SOURCE_IDS}
 MAX_RESPONSE_BYTES = MAX_SOURCE_BYTES
 
@@ -64,6 +65,25 @@ class FetchError(ValueError):
     """Only fixed codes may cross the transport boundary."""
 
 
+def _require_live_policy():
+    """Deliberate code-level stop until official endpoints and live use are approved.
+
+    Neither LIVE_TRANSPORT_ENABLED nor CLI options can bypass this stop.
+    """
+    raise FetchError('live_transport_disabled')
+
+
+def _transport_mode(exchange):
+    if exchange is None:
+        _require_live_policy()
+        if not LIVE_TRANSPORT_ENABLED:
+            raise FetchError('live_transport_disabled')
+        return 'live-https'
+    if not callable(exchange):
+        raise FetchError('exchange_invalid')
+    return 'offline-injected'
+
+
 def endpoint(source_id):
     if source_id not in SOURCE_IDS:
         raise FetchError("source_id_invalid")
@@ -79,6 +99,7 @@ def endpoint(source_id):
 
 def _https_exchange(url):
     """Real adapter has two timeouts; CLI and adapter both forbid live use."""
+    _require_live_policy()
     if not LIVE_TRANSPORT_ENABLED:
         raise FetchError("live_transport_disabled")
     parsed = urlsplit(url)
@@ -109,8 +130,7 @@ def env_credential():
 
 def transport(source_id, credential_provider, exchange=None):
     """Injected exchange must return status/getheader/read/close; no auto retry."""
-    if exchange is None and not LIVE_TRANSPORT_ENABLED:
-        raise FetchError("live_transport_disabled")
+    _transport_mode(exchange)  # Deny before reading a credential.
     responses = []
     try:
         secret = credential_provider()
@@ -206,16 +226,39 @@ def _read_json(path):
     return _load_json_object(path)
 
 
-def new_batch(path):
+def validate_batch(batch):
+    """Auxiliary envelope v1 stays offline-only; v2 also describes future live data."""
+    if (not isinstance(batch, dict) or set(batch) != {'contract', 'schemaVersion', 'batchId',
+            'provenance', 'applicationPeriod', 'publicationApproved'}
+            or batch['contract'] != 'odpt-manual-fetch-batch'
+            or type(batch['schemaVersion']) is not int or batch['schemaVersion'] not in (1, 2)
+            or batch['publicationApproved'] is not False or batch['applicationPeriod'] is not None):
+        raise FetchError('batch_invalid')
+    try:
+        if str(uuid.UUID(batch['batchId'])) != batch['batchId']:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        raise FetchError('batch_id_invalid') from None
+    provenance = batch['provenance']
+    if (not isinstance(provenance, dict) or set(provenance) != {'transport', 'retrievedAt'}
+            or not isinstance(provenance['transport'], str) or provenance['transport'] not in TRANSPORT_MODES
+            or provenance['retrievedAt'] is not None
+            or (batch['schemaVersion'] == 1 and provenance['transport'] != 'offline-injected')):
+        raise FetchError('provenance_invalid')
+    return provenance['transport']
+
+
+def new_batch(path, *, transport_mode='offline-injected'):
+    batch = {'batchId': str(uuid.uuid4()), 'contract': 'odpt-manual-fetch-batch', 'schemaVersion': 2,
+             'provenance': {'transport': transport_mode, 'retrievedAt': None},
+             'applicationPeriod': None, 'publicationApproved': False}
+    validate_batch(batch)
     root = _safe_new_store_path(path)
     root.mkdir(mode=PRIVATE_MODE)
     os.chmod(root, PRIVATE_MODE)
     for name in ("raw", "attempts"):
         (root / name).mkdir(mode=PRIVATE_MODE)
-    _save(root, "batch.json", _json_bytes({"batchId": str(uuid.uuid4()),
-          "contract": "odpt-manual-fetch-batch", "schemaVersion": 1,
-          "provenance": {"transport": "offline-injected", "retrievedAt": None},
-          "applicationPeriod": None, "publicationApproved": False}))
+    _save(root, "batch.json", _json_bytes(batch))
     return root
 
 
@@ -233,9 +276,7 @@ def _locked(path):
 
 def history(root):
     batch = _read_json(root / "batch.json")
-    if (batch.get("contract") != "odpt-manual-fetch-batch" or batch.get("publicationApproved") is not False
-            or batch.get("applicationPeriod") is not None):
-        raise FetchError("batch_invalid")
+    validate_batch(batch)
     attempts = _safe_existing_store_path(root / "attempts")
     records = []
     for directory in sorted(attempts.iterdir()):
@@ -250,7 +291,7 @@ def history(root):
             raise FetchError("history_invalid")
         if (directory / "result.json").exists():
             evidence = _read_json(directory / "evidence.json")
-            if evidence != evidence_for(rec): raise FetchError("evidence_invalid")
+            if evidence != evidence_for(rec, batch): raise FetchError("evidence_invalid")
         records.append(rec)
     by_attempt = {r["attemptId"]: r for r in records}
     if len(by_attempt) != len(records) or len({r["recordId"] for r in records}) != len(records):
@@ -270,22 +311,27 @@ def history(root):
     return batch, records
 
 
-def evidence_for(rec):
+def evidence_for(rec, batch=None):
+    # The default is only for reading the original v1 offline evidence format.
+    mode = validate_batch(batch) if batch is not None else 'offline-injected'
     base, filters = endpoint(rec["sourceId"])
-    return {"contract": "odpt-fetch-evidence", "schemaVersion": 1,
+    return {"contract": "odpt-fetch-evidence", "schemaVersion": batch['schemaVersion'] if batch else 1,
             "batchId": rec["batchId"], "attemptId": rec["attemptId"], "sourceId": rec["sourceId"],
             "endpointId": ENDPOINT_IDS[rec["sourceId"]], "host": "api.odpt.org",
             "path": urlsplit(base).path, "filters": filters, "selector": None,
-            "selectorStatus": "not-used-unconfirmed", "transport": "offline-injected",
+            "selectorStatus": "not-used-unconfirmed", "transport": mode,
             "outcome": rec["outcome"], "errorCode": rec["errorCode"]}
 
 
 def acquire(path, source_id, credential_provider, *, exchange=None):
     """One manual attempt. Retry follows only the latest failed/interrupted attempt."""
     if source_id not in SOURCE_IDS: raise FetchError("source_id_invalid")
+    mode = _transport_mode(exchange)
     with _locked(path) as root:
         if (root / "snapshot.json").exists() or (root / "snapshot.json").is_symlink(): raise FetchError("batch_sealed")
         batch, records = history(root)
+        if mode != batch['provenance']['transport']:
+            raise FetchError('transport_provenance_mismatch')
         prior = [r for r in records if r["sourceId"] == source_id]
         # A retry chain, not wall clock order, determines the latest record.
         parents = {r["retryOfAttemptId"] for r in prior}
@@ -315,7 +361,7 @@ def acquire(path, source_id, credential_provider, *, exchange=None):
         except KeyboardInterrupt as exc:
             if getattr(exc, "responses", None): start["http"] = {"responses": exc.responses}
             validate_source_record(start)
-            _save(directory, "evidence.json", _json_bytes(evidence_for(start)))
+            _save(directory, "evidence.json", _json_bytes(evidence_for(start, batch)))
             _save(directory, "result.json", _json_bytes(start))
             return start
         except Exception as exc:
@@ -324,7 +370,7 @@ def acquire(path, source_id, credential_provider, *, exchange=None):
             observed = getattr(exc, "responses", None) or responses
             if observed: rec["http"] = {"responses": observed}
         validate_source_record(rec)
-        _save(directory, "evidence.json", _json_bytes(evidence_for(rec)))
+        _save(directory, "evidence.json", _json_bytes(evidence_for(rec, batch)))
         if rec["outcome"] == "succeeded":
             # History result is durable only after raw is durable. Orphan raw blocks retries.
             _save(root / "raw", SOURCE_FILES[source_id], raw)
@@ -332,27 +378,86 @@ def acquire(path, source_id, credential_provider, *, exchange=None):
         return rec
 
 
+def _verify_raw(root, records, batch):
+    # No raw copies. Stable read applies JSON/GTFS validation and inode checks.
+    _safe_existing_store_path(root / "raw")
+    for rec in records:
+        if rec["outcome"] != "succeeded": continue
+        raw, metadata = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
+        artifact = rec["artifact"]
+        if (hashlib.sha256(raw).hexdigest() != artifact["sha256"] or len(raw) != artifact["sizeBytes"]
+                or metadata != rec["metadata"] or rec["batchId"] != batch["batchId"]):
+            raise FetchError("raw_mismatch")
+    # A second pass catches changes to early files during later parsing.
+    for rec in records:
+        if rec["outcome"] != "succeeded": continue
+        raw, _ = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
+        if (hashlib.sha256(raw).hexdigest(), len(raw)) != (rec["artifact"]["sha256"], rec["artifact"]["sizeBytes"]):
+            raise FetchError("raw_changed_during_finalization")
+
+
 def finalize(path):
     with _locked(path) as root:
         batch, records = history(root)
         snapshot = create_fetch_snapshot(records)
-        # No raw copies. Stable read applies JSON/GTFS validation and inode checks.
-        _safe_existing_store_path(root / "raw")
-        for rec in records:
-            if rec["outcome"] != "succeeded": continue
-            raw, metadata = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
-            artifact = rec["artifact"]
-            if (hashlib.sha256(raw).hexdigest() != artifact["sha256"] or len(raw) != artifact["sizeBytes"]
-                    or metadata != rec["metadata"] or rec["batchId"] != batch["batchId"]):
-                raise FetchError("raw_mismatch")
-        # A second pass catches changes to early files during later parsing.
-        for rec in records:
-            if rec["outcome"] != "succeeded": continue
-            raw, _ = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
-            if (hashlib.sha256(raw).hexdigest(), len(raw)) != (rec["artifact"]["sha256"], rec["artifact"]["sizeBytes"]):
-                raise FetchError("raw_changed_during_finalization")
+        _verify_raw(root, records, batch)
         _save(root, "snapshot.json", _json_bytes(snapshot))
         return snapshot
+
+
+def run_fetch(path, credential_provider, *, exchange=None, retry_source=None):
+    """Fixed seven-source driver. Only explicit retry may reopen an unfinished batch.
+
+    Dependency injection is a Python test seam, never a CLI transport/URL option.
+    """
+    mode = _transport_mode(exchange)  # Never read secrets/create a batch while live is prohibited.
+    if not callable(credential_provider):
+        raise FetchError('credential_provider_required')
+    order = list(SOURCE_FILES)
+    if retry_source is None:
+        root = new_batch(path, transport_mode=mode)
+        pending = order
+    else:
+        if retry_source not in SOURCE_IDS:
+            raise FetchError('source_id_invalid')
+        with _locked(path) as root:
+            if (root / 'snapshot.json').exists() or (root / 'snapshot.json').is_symlink():
+                raise FetchError('batch_sealed')
+            batch, records = history(root)
+            if validate_batch(batch) != mode:
+                raise FetchError('transport_provenance_mismatch')
+            latest = {}
+            for sid in order:
+                chain = [r for r in records if r['sourceId'] == sid]
+                if not chain:
+                    continue
+                children = [r['retryOfAttemptId'] for r in chain if r['retryOfAttemptId'] is not None]
+                roots = [r for r in chain if r['retryOfAttemptId'] is None]
+                leaves = [r for r in chain if r['attemptId'] not in children]
+                if len(roots) != 1 or len(children) != len(set(children)) or len(leaves) != 1:
+                    raise FetchError('retry_chain_invalid')
+                latest[sid] = leaves[0]
+            unattempted = [sid for sid in order if sid not in latest]
+            target = latest.get(retry_source)
+            # A process may stop between attempts, leaving no failed record for the next source.
+            # Explicit continuation starts that source's first attempt; never invent a retry parent.
+            if ((target is not None and target['outcome'] not in ('failed', 'interrupted'))
+                    or (target is None and (not unattempted or retry_source != unattempted[0]))
+                    or any(r['outcome'] != 'succeeded' for sid, r in latest.items() if sid != retry_source)):
+                raise FetchError('explicit_retry_target_invalid')
+            _verify_raw(root, records, batch)  # Do not continue a batch whose earlier successes changed.
+            pending = [retry_source] + [sid for sid in unattempted if sid != retry_source]
+    attempted = []
+    for sid in pending:
+        rec = acquire(root, sid, credential_provider, exchange=exchange)
+        attempted.append(sid)
+        if rec['outcome'] != 'succeeded':
+            return {'driverStatus': 'stopped', 'stoppedSourceId': sid, 'outcome': rec['outcome'],
+                    'attemptedSourceIds': attempted, 'snapshotCreated': False,
+                    'publicationApproved': False, 'applicationPeriod': None}
+    finalize(root)  # Seven unique successes, full history and unchanged raw are mandatory.
+    return {'driverStatus': 'complete', 'attemptedSourceIds': attempted, 'snapshotCreated': True,
+            'publicationApproved': False, 'applicationPeriod': None}
 
 
 def capture_mock_batch(batch_path, responses):
@@ -383,21 +488,28 @@ class SafeArgumentParser(argparse.ArgumentParser):
         self.exit(2, "cli_arguments_invalid\n")
 
 
-def main(argv=None):
+def main(argv=None, *, exchange=None, credential_provider=None):
     parser = SafeArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     live = commands.add_parser("fetch", help="live fetch is disabled")
     live.add_argument("--batch", type=Path, required=True)
     live.add_argument("--enable-live-transport", action="store_true", help="reserved; cannot enable communication")
+    retry = commands.add_parser("retry", help="explicit retry of one failed/interrupted source, then remaining unattempted sources")
+    retry.add_argument("--batch", type=Path, required=True)
+    retry.add_argument("--source", choices=sorted(SOURCE_IDS), required=True)
     commands.add_parser("help-offline", help="show offline transport status")
     for name in ("init", "inspect", "finalize"):
         command = commands.add_parser(name, help="local batch operation only")
         command.add_argument("--batch", type=Path, required=True)
     args = parser.parse_args(argv)
-    if args.command == "fetch":
-        print("live_transport_disabled", file=sys.stderr)
-        return 2
     try:
+        if args.command in ('fetch', 'retry'):
+            if getattr(args, 'enable_live_transport', False):
+                raise FetchError('live_transport_disabled')
+            result = run_fetch(args.batch, credential_provider, exchange=exchange,
+                               retry_source=args.source if args.command == 'retry' else None)
+            print(json.dumps(result, sort_keys=True))
+            return 0 if result['driverStatus'] == 'complete' else 2
         if args.command == "help-offline":
             print("live_transport=disabled; offline tests only")
         elif args.command == "init":
@@ -411,6 +523,9 @@ def main(argv=None):
                 _, records = history(root)
                 print("attempts=" + str(len(records)) + "; succeeded=" + str(sum(r["outcome"] == "succeeded" for r in records)))
         return 0
+    except KeyboardInterrupt:
+        print("local_batch_operation_interrupted", file=sys.stderr)
+        return 2
     except Exception:
         # Do not expose paths, exceptions, malformed metadata or credentials.
         print("local_batch_operation_failed", file=sys.stderr)

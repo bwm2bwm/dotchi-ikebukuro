@@ -1077,3 +1077,13 @@
 - 2D-3へは公式endpoint/selector・改正切替・期間/鮮度/版整合の根拠と、明示的に許可された隔離取得が必要。ライブ通信は無効のまま。異世代実Snapshot、実ブラウザー描画/HTTP、公開資格は未評価。既存実原本/storeは操作・コピーせず、テストの一時合成fixtureだけを使用。実原本の開始前後hash計測は実施していない。Cloudflare/公開配信/広告変更、APIアクセス、新実取得、Commit/Push/Merge/Deployなし。
 - 最終版の新規接続テスト11件PASS（113.284秒、関連回帰と並行実行）。CLI help確認とgit diff --checkもPASS。実generatorの2C接続は旧新とも同じ固定contextでDOM complete、入力treeのhash/inode/mtime不変を確認。
 - 関連一括回帰271件PASS（893.703秒、新規接続8件を含む開始時のsuite）。対象はmanual fetch、Source/Snapshot、2A/2B、品質入力/基本/詳細/差分、表示context/metrics/diff/state、DOM collector。最終版の追加3条件を含む接続11件は上記の別runで全PASS。一括runと新規runには重複がある。テスト中に仕様変更や実通信有効化は行わない。
+
+## 2026-11-07 — ODPT Phase 2D-3A ライブCLI最小配線・オフライン検証
+
+- 開始main / `c07394dc2c8df777f9318e5102a4e5062f4a98fe`、status clean。Phase 2D-2B反映と2D-3調査結果を既存コードへ照合した。
+- 既存manual fetchへ固定7 sourceの`run_fetch()`とCLI fetch/retry接続を追加。新規先必須・最初の失敗/中断で停止・明示対象retry・成功raw再照合・7成功後だけSnapshot確定。既存HTTP/TLS/timeout/redirect/サイズ制約を再利用し、自動retryや評価engineを追加しない。
+- 実行間にプロセスが止まると次sourceのattemptがない具体的な条件を確認した。最初の未試行sourceを明示して続行する最小対応とし、その場合はretry親を捏造しない。保存失敗で孤立raw/壊れた履歴がある場合は上書きせず停止する。
+- 補助batch/evidence v2でoffline/mockと将来liveを区別し、旧v1 offlineを保持。provenance検証をhistoryと評価adapterで共有し、unknown/mixed/不正version/不正日時をfail-closed。Source/Snapshot strict schemaは未変更。mock取得をliveと記録せず、live形式の合成fixtureは既存2A/2B/2Cで評価した。外部の真正性や実取得成功を証明するものではない。
+- CLI/transport/native adapterの実通信は`_require_live_policy()`のコード停止を維持。定数変更・通常optionだけでは解除できず、通常CLIはprovider読込/保存先作成より前に拒否する。実APIキーの環境設定・読込・使用なし。許可されたendpoint/configと明示取得許可は別工程で必要。
+- 最終関連120件PASS（144.428秒）：manual fetch 33件（新規13＋既存20）、取得評価11件、Source/Snapshot契約・inventory/store/2A、統合semantics/GTFS loader、quality inputの回帰。正常7件、CLI接続、最初のHTTP/timeout/中断停止、retry/履歴保持、未完了・raw改変、offline/live区別・旧v1互換・不正provenance、秘密非出力、定数/option/通常CLIの通信拒否、承認状態不変を確認。TLS adapterテストもHTTPSConnectionをmock化し、外部通信なし。実generator→v2→board→DOMは合成既知0候補の範囲であり実ダイヤ品質は未評価。
+- README、project_state、research、本履歴とmanual fetch/評価adapter/既存manual fetch testの7ファイルを変更。help-offline/help、git diff --check PASS。既存実原本7件/storeは操作・コピーせず、合成fixtureだけを使用。実原本の前後hash計測は未実施。実アクセス・実取得・Cloudflare/公開builder/runtime/広告変更、Commit/Push/Merge/Deployなし。

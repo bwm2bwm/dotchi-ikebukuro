@@ -43,11 +43,8 @@ def load_fetch_batch(path):
             snapshot = fetch._read_json(root / 'snapshot.json')
             before = _files(root)
             batch, attempts = fetch.history(root)
-            if (set(batch) != {'contract', 'schemaVersion', 'batchId', 'provenance', 'applicationPeriod', 'publicationApproved'}
-                    or type(batch['schemaVersion']) is not int or batch['schemaVersion'] != 1
-                    or batch['provenance'] != {'transport': 'offline-injected', 'retrievedAt': None}
-                    or batch['publicationApproved'] is not False
-                    or batch['applicationPeriod'] is not None or snapshot['mode'] != 'fetch'
+            # history() enforces the versioned provenance and approval envelope.
+            if (snapshot['mode'] != 'fetch'
                     or snapshot['batchId'] != batch['batchId']
                     or snapshot['crossSourceConsistency'] != 'not-evaluated'):
                 raise StoreError('fetch_batch_state_invalid')

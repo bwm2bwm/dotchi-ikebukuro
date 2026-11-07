@@ -1499,3 +1499,16 @@ CLIの実通信は常時終了2で、実adapterにも通信無効guardがある�
 結果はメモリのみ、CLIは状態とscopeだけを出す。終了0も公開資格・鮮度・同一ダイヤ版性を意味しない。終了2は失敗・比較不能またはpartial。raw/旅程本文・field値・秘密・local pathをCLI結果へ出さない。batchのpublicationApproved=false/applicationPeriod=nullとSnapshotのcrossSourceConsistency=not-evaluatedを要求・維持する。生の評価APIの結果は非公開QA専用であり、公開物に含めない。
 
 実APIアクセス、新規実取得、実異世代Snapshot、実ブラウザー/CSS/HTTP/CSP/cache、公開承認・適用期間・ダイヤ版根拠の審査は行わない。2D-3では公式取得先/認証/selector・切替時点を確認し、別途許可された隔離取得と鮮度/期間/版整合の根拠を揃える。ライブ通信は引き続き無効。
+
+## ODPT-2D-3A ライブCLIの最小配線とオフライン検証
+
+2D-3の調査結果を既存実装へ照合した。通常CLIが無条件停止する点、provenance/evidenceと評価adapterがoffline固定である点を、本節の範囲で修正する。外部通信による仕様照合や実取得は実施しない。
+
+- `run_fetch()`は既存`new_batch/acquire/finalize`とHTTP transportを使い、固定7 sourceの新規batchを取得するdriver。各結果を確認して最初の失敗/中断で停止し、不完全なSnapshotを確定しない。正常時だけ既存二巡raw照合とstrict Snapshot検証を行う。raw再照合処理をhelperへ共通化した。
+- `fetch`/`retry` CLIはdriverへ配線し、Pythonテスト引数のexchange/providerでmock検証できる。通常の実行はprovider読込・保存先作成より前に停止する。実adapterとtransportの入口には常に拒否する`_require_live_policy()`を置き、既存定数の変更や通常flagだけでは通信できない。任意のURLやtransportをCLIから指定できない。環境providerは未接続、実キーは未読取・未使用。
+- `retry --source`は対象の失敗/中断を新attemptで再試行し、残る未試行sourceへ進む。過去の成功rawを再照合し、成功sourceを再取得しない。取得間にプロセスが止まると次sourceのattempt自体がないため、最初の未試行sourceを明示した続行も許可する。その最初のattemptに偽のretry親を付けない。他の失敗sourceが残る場合や対象が成功済みなら停止。保存失敗で孤立raw/壊れたhistoryが残る場合の自動修復は行わない。
+- 補助batch/evidence v2は`offline-injected`と将来の`live-https`を区別。既存v1はofflineのみ受理する。`validate_batch`をhistory/adapterで共有し、schema version・exact fields・UUID・provenance・承認状態を検査。evidenceはbatchのversion/transportとの完全一致を要求する。実際のacquireは注入exchangeならofflineを要求し、labelを利用者optionでliveへ変更できない。新規v2のlive形式は将来のnative transport用であり、現在native transportはpolicy停止で到達不能。
+- Source/Snapshot strict schemaは変更しない。snapshotId/contentFingerprintと来歴の意味を維持し、日時は従来どおりSourceのstarted/finished/retrievedAtに保持する。batchのretrievedAt=nullは従来の集約未設定であり、取得時刻を補完/捏造しない。publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluatedを維持する。
+- live形式はテスト内の合成履歴として構成し、全retry/strict契約・hash/bytes・2A/2B/2Cを実adapterで検証する。これはprovenanceの整合性検査であり、手編集された記録の外部真正性や実取得成功の証明ではない。署名基盤などは追加しない。
+
+取得先は既存`endpoint()`の固定7 sourceだけ。operator/railway filter、GTFS file pathと認証queryは既存値を維持し、未確認のdate selectorやページングを追加しない。TLS/timeout/status/MIME/redirect/サイズ/秘密非出力の既存制約を再利用する。現行値を公式確認済みと扱わない。次工程では公式URL・認証・filter・date省略時の扱い・全件取得条件を照合し、対象/保存先/通信範囲の明示許可と、policy停止の別途レビュー付き変更を経る。旧取得script、既存実原本/store、公開経路は使用・変更しない。

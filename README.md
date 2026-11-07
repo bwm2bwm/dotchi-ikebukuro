@@ -35,15 +35,17 @@ find local_data/odpt -maxdepth 1 -type f -print
 
 取得スクリプトは対象JSONを最大6リクエストでローカル保存します。`local_data/odpt/` はGit管理対象外です。GTFSのCKAN配布URL・認証条件は未確認のため自動ダウンロードしません。入手済みZIPを同フォルダに置くと解析対象になります。解析結果はターミナルに表示され、データ未配置時に実データ結果を作りません。
 
-### Phase 2D-2A 非公開の手動取得基盤（実通信無効）
+### Phase 2D-3A 手動取得driver・CLI（実通信禁止）
 
-`python3 -B scripts/odpt_manual_fetch.py help-offline` で通信無効を確認できます。`fetch --batch <絶対path>` は常に終了2となり、`--enable-live-transport`でも通信しません。実秘密値をCLI引数へ渡さないでください。実取得先・selectorの公式確認と明示的な実取得許可は未成立です。
+`python3 -B scripts/odpt_manual_fetch.py help-offline` で通信無効を確認できます。通常の `fetch --batch <新規絶対path>` と `retry --batch <未完了batch> --source <固定sourceId>` は実通信を拒否して終了2となり、認証情報を読みません。`--enable-live-transport`も通信を許可しません。単なる定数変更では解除できないコード上のpolicy停止を維持しています。実取得先・selectorの公式確認と人による取得許可を得た別工程でのみ、実通信の配線を変更します。
 
-ローカル操作は `init --batch <新規の非公開絶対path>`、`inspect --batch <batch>`、`finalize --batch <batch>`。親directoryは事前に用意し、repository/公開風path/preview/QA出力先やsymlink経路は使えません。`init`は空バッチを作るだけで取得しません。空・未完了バッチの`finalize`は終了2です。既存raw/storeを入力に指定しないでください。
+CLIのdriver接続はPythonのテスト入口 `main(argv, exchange=mock, credential_provider=dummy_provider)` で検証できます。CLIからmockコードやURL、秘密値を指定する機能はありません。`run_fetch()`は新規非公開batchを作り、固定順（Railway、Station、TrainTimetable有楽町/副都心、StationTimetable有楽町/副都心、GTFS）で取得します。最初の失敗/中断で止まり、7件が成功してraw再照合できた場合だけSnapshotを確定します。自動retryなし。
 
-Python API `acquire(batch, sourceId, credential_provider, exchange=mock)` は1回の手動attempt、同sourceへの再呼出は失敗・中断後だけretryを記録します。`capture_mock_batch()`も同じtransport/journalを使います。テストは `python3 -m unittest tests.test_odpt_manual_fetch`。実環境の認証注入用`env_credential()`は環境変数`ODPT_API_KEY`だけを読む関数ですが、現在のCLIはこれを呼びません。`.env.local`は読みません。
+明示的な `retry --source` は過去の成功rawを再照合し、対象の失敗/中断attemptへ新attemptをつないで、残る未試行sourceを順に取得する設計です。取得間のプロセス停止で次sourceにattemptがない場合は、最初の未試行sourceを明示して続行し、retry親を捏造しません。成功sourceの再取得・既存raw上書き・履歴削除は拒否します。これらのCLIも通常実行では通信禁止です。
 
-rawは再整形せず保存し、attempt別の開始記録・結果・補助証拠を0700/0600で保持します。Snapshot確定前に全7件を再読・再検証します。保存失敗後の孤立rawや壊れた履歴は上書きで修復せず停止し、別途調査してください。`publicationApproved=false`、`applicationPeriod=null`、ダイヤ版整合`not-evaluated`を維持します。Phase 2A〜2Cとの評価接続は下記2D-2Bの入口を使います。
+ローカル操作は `init --batch <新規の非公開絶対path>`、`inspect --batch <batch>`、`finalize --batch <batch>`。`fetch`自体が新規先を要求するため、`init`で作った同じ先へ`fetch`を実行する手順ではありません。repository/公開風path/preview/QA出力先やsymlink経路は使えません。保存失敗後の孤立rawや壊れた履歴は上書きせず調査します。
+
+補助batch/evidenceの新形式はschemaVersion 2で、mockの`offline-injected`と将来の`live-https`を区別します。mock取得は必ずoffline記録となり、live batchへmockを追記できません。従来v1 offline記録も読み取れます。Source/Snapshot strict schemaは変更せず、公開承認false・適用期間null・版整合not-evaluatedを維持します。実APIキーは使用せず、`env_credential()`も通常CLIから呼びません。テストは `python3 -m unittest tests.test_odpt_manual_fetch tests.test_odpt_fetch_evaluate`（合成データとmockのみ）。
 
 ### Phase 2D-2B オフライン評価入口
 

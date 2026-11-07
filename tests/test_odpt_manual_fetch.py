@@ -153,7 +153,7 @@ class TransportAndHistoryTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()),[])
     def test_transport_tls_verification_and_two_timeouts(self):
         # No real socket: the HTTPSConnection adapter is replaced in its entirety.
-        with patch.object(fetch,'LIVE_TRANSPORT_ENABLED',True),patch.object(fetch.http.client,'HTTPSConnection') as conn:
+        with patch.object(fetch,'_require_live_policy'),patch.object(fetch,'LIVE_TRANSPORT_ENABLED',True),patch.object(fetch.http.client,'HTTPSConnection') as conn:
             conn.return_value.getresponse.return_value=Response()
             response=fetch._https_exchange('https://api.odpt.org/api/v4/odpt:Station')
             kwargs=conn.call_args.kwargs
@@ -190,5 +190,194 @@ class TransportAndHistoryTests(unittest.TestCase):
         with patch.object(fetch,'_stable_read',side_effect=mutate):
             with self.assertRaises(Exception):fetch.finalize(good)
         self.assertFalse((good/'snapshot.json').exists())
+
+
+
+
+class DriverAndProvenanceTests(unittest.TestCase):
+    setUp = ManualFetchTests.setUp
+    tearDown = ManualFetchTests.tearDown
+
+    def exchange(self, calls, fail_sid=None, failure=None):
+        from urllib.parse import urlsplit, parse_qs
+        def send(url):
+            parsed=urlsplit(url); params=parse_qs(parsed.query)
+            self.assertEqual(params.pop('acl:consumerKey'), ['DUMMY-DRIVER-KEY'])
+            found=[]
+            for sid in contract.SOURCE_FILES:
+                base, filters=fetch.endpoint(sid)
+                if parsed.path==urlsplit(base).path and params=={k:[v] for k,v in filters.items()}:found.append(sid)
+            self.assertEqual(len(found),1);sid=found[0];calls.append(sid)
+            self.assertNotIn('date',params)
+            if sid==fail_sid:
+                if isinstance(failure, BaseException):raise failure
+                return Response(status=failure or 500)
+            status,ctype,body=self.responses[sid]
+            return Response(status,body,ctype)
+        return send
+
+    def run_cli(self, path, calls, *, command='fetch', source=None, fail_sid=None, failure=None):
+        args=[command,'--batch',str(path)]
+        if source:args+=['--source',source]
+        stdout=io.StringIO();stderr=io.StringIO()
+        with contextlib.redirect_stdout(stdout),contextlib.redirect_stderr(stderr):
+            code=fetch.main(args,exchange=self.exchange(calls,fail_sid,failure),credential_provider=lambda:'DUMMY-DRIVER-KEY')
+        for value in (stdout.getvalue(),stderr.getvalue()):
+            self.assertNotIn('DUMMY-DRIVER-KEY',value);self.assertNotIn(str(self.parent),value)
+        return code,stdout.getvalue(),stderr.getvalue()
+
+    def tree(self, root):
+        return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}
+
+    def test_cli_calls_fixed_seven_driver_and_finalizes_without_reformatting(self):
+        from scripts import odpt_evaluation_input as adapter
+        root=self.parent/'batch';calls=[]
+        code,out,err=self.run_cli(root,calls)
+        self.assertEqual(code,0);self.assertFalse(err);self.assertEqual(calls,list(contract.SOURCE_FILES))
+        self.assertEqual(json.loads(out)['driverStatus'],'complete')
+        loaded=adapter.load_fetch_batch(root);self.assertEqual(len(loaded['records']),7)
+        batch=fetch._read_json(root/'batch.json');self.assertEqual(batch['schemaVersion'],2)
+        self.assertEqual(batch['provenance']['transport'],'offline-injected')
+        self.assertIs(batch['publicationApproved'],False);self.assertIsNone(batch['applicationPeriod'])
+        self.assertEqual(loaded['snapshot']['crossSourceConsistency'],'not-evaluated')
+        for sid,name in contract.SOURCE_FILES.items():self.assertEqual((root/'raw'/name).read_bytes(),self.responses[sid][2])
+        before=self.tree(root);calls=[];code,_,_=self.run_cli(root,calls)
+        self.assertEqual(code,2);self.assertFalse(calls);self.assertEqual(before,self.tree(root))
+
+    def test_first_http_timeout_and_interrupt_stop_without_snapshot(self):
+        sid=list(contract.SOURCE_FILES)[2]
+        for index,failure in enumerate([403,500,TimeoutError('DUMMY-DRIVER-KEY'),KeyboardInterrupt()]):
+            root=self.parent/str(index);calls=[];code,_,_=self.run_cli(root,calls,fail_sid=sid,failure=failure)
+            self.assertEqual(code,2);self.assertEqual(calls,list(contract.SOURCE_FILES)[:3])
+            self.assertFalse((root/'snapshot.json').exists());batch,records=fetch.history(root)
+            self.assertEqual(len(records),3)
+            failed=next(r for r in records if r['sourceId']==sid)
+            self.assertEqual(failed['outcome'],'interrupted' if isinstance(failure,KeyboardInterrupt) else 'failed')
+            with self.assertRaises(Exception):fetch.finalize(root)
+
+    def test_manual_retry_preserves_all_old_records_and_only_fetches_missing(self):
+        for index,failure in enumerate([500,KeyboardInterrupt()]):
+            root=self.parent/str(index);failed=list(contract.SOURCE_FILES)[2];calls=[]
+            self.run_cli(root,calls,fail_sid=failed,failure=failure)
+            before=self.tree(root);old=next(r for r in fetch.history(root)[1] if r['sourceId']==failed)
+            calls=[];code,_,_=self.run_cli(root,calls,command='retry',source=failed)
+            self.assertEqual(code,0);self.assertEqual(calls,list(contract.SOURCE_FILES)[2:])
+            after=self.tree(root);self.assertTrue(all(after[k]==v for k,v in before.items()))
+            records=fetch.history(root)[1];self.assertEqual(len(records),8)
+            retry=next(r for r in records if r['sourceId']==failed and r['outcome']=='succeeded')
+            self.assertEqual(retry['retryOfAttemptId'],old['attemptId'])
+            contract.validate_snapshot(fetch._read_json(root/'snapshot.json'),records)
+
+    def test_retry_of_success_and_raw_corruption_stop_before_transport(self):
+        root=self.parent/'batch';first,failed=list(contract.SOURCE_FILES)[:2];calls=[]
+        self.run_cli(root,calls,fail_sid=failed)
+        before=self.tree(root);calls=[];code,_,_=self.run_cli(root,calls,command='retry',source=first)
+        self.assertEqual(code,2);self.assertFalse(calls);self.assertEqual(before,self.tree(root))
+        path=root/'raw'/contract.SOURCE_FILES[first];path.write_bytes(path.read_bytes()+b' ')
+        calls=[];code,_,_=self.run_cli(root,calls,command='retry',source=failed)
+        self.assertEqual(code,2);self.assertFalse(calls);self.assertFalse((root/'snapshot.json').exists())
+
+    def test_process_stop_between_attempts_can_continue_without_invented_parent(self):
+        root=self.parent/'between';calls=[];original=fetch.acquire
+        def stop_after_success(*args,**kwargs):
+            original(*args,**kwargs)
+            raise KeyboardInterrupt()
+        with patch.object(fetch,'acquire',side_effect=stop_after_success):
+            code,_,_=self.run_cli(root,calls)
+        self.assertEqual(code,2);self.assertEqual(len(fetch.history(root)[1]),1)
+        self.assertFalse((root/'snapshot.json').exists());before=self.tree(root)
+        calls=[];code,_,_=self.run_cli(root,calls,command='retry',source=list(contract.SOURCE_FILES)[1])
+        self.assertEqual(code,0);self.assertEqual(calls,list(contract.SOURCE_FILES)[1:])
+        after=self.tree(root);self.assertTrue(all(after[k]==v for k,v in before.items()))
+        self.assertTrue(all(r['retryOfAttemptId'] is None for r in fetch.history(root)[1]))
+
+    def test_incomplete_or_changed_body_cannot_be_finalized_by_driver(self):
+        root=self.parent/'batch';calls=[];exchange=self.exchange(calls)
+        def mutate(url):
+            response=exchange(url)
+            if calls[-1]=='metro.gtfs':
+                path=root/'raw'/'Station_all.json';path.write_bytes(path.read_bytes()+b' ')
+            return response
+        with self.assertRaises(fetch.FetchError):fetch.run_fetch(root,lambda:'DUMMY-DRIVER-KEY',exchange=mutate)
+        self.assertFalse((root/'snapshot.json').exists())
+
+    def test_constant_option_and_environment_cannot_enable_network(self):
+        root=self.parent/'blocked'
+        with patch.object(fetch,'LIVE_TRANSPORT_ENABLED',True),patch.object(fetch,'env_credential',side_effect=AssertionError('secret read')) as key,patch.object(fetch.http.client,'HTTPSConnection',side_effect=AssertionError('network')) as network:
+            for extra in ([],['--enable-live-transport']):
+                output=io.StringIO()
+                with contextlib.redirect_stderr(output):self.assertEqual(fetch.main(['fetch','--batch',str(root)]+extra),2)
+            with self.assertRaises(fetch.FetchError):fetch.transport('metro.station',fetch.env_credential)
+            with self.assertRaises(fetch.FetchError):fetch._https_exchange('https://api.odpt.org/api/v4/odpt:Station')
+            with self.assertRaises(fetch.FetchError):fetch.run_fetch(root,fetch.env_credential)
+            key.assert_not_called();network.assert_not_called();self.assertFalse(root.exists())
+
+    @staticmethod
+    def format_fixture(root, *, version=2, mode='live-https'):
+        # Synthetic future-live FORMAT only, never presented as an actual live fetch.
+        p=root/'batch.json';batch=fetch._read_json(p);batch['schemaVersion']=version
+        batch['provenance']['transport']=mode;p.write_text(json.dumps(batch))
+        for p in (root/'attempts').glob('*/evidence.json'):
+            evidence=fetch._read_json(p);evidence['schemaVersion']=version;evidence['transport']=mode;p.write_text(json.dumps(evidence))
+
+    def test_future_live_format_with_retry_passes_existing_2a_2b(self):
+        from tests.test_odpt_fetch_evaluate import FetchEvaluationTests, entry
+        helper=FetchEvaluationTests();helper.setUp();self.addCleanup(helper.doCleanups)
+        helper.batch_create(retry=True);self.format_fixture(helper.batch)
+        before=helper.digest_tree()
+        for stage in ('2a','2b'):
+            result=helper.run_stage(stage);self.assertFalse(result['publicationApproved']);self.assertIsNone(result['applicationPeriod'])
+        from scripts import odpt_evaluation_input as adapter
+        self.assertEqual(len(adapter.load_fetch_batch(helper.batch)['attemptRecords']),8)
+        self.assertEqual(before,helper.digest_tree())
+
+    def test_synthetic_future_live_format_runs_existing_phase2c_without_weakening_validation(self):
+        from tests.test_odpt_fetch_evaluate import FetchEvaluationTests
+        helper=FetchEvaluationTests();helper.setUp();self.addCleanup(helper.doCleanups)
+        original=fetch.capture_mock_batch
+        def fixture(path,responses):
+            result=original(path,responses)
+            self.format_fixture(path)
+            return result
+        # Only the generated fixture format is converted. The adapter/engines are real.
+        with patch.object(fetch,'capture_mock_batch',side_effect=fixture):
+            helper.test_phase2c_real_synthetic_generator_v2_board_and_dom()
+
+    def test_old_v1_offline_remains_readable_but_v1_live_is_rejected(self):
+        from scripts import odpt_evaluation_input as adapter
+        root=self.parent/'old';calls=[];self.run_cli(root,calls)
+        self.format_fixture(root,version=1,mode='offline-injected');adapter.load_fetch_batch(root)
+        self.format_fixture(root,version=1,mode='live-https')
+        with self.assertRaises(store.StoreError):adapter.load_fetch_batch(root)
+
+    def test_bad_or_mixed_provenance_is_fail_closed(self):
+        from scripts import odpt_evaluation_input as adapter
+        for index,case in enumerate(['unknown','mixed','time','extra','version']):
+            root=self.parent/str(index);self.run_cli(root,[])
+            p=root/'batch.json';batch=fetch._read_json(p)
+            if case=='unknown':batch['provenance']['transport']='unverified'
+            elif case=='mixed':
+                evidence_path=next((root/'attempts').glob('*/evidence.json'));evidence=fetch._read_json(evidence_path)
+                evidence['transport']='live-https';evidence_path.write_text(json.dumps(evidence))
+            elif case=='time':batch['provenance']['retrievedAt']='2026-01-01T00:00:00Z'
+            elif case=='extra':batch['provenance']['secret']='DUMMY-DRIVER-KEY'
+            else:batch['schemaVersion']=True
+            p.write_text(json.dumps(batch))
+            with self.assertRaises(store.StoreError):adapter.load_fetch_batch(root)
+
+    def test_mock_cannot_append_to_live_labeled_batch(self):
+        root=fetch.new_batch(self.parent/'future',transport_mode='live-https');before=self.tree(root)
+        exchange=self.exchange([])
+        with self.assertRaises(fetch.FetchError):fetch.acquire(root,'metro.station',lambda:'DUMMY-DRIVER-KEY',exchange=exchange)
+        self.assertEqual(before,self.tree(root))
+
+    def test_cli_protects_secrets_in_failure_and_argument_errors(self):
+        root=self.parent/'bad';calls=[]
+        code,out,err=self.run_cli(root,calls,fail_sid=list(contract.SOURCE_FILES)[0],failure=RuntimeError('DUMMY-DRIVER-KEY url headers'))
+        self.assertEqual(code,2)
+        for p in root.rglob('*'):
+            if p.is_file():self.assertNotIn(b'DUMMY-DRIVER-KEY',p.read_bytes())
+        self.assertNotIn('url headers',out+err)
+
 
 if __name__ == '__main__': unittest.main()
