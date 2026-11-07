@@ -188,17 +188,17 @@ class LocalFeedItineraryTests(unittest.TestCase):
     def test_phase35_transfer_destinations_keep_direct_and_transfer_metrics_separate(self):
         expected = {
             "Heiwadai": {"2026-10-22": (439, 435, 287, 417, 622, 148, 13, 0, 96),
-                         "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 3, 98),
-                         "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 3, 98)},
+                         "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 0, 98),
+                         "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 0, 98)},
             "ChikatetsuAkatsuka": {"2026-10-22": (439, 435, 287, 417, 622, 148, 13, 0, 96),
-                                   "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 3, 98),
-                                   "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 3, 98)},
+                                   "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 0, 98),
+                                   "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 0, 98)},
             "ChikatetsuNarimasu": {"2026-10-22": (439, 435, 287, 417, 622, 148, 13, 0, 96),
-                                   "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 3, 98),
-                                   "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 3, 98)},
+                                   "2026-10-24": (405, 396, 240, 366, 490, 156, 34, 0, 98),
+                                   "2026-11-03": (405, 396, 240, 366, 490, 156, 34, 0, 98)},
             "Wakoshi": {"2026-10-22": (439, 435, 300, 419, 635, 135, 0, 0, 83),
-                        "2026-10-24": (405, 397, 274, 378, 525, 123, 0, 3, 66),
-                        "2026-11-03": (405, 397, 274, 378, 525, 123, 0, 3, 66)},
+                        "2026-10-24": (405, 397, 274, 378, 525, 123, 0, 0, 66),
+                        "2026-11-03": (405, 397, 274, 378, 525, 123, 0, 0, 66)},
         }
         for destination_id, by_day in expected.items():
             generator = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR,
@@ -285,12 +285,12 @@ class LocalFeedItineraryTests(unittest.TestCase):
 
     def test_phase2_targets_generate_same_trip_direct_only_and_classify_data(self):
         expected = {
-            "Kanamecho": {"2026-10-22": (219, 152, 68), "2026-10-24": (190, 154, 61),
-                          "2026-11-03": (190, 154, 61)},
-            "Senkawa": {"2026-10-22": (219, 152, 68), "2026-10-24": (190, 154, 61),
-                        "2026-11-03": (190, 154, 61)},
-            "KotakeMukaihara": {"2026-10-22": (219, 220, 0), "2026-10-24": (190, 212, 3),
-                                "2026-11-03": (190, 212, 3)},
+            "Kanamecho": {"2026-10-22": (219, 152, 68), "2026-10-24": (190, 154, 58),
+                          "2026-11-03": (190, 154, 58)},
+            "Senkawa": {"2026-10-22": (219, 152, 68), "2026-10-24": (190, 154, 58),
+                        "2026-11-03": (190, 154, 58)},
+            "KotakeMukaihara": {"2026-10-22": (219, 220, 0), "2026-10-24": (190, 212, 0),
+                                "2026-11-03": (190, 212, 0)},
         }
         baseline = ItineraryGenerator(DEFAULT_GTFS, DEFAULT_DATA_DIR)
         for destination_id, by_day in expected.items():
@@ -308,6 +308,13 @@ class LocalFeedItineraryTests(unittest.TestCase):
                     self.assertEqual(coverage["dataInsufficientCount"], 0)
                     self.assertEqual(coverage["routes"]["6"]["candidateCount"], y_count)
                     self.assertEqual(coverage["routes"]["9"]["candidateCount"], f_count)
+                    # Official boarding bans are retained as separate rows,
+                    # rather than counted as passenger destination passes.
+                    banned = [r for r in rows if r.origin_boarding_prohibited_rule]
+                    self.assertEqual(len(banned), 0 if service_date == "2026-10-22" else 3)
+                    self.assertTrue(all(r.primary_itinerary is None and
+                                        "origin_boarding_prohibited_official_rule" in r.data_quality
+                                        for r in banned))
                     self.assertTrue(all(row.primary_itinerary is None or
                                         row.primary_itinerary.kind == "direct" for row in rows))
                     self.assertTrue(all(row.best_transfer_alternative is None for row in rows))

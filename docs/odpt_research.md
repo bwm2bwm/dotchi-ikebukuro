@@ -1660,3 +1660,14 @@ U1 p. 8では検索結果がシステム上限を超えると上限以下に絞�
 最終関連回帰は164件PASS（145.345秒）。manual fetch/取得評価、Source契約/inventory/store/2A、train意味比較/GTFS loader/GTFS意味比較/7 source統合/品質入力を実行した。2C接続は同じ凍結engine/contextの実generator→v2→board→Node DOMを合成fixtureで評価しており、実ダイヤ品質・実HTTP/TLS疎通の証明ではない。回帰前後の既存7原本＋store8ファイルはSHA-256/bytes/inode/mtime/ctime一致。原本/storeへ書込・コピーしない。
 
 初回実取得前の残件は、JSON個別endpoint/filterと必要範囲/全件性の確認方法、GTFS転送先を含む通信範囲と保存先の人間による明示許可、この差分のレビュー。取得後はfeed/calendar・公式改正情報・JSONとの版整合と品質評価を実施し、公開承認は別工程。`date`指定・ページング・自動取得/監視・公開builder/runtimeは追加していない。新たな公式仕様との不一致は発見していない。
+
+## route9旅客coverageとODPT照合品質の分離（2026-11-07）
+
+判断根拠は本作業で利用者が確認済みとして提示した運行ルールと、取得済みrawである。提示された公式参照先は [西武鉄道S-TRAIN](https://www.seiburailway.jp/railway/reservedtrain/s-train/)、[東急S-TRAIN](https://www.tokyu.co.jp/railway/ticket/s-train/)、[東京メトロ副都心線](https://www.tokyometro.jp/station/line_fukutoshin/index.html)。外部通信禁止のため、この実装作業ではURLを再閲覧していない。先行調査で未確認だった土休日西武方面S-TRAINの池袋降車専用は、今回の利用者確認情報を根拠として採用する。平日有楽町線系統や逆方向への拡張はしない。
+
+- **rawで確認:** 土休日3便のS-TRAINはGTFS池袋pickup/drop_offが0/0だが、ODPTには池袋arrivalのみがありdepartureがない。小竹向原はGTFS pickup/drop_off=1/1。GTFSだけでは池袋の降車専用を表現できていない。rawを修正せず、公式ルールと矛盾のない限定条件で乗車を禁止する。
+- **設計判断:** route9・SaturdayHoliday・既存番号normalizerによる一意のODPT候補・S-TRAIN raw種別・和光市方向・全行先が西武・池袋到着一意/GTFS時刻一致/発時刻なし・小竹向原の乗降不可が全て成立した場合に限り、池袋乗車不可の根拠を内部結果に保持する。列車ID例外は使わない。対象行・ODPT未照合・kotake_alighting_prohibited WARNINGと公式ルール診断を残し、候補/乗換legへは使わない。乗車不可行は通過件数・乗換データ不足の集計対象ではなくなる。条件不成立時は従来の不足判定へ戻る。
+- **coverage判断:** 上記乗車不可の証拠があり旅程なし、診断が想定した2コードだけの行は旅客coverageの判定対象外。それ以外のWARNINGは引き続き阻害する。ODPT未照合理由が独立destination/headsign crosswalkの欠落だけで、既存検証済み旅程または明示通過がある場合は、照合品質の未確定として保持し、旅客coverageを阻害しない。matcherが行先crosswalk検査で早期returnする場合も、enrichment層で既存のGTFS→ODPT停車順対応と完全一致を再検査し、未検証/矛盾は阻害理由に残す。他の未照合/衝突・目的駅欠損/時刻不明・件数不整合は阻害を維持する。matcher・種別表示・旅程validator・公開validatorは変更していない。
+- **利用者影響:** B554K/B689S/B733Sは未照合のまま、小竹向原・和光市の直通および有効な乗換候補を維持。急行停車パターンを通勤急行へ置換せず、途中駅の通過も維持する。B771M/B1673M/B1975Mは乗車不可として除外し、他列車の表示まで止めない。未知の列車を利用可へ昇格する処理ではない。
+
+QA結果は同日のdevlogを参照。coverage completeは、保存済み入力に対する旅客候補判定の状態であり、API全件性・鮮度・版整合・公開資格の承認ではない。publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluatedは維持する。

@@ -78,3 +78,5 @@ Phase 2D-3A: manual fetchの固定7 source driverをCLIへ接続。新規先必�
 Phase 2D-3B: 2026-11-07に公式API仕様PDF pp. 7–10、API補足pp. 1/6、東京メトロGTFS公式catalog画像を直接確認。一般HTTPS/query認証/encode/filter/search upper-limit/dump endpoint根拠をresearchへ反映。JSON個別endpoint/filterと全件性は6件ともC。GTFS初期URL/認証/形式は画像に一致しA、省略版・転送先等は未確認。200/coverage/matcher/Snapshot completeは検索切捨てや共通欠落を証明しない。date省略案は会員ポータル補足の対象限定と東京メトロURLへの適用未確認を明記し、取得後にfeed/calendar・公式改正情報・JSON整合を審査。最小変更案と安全な実行計画をresearchへ集約。文書以外は変更なし。
 
 Phase 2D-3C: 既存manual fetchへ通信なしplanと保存先/固定source/retry履歴の確認値、fetch/retry両方の明示許可経路を実装。許可後だけ環境providerを接続し、不正credentialは通信前に拒否。JSONの非空/@type/識別子/operator/指定railway検査を成功記録前・raw確定前に追加し、既存ZIP/TLS/HTTP/保存/retry/評価を再利用。承認状態・strict schemaは維持。テストはdummy/mockのみで、ライブ許可contextは発動せず、許可後のdispatch/native adapterをmock化して検証。実通信・実キーの使用なし。
+
+2026-11-07 route9 coverage修正: 旅客利用可否とODPT照合品質を限定的に分離。利用者確認済みの土休日西武方面S-TRAIN池袋降車専用ルールを、rawの路線/日種/方向/種別/行先/一意番号/到着時刻/小竹向原乗降不可で絞って適用。対象行・未照合・WARNINGを保持しつつ乗車不可として候補から除く。独立行先crosswalk欠落だけの未照合は、有効旅程または明示通過がある場合に旅客coverageを阻害しない。未知/衝突/独立WARNINGとvalidatorのfail-closedを維持。根拠と限定条件はresearch、QA結果はdevlogを参照。公開承認・適用期間・外部通信・原本/storeは変更しない。

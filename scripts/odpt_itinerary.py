@@ -210,6 +210,7 @@ class DepartureResult:
     # A valid destination transfer existed but was outside the configured
     # search policy. Kept private and separate from source-data diagnostics.
     transfer_wait_policy_excluded: bool = False
+    origin_boarding_prohibited_rule: str | None = None
 
 
 def choose_primary(direct: Itinerary | None, best_transfer: Itinerary | None) -> Itinerary | None:
@@ -492,13 +493,59 @@ class ItineraryGenerator:
                       for route_id in ROUTES}
         return matcher, active_ids
 
+    def _origin_boarding_prohibited(self, trip: TripInstance, calendar: str | None) -> bool:
+        """Official Saturday/holiday Seibu-bound S-TRAIN rule, identity gated.
+
+        GTFS access flags remain unchanged. This rule covers the observed conflict
+        where GTFS permits pickup but ODPT records only an Ikebukuro arrival.
+        It is not used to enrich a train or to confirm an ODPT matcher result.
+        """
+        from odpt_train_matcher import parse_trip_number, odpt_destinations
+        if trip.route_id != "9" or calendar != "SaturdayHoliday":
+            return False
+        parsed = parse_trip_number(trip.trip_id, trip.route_id)
+        if not parsed or parsed.calendar != calendar:
+            return False
+        hits = [r for number in parsed.candidates
+                for r in self._odpt_index(trip.route_id, calendar).get(number, ())]
+        if len(hits) != 1:
+            return False
+        record = hits[0]
+        destinations = odpt_destinations(record)
+        if (record.get("odpt:trainType") != "odpt.TrainType:TokyoMetro.S-TRAIN"
+                or record.get("odpt:railDirection") != "odpt.RailDirection:TokyoMetro.Wakoshi"
+                or not destinations or not all(d.startswith("odpt.Station:Seibu.") for d in destinations)):
+            return False
+        ike = [e for e in record.get("odpt:trainTimetableObject", ())
+               if any((e.get(k) or "").endswith(".Ikebukuro")
+                      for k in ("odpt:arrivalStation", "odpt:departureStation"))]
+        kotake = [e for e in trip.events if e.stop_id == "906"
+                  and e.sequence > trip.origin_event.sequence]
+        return (len(ike) == 1 and not ike[0].get("odpt:departureTime")
+                and parse_gtfs_time(ike[0].get("odpt:arrivalTime")) == trip.departure_seconds % 86400
+                and len(kotake) == 1
+                and kotake[0].pickup_type == kotake[0].drop_off_type == "1")
+
     def _enrich(self, trip: TripInstance, calendar: str | None,
                 matcher=None, active_trip_ids=()) -> OdptEnrichment:
         if matcher is None:
             return OdptEnrichment("unavailable")
-        from odpt_train_matcher import odpt_destinations, type_scope
+        from odpt_train_matcher import (odpt_destinations, type_scope,
+                                        gtfs_route_station_sequence, odpt_route_station_sequence)
 
         match = matcher.match(trip, calendar, active_trip_ids)
+        if match.reason == "destination_has_no_independent_gtfs_crosswalk":
+            # The matcher stops before checking station order in this case.
+            # Passenger coverage may tolerate a missing headsign crosswalk only
+            # after those remaining checks have also succeeded.
+            records = [r for number in match.candidates
+                       for r in self._odpt_index(trip.route_id, calendar).get(number, ())]
+            stops = gtfs_route_station_sequence(trip.events, matcher.station_lookup,
+                                               trip.route_id, matcher.stop_names)
+            if not stops or len(records) != 1:
+                return OdptEnrichment("unmatched", match_reason="gtfs_stop_order_not_fully_mappable")
+            if stops != odpt_route_station_sequence(records[0], trip.route_id):
+                return OdptEnrichment("unmatched", match_reason="ordered_stop_sequence_conflict")
         if match.status != "confirmed" or match.odpt_record is None:
             status = "ambiguous" if match.status == "ambiguous" else (
                 "unavailable" if match.status == "unavailable" else "unmatched")
@@ -688,6 +735,8 @@ class ItineraryGenerator:
             for route_id in ROUTES
         }
         direct_data_issue_trip_ids: set[str] = set()
+        prohibited_origins = {tid for tid, trip in trips.items()
+                              if self._origin_boarding_prohibited(trip, calendar)}
         if transfer_enabled:
             for counts in route_destination_counts.values():
                 counts.update({"directCandidateCount": 0, "transferCandidateCount": 0,
@@ -697,6 +746,13 @@ class ItineraryGenerator:
             route_stops = ROUTE_STOP_IDS[trip.route_id]
             destination_stop_id = DESTINATIONS[self.destination_station_id]["routeStopIds"][trip.route_id]
             route_destination_counts[trip.route_id]["originTripCount"] += 1
+            if trip_id in prohibited_origins:
+                # Retain the row, unmatched enrichment and WARNING evidence.
+                # Neither first nor second leg can use this trip: Ikebukuro is
+                # alight-only and Kotake explicitly prohibits pickup/drop-off.
+                diagnostics[trip_id].update({"origin_boarding_prohibited_official_rule",
+                                             "kotake_alighting_prohibited"})
+                continue
             if self.destination_station_id == DEFAULT_DESTINATION_ID:
                 target_order = destination["outboundOrder"]
                 station_order = {
@@ -961,6 +1017,8 @@ class ItineraryGenerator:
                 transfer_candidates_count=transfer_candidate_counts.get(trip_id, 0),
                 status=status, data_quality=data_quality,
                 transfer_wait_policy_excluded=(trip_id in transfer_wait_policy_excluded and primary is None),
+                origin_boarding_prohibited_rule=("s_train_saturday_holiday_seibu_bound_ikebukuro_alight_only"
+                                                if trip_id in prohibited_origins else None),
             ))
         if transfer_enabled:
             transfer_data_insufficient_count = len(

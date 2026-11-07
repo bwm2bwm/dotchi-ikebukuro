@@ -131,9 +131,29 @@ def _route_state(route_id: str, route_metrics: Any, results: list[Any]) -> dict[
         state = "insufficient"
     else:
         from odpt_snapshot_qa import _classify_diagnostics
-        warnings = any(_classify_diagnostics(row)["WARNING"] for row in route_results)
-        unresolved_match = any(row.odpt.status not in {"matched", "unique_match"}
-                              for row in route_results)
+        # Keep all match/WARNING evidence in audits. A proven boarding ban is
+        # outside passenger coverage, not a successful ODPT match. Refuse a
+        # contradictory row that still contains a journey.
+        relevant = [row for row in route_results if not (
+            getattr(row, "origin_boarding_prohibited_rule", None)
+            == "s_train_saturday_holiday_seibu_bound_ikebukuro_alight_only"
+            and row.primary_itinerary is None and row.direct_alternative is None
+            and row.best_transfer_alternative is None
+            and set(row.data_quality) <= {"origin_boarding_prohibited_official_rule",
+                                          "kotake_alighting_prohibited"})]
+        warnings = any(_classify_diagnostics(row)["WARNING"] for row in relevant)
+        # A missing independent destination/headsign crosswalk affects ODPT
+        # enrichment only. GTFS journey/access checks and diagnostics above
+        # still gate passenger coverage. Other unresolved/conflicting matches
+        # remain blocking; unknown data is never inferred to be a pass.
+        unresolved_match = any(
+            row.odpt.status not in {"matched", "unique_match"}
+            and not (row.odpt.status == "unmatched"
+                     and getattr(row.odpt, "match_reason", None)
+                     == "destination_has_no_independent_gtfs_crosswalk"
+                     and (row.primary_itinerary is not None
+                          or "destination_explicit_pass" in row.data_quality))
+            for row in relevant)
         state = "insufficient" if warnings or unresolved_match else "complete"
     return {"scheduledTripCount": scheduled, "dataState": state}
 
@@ -789,7 +809,7 @@ def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dic
                         "candidateDepartureCount": sum(output_stats.values()),
                         "exclusionAudit": exclusion_audit,
                         "routeCoverageStateCounts": dict(sorted(route_state_counts.items())),
-                        "routeCoveragePolicy": "complete only when scheduled route counts and origin result counts are present and consistent, route data issue counts are zero, ODPT match states are matched/unique_match, and contextual diagnostics contain no WARNING; INFO is non-blocking. Generated rows without a primary journey are omitted as candidates and do not alone imply missing source data.",
+                        "routeCoveragePolicy": "Passenger coverage requires consistent schedule/origin counts and zero route data issues. Proven official Ikebukuro boarding bans with only the expected access diagnostics are outside passenger coverage; their unmatched/WARNING evidence is retained. A missing independent destination crosswalk alone is non-blocking only for a validated journey or explicit pass. Other unresolved ODPT states and WARNING remain blocking. INFO is non-blocking.",
                         "journeyGenerationDigest": generation_digest},
             "provenance": {"input": "saved local ODPT JSON and GTFS snapshot",
                            "networkAccess": False, "sourceRecordBodiesIncluded": False,

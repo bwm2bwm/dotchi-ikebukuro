@@ -1116,3 +1116,15 @@
 - 編集途中の暫定runはdisplay評価/engine変更検出で停止したため、その結果を採用せず、コードを固定して関連回帰を実行。最終164件PASS（145.345秒）：manual fetch/取得評価、Source契約/inventory/store/2A、train意味比較/GTFS loader/GTFS意味比較/統合semantics/quality input。新規クラスが共通基本6ケースを継承するため、164実行にはその再実行分を含む。2A〜2C接続は合成live形式も含め検証、Node DOMまでの範囲であり実ダイヤ・外部疎通の証明ではない。socket接続自体を拒否mockにした状態でPASS。
 - 既存原本7件＋store8ファイルを回帰前後にread-onlyで照合し、SHA-256/bytes/inode/mtime/ctime一致。原本/storeへの書込・上書き・移動・コピーなし。referencesは未追跡のまま非操作。Cloudflare/公開builder/runtime、承認状態、Commit/Push/Merge/Deploy操作なし。
 - 変更はmanual fetch、manual fetch test、取得評価test、README、project_state、research、本履歴の7ファイル。help-offlineとgit diff --check PASS。初回実取得前には公式個別endpoint/filter/全件性確認方法、通信/転送先・保存先の人間の明示許可と、この差分のレビューが残る。
+
+## 2026-11-07 — 副都心線route9の旅客coverage最小修正
+
+- 開始main / `5ecdfcd099fd6ad52d0b40ba4204f53a77ba5fef`。tracked差分なし、references/だけ未追跡。利用者が今回確認済みとして提示した急行/通勤急行/S-TRAIN運行ルールを採用し、外部URL再閲覧・ODPT通信・APIキー読取は実施しない。
+- generatorに土休日西武方面S-TRAINの池袋降車専用を適用する限定証拠判定を追加。列車IDはハードコードせず、路線/日種/方向/種別/行先/番号一意/池袋到着時刻/小竹向原乗降不可の条件を全て要求する。条件不成立は従来ロジック。rawとGTFS乗降値は書換えず、原行・未照合・WARNINGを保持し、公式ルール診断を追加する。既知の乗車不可3便は通過件数や乗換データ不足件数の対象ではなくなり、候補legには使わない。
+- v2旅客coverageは、証拠付き乗車不可・旅程なし・想定したアクセス診断だけの行を対象外とする。独立行先crosswalk欠落だけの未照合は、既存検証済み旅程または明示通過がある時に限り非阻害とする。別のWARNING、未知/衝突/その他の照合未確定、source不足、件数不整合は阻害。matcher・種別/停車パターン分類・旅程/公開validator・DOM adapterは変更しない。manifestのcoverage方針説明も実装へ合わせる。
+- 最終関連回帰144件PASS（Python100、Node44）：新規乗車証拠/coverage否定ケース7、既存itinerary28、public-v2 25、train matcher13、snapshot QA15、quality details12、adapter/DOM/display runner/終電UI44。旧itinerary期待値のS-TRAIN通過/乗換不足14 subtestは今回の既知乗車不可分類に合わせ更新し、候補数/時刻/乗換数の期待値は維持した。
+- 保存済み初回batchで11/3（祝）、11/6（平日）、11/7（土）×8駅をHEAD版generator/coverageと比較。24駅日すべて旅程の発着時刻・直通/乗換選択一致。route9は平日completeを維持、土休日は全8駅でinsufficient→complete。平日220件unique_match、土休日209件unique_match＋6件unmatchedは不変。土休日S-TRAIN3便は全8駅で乗車不可の根拠付き除外、WARNING診断も保持。急行3便の有効直通/乗換候補は維持。
+- matcherの行先crosswalk欠落は停車順検査前の早期returnだったため、enrichment層で既存の停車順mapping/一致検査を補完した。対応不能/矛盾は阻害理由を保持し、crosswalk欠落だけという理由で未実施検証を迂回しない。matcherのconfirmed条件は変えず、この否定ケースも新規テストに追加。補強前の中間DOM結果は最終採用せず、コード固定後の新engineで再実行する。
+- 最終コード/新engineで既存DOM collectorを実batchへ適用。JST 11/6 12:00と11/7 12:00に各8駅×4scenario＝32セル、各352 checks PASS・findings 0・domQaStatus=complete（計64セル/704 checks）。全route候補表示が可能となり、対象3日route statesは前日ended/当日running/翌日not_started、terminalKnownは各run192 route-date評価すべてtrue。未知データの始発/終電抑止や境界動作は既存Node回帰で維持。実日時の秒境界DOMを今回全駅で追加実行したという意味ではない。
+- QA前後で取得batch全体・既存原本7件・既存store8件の計48ファイルをSHA-256/bytes/inode/mtime/ctime照合し一致。DOM collectorでもsource 7/store metadata 26の不変検証PASS。QA一時出力と比較用コードは/private/tmp配下のみ。外部通信、キー読取、rawコピー/変更、公開承認/適用期間/整合状態の更新、Commit/Push/Merge/Deployなし。公開用候補データの非公開生成・レビューへ進める状態だが、鮮度/版/全件性/公開資格はこの修正で承認しない。
+- git diff --check PASS。変更はgenerator、v2 coverage、既存itinerary test、新規passenger coverage test、research/project_state/本履歴の7ファイル。references/公式資料3件は未追跡のまま保持。
