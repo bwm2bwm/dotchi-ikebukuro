@@ -286,7 +286,8 @@ def _safe_output_path(output_dir: Path, snapshot: Path) -> Path:
 
 
 def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
-           mutation_hook: Callable[[], None] | None = None) -> dict[str, Any]:
+           mutation_hook: Callable[[], None] | None = None,
+           requested_service_dates: list[str] | None = None) -> dict[str, Any]:
     try:
         anchor = date.fromisoformat(service_date)
     except ValueError:
@@ -299,7 +300,19 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
     source_fingerprint = _fingerprint(initial_entries)
     if mutation_hook:
         mutation_hook()
-    requested_dates = [anchor + timedelta(days=offset) for offset in (-1, 0, 1)]
+    if requested_service_dates is None:
+        requested_dates = [anchor + timedelta(days=offset) for offset in (-1, 0, 1)]
+    else:
+        try:
+            requested_dates = [date.fromisoformat(value) for value in requested_service_dates]
+        except (TypeError, ValueError):
+            raise QAError("service_date_range_invalid") from None
+        if (not requested_dates or len(requested_dates) > 366
+                or any(day.isoformat() != value for day, value in zip(requested_dates, requested_service_dates))
+                or requested_dates != sorted(set(requested_dates))
+                or anchor not in requested_dates
+                or any(right - left != timedelta(days=1) for left, right in zip(requested_dates, requested_dates[1:]))):
+            raise QAError("service_date_range_invalid")
     day_rows: list[dict[str, Any]] = []
     result_digests: list[dict[str, str]] = []
     for destination_id, destination in DESTINATIONS.items():
@@ -389,6 +402,8 @@ def run_qa(snapshot_dir: Path, service_date: str, output_dir: Path,
     }
     body = {"schemaVersion": 1, "status": status, "serviceDate": anchor.isoformat(),
             "requestedServiceDates": [d.isoformat() for d in requested_dates],
+            "serviceDateRange": {"from": requested_dates[0].isoformat(),
+                                 "through": requested_dates[-1].isoformat()},
             "stationCount": len(DESTINATIONS), "dayResultCount": len(day_rows),
             "sourceFingerprint": source_fingerprint, "generatorFingerprint": _generator_fingerprint(),
             "generationDigest": _fingerprint(result_digests), "source": source_metadata,
@@ -466,13 +481,30 @@ def _compare_previous(report: dict[str, Any], previous_path: Path) -> dict[str, 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
-    parser.add_argument("--service-date", default="2026-10-29", help="YYYY-MM-DD (default: 2026-10-29)")
+    date_group = parser.add_mutually_exclusive_group()
+    date_group.add_argument("--service-date", help="legacy anchor YYYY-MM-DD; evaluates anchor ±1 day")
+    date_group.add_argument("--service-date-range", nargs=2, metavar=("START", "END"),
+                            help="inclusive contiguous service-date range; does not add buffers")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--compare-with", type=Path,
                         help="compare against a previous QA JSON report; same inputs with a different digest fail")
     args = parser.parse_args(argv)
     try:
-        report = run_qa(args.snapshot, args.service_date, args.output_dir)
+        if args.service_date_range:
+            try:
+                start, end = (date.fromisoformat(value) for value in args.service_date_range)
+            except ValueError:
+                raise QAError("service_date_range_invalid") from None
+            if start.isoformat() != args.service_date_range[0] or end.isoformat() != args.service_date_range[1] or end < start:
+                raise QAError("service_date_range_invalid")
+            if (end - start).days > 364:
+                raise QAError("service_date_range_limit_exceeded")
+            dates = [(start + timedelta(days=offset)).isoformat()
+                     for offset in range((end - start).days + 1)]
+            report = run_qa(args.snapshot, start.isoformat(), args.output_dir,
+                            requested_service_dates=dates)
+        else:
+            report = run_qa(args.snapshot, args.service_date or "2026-10-29", args.output_dir)
         if args.compare_with:
             report["reproducibility"]["comparison"] = _compare_previous(report, args.compare_with.expanduser())
             comparison_status = report["reproducibility"]["comparison"]["status"]

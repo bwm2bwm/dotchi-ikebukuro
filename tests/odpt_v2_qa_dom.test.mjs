@@ -8,6 +8,46 @@ import { buildV2QaBoard, ODPT_V2_QA_FILES } from '../_local_preview/odpt_v2_qa_a
 
 import { makeEnvironment, startDom, waitFor, withDom, assertBoardDom } from '../scripts/odpt_dom_harness.mjs';
 
+async function padStationFile(files, paddingBytes) {
+  const name = ODPT_V2_QA_FILES.Hikawadai;
+  const original = files.get(name);
+  const padded = new Uint8Array(original.length + paddingBytes);
+  padded.set(original);
+  padded.fill(0x20, original.length);
+  files.set(name, padded);
+  const state = JSON.parse(new TextDecoder().decode(files.get('_odpt_v2_qa_state.json')));
+  state.candidateFiles.Hikawadai = { bytes: padded.byteLength,
+    sha256: createHash('sha256').update(padded).digest('hex') };
+  files.set('_odpt_v2_qa_state.json', new TextEncoder().encode(JSON.stringify(state)));
+  return padded.byteLength;
+}
+
+test('QA loader reads a hash-bound station payload larger than the former 1.5 MB cap', async () => {
+  const files = await makeBundle();
+  const bytes = await padStationFile(files, 1_600_000);
+  assert.ok(bytes > 1_500_000 && bytes < 25 * 1024 * 1024);
+  const env = makeEnvironment(files);
+  const restore = await startDom(env, { value: Date.parse('2026-10-29T06:00:00+09:00') });
+  try {
+    await waitFor(() => env.fetchAudit.some(item => item.filename === ODPT_V2_QA_FILES.Hikawadai));
+    assert.equal(env.fetchAudit.find(item => item.filename === ODPT_V2_QA_FILES.Hikawadai).bytes, bytes);
+    assert.ok(env.elements.get('board').querySelectorAll('.train').length > 0);
+  } finally { await restore(); }
+});
+
+test('QA loader rejects a candidate file beyond the explicit 25 MiB limit', async () => {
+  const files = await makeBundle();
+  const bytes = await padStationFile(files, 25 * 1024 * 1024);
+  assert.ok(bytes > 25 * 1024 * 1024);
+  const env = makeEnvironment(files);
+  const restore = await startDom(env, { value: Date.parse('2026-10-29T06:00:00+09:00') });
+  try {
+    await waitFor(() => env.fetchAudit.some(item => item.filename === ODPT_V2_QA_FILES.Hikawadai));
+    await waitFor(() => env.elements.get('timetable-status').dataset.state === 'error');
+    assert.equal(env.elements.get('board').querySelectorAll('.train').length, 0);
+  } finally { await restore(); }
+});
+
 test('v2 QA DOM shows verified cards and UNKNOWN warning, then clears warning on station/date changes', async () => {
   const env = makeEnvironment(await makeBundle());
   const wallNow = { value: Date.parse('2026-10-29T21:06:00+09:00') };

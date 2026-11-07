@@ -43,7 +43,9 @@ def _payload(station_id: str, generated_at="2026-10-29T12:00:00Z", dates=None):
                      "departures": [row]})
     return {"schemaVersion": 2, "dataScope": "public-display-v2",
             "generatedAt": generated_at, "timezone": "Asia/Tokyo",
-            "applicationPeriod": None, "stationId": station_id,
+            "applicationPeriod": None,
+            "serviceDateRange": {"from": dates[0], "through": dates[-1]},
+            "stationId": station_id,
             "originStationId": "Ikebukuro", "serviceDays": days}
 
 
@@ -68,9 +70,13 @@ def _bundle(root: Path, *, dates=None, state="complete"):
                                   "reasonCounts": {key: 0 for key in v2.EXCLUSION_REASONS}}
                                  for day in dates)
     audit = v2._build_exclusion_audit(station_date_rows)
+    target_start = dates[1] if len(dates) >= 3 else dates[0]
+    target_end = dates[-2] if len(dates) >= 3 else dates[-1]
     manifest = {"dataScope": v2.MANIFEST_SCOPE,
                 "sourceFingerprint": "a" * 64,
                 "evaluationServiceDates": dates,
+                "evaluationServiceDateRange": {"from": target_start, "through": target_end},
+                "serviceDateRange": {"from": dates[0], "through": dates[-1]},
                 "transferSearchPolicy": {"minimumWaitSeconds": 60,
                                          "maximumWaitSeconds": 3600,
                                          "crossServiceDateSearch": False},
@@ -115,6 +121,44 @@ class FakeGenerator:
 
 
 class PublicV2Tests(unittest.TestCase):
+    def test_range_scope_adds_only_one_buffer_day_and_caps_range(self):
+        anchor, target, dates = v2._candidate_date_scope(
+            None, ("2026-11-09", "2027-03-11"))
+        self.assertEqual(anchor.isoformat(), "2026-11-09")
+        self.assertEqual(target, {"from": "2026-11-09", "through": "2027-03-11"})
+        self.assertEqual(len(dates), 125)
+        self.assertEqual((dates[0], dates[-1]), ("2026-11-08", "2027-03-12"))
+        with self.assertRaisesRegex(v2.V2Error, "service_date_range_limit_exceeded"):
+            v2._candidate_date_scope(None, ("2026-01-01", "2027-01-01"))
+        with self.assertRaisesRegex(v2.V2Error, "service_date_scope_invalid"):
+            v2._candidate_date_scope("2026-11-09", ("2026-11-09", "2026-11-10"))
+
+    def test_payload_range_is_strict_and_days_must_be_contiguous(self):
+        dates = ["2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31"]
+        payload = _payload("Hikawadai", dates=dates)
+        self.assertIs(v2.validate_v2_payload(payload), payload)
+        legacy_three_day = _payload("Hikawadai", dates=dates[1:4])
+        del legacy_three_day["serviceDateRange"]
+        self.assertIs(v2.validate_v2_payload(legacy_three_day), legacy_three_day)
+        payload["serviceDateRange"]["through"] = "2026-11-01"
+        with self.assertRaisesRegex(v2.V2Error, "service_date_range_mismatch"):
+            v2.validate_v2_payload(payload)
+        payload = _payload("Hikawadai", dates=[dates[0], dates[1], dates[3]])
+        with self.assertRaisesRegex(v2.V2Error, "service_dates_not_contiguous"):
+            v2.validate_v2_payload(payload)
+
+    def test_multi_day_bundle_range_and_all_station_date_pairs_validate(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            dates = [f"2026-10-{day:02d}" for day in range(27, 32)]
+            bundle, manifest, _ = _bundle(Path(directory) / "bundle", dates=dates)
+            report = v2.validate_bundle(bundle, manifest, list(v2.DESTINATIONS), dates, "a" * 64)
+            self.assertEqual(report["serviceDateCount"], 5)
+            self.assertEqual(report["stationDateCount"], 40)
+            self.assertEqual(report["routeStateCount"], 80)
+            manifest["serviceDateRange"]["through"] = dates[-2]
+            with self.assertRaisesRegex(v2.V2Error, "manifest_service_date_range_invalid"):
+                v2.validate_bundle(bundle, manifest, list(v2.DESTINATIONS), dates, "a" * 64)
+
     def test_odpt0_quality_consistency_does_not_pin_v2_transfer_policy_counts(self):
         report = {"dayResults": [{"journeyCount": 10, "primaryDirectCount": 8,
                                   "primaryTransferCount": 2,
@@ -413,7 +457,8 @@ class PublicV2Tests(unittest.TestCase):
             inventory = ([{"path": "snapshot.json", "sizeBytes": 1, "sha256": "b" * 64}],
                          fingerprint, {"gtfs": {"feedVersion": "fixture"}, "json": {}})
             def qa_report(*args, **kwargs):
-                dates = ["2026-10-28", "2026-10-29", "2026-10-30"]
+                dates = kwargs.get("requested_service_dates", ["2026-10-28", "2026-10-29", "2026-10-30"])
+                anchor = args[1]
                 days = [{"stationId": station, "serviceDate": day, "journeyCount": 2,
                          "primaryDirectCount": 2, "primaryTransferCount": 0,
                          "odptMatchStatusCounts": {"unique_match": 2}, "status": "ok",
@@ -422,9 +467,10 @@ class PublicV2Tests(unittest.TestCase):
                          "routeCoverage": {r: {"dataState": "complete"} for r in v2.ROUTES}}
                         for station in v2.DESTINATIONS for day in dates]
                 return {"status": "PASS", "sourceFingerprint": fingerprint,
-                        "serviceDate": "2026-10-29",
-                        "requestedServiceDates": ["2026-10-28", "2026-10-29", "2026-10-30"],
-                        "stationCount": 8, "dayResultCount": 24, "dayResults": days,
+                        "serviceDate": anchor,
+                        "requestedServiceDates": dates,
+                        "serviceDateRange": {"from": dates[0], "through": dates[-1]},
+                        "stationCount": 8, "dayResultCount": 8 * len(dates), "dayResults": days,
                         "summary": {"resolution": odpt_snapshot_qa._resolution_summary([]), "unmatchedOdptJourneyCount": 0,
                                     "diagnosticSeverity": {"WARNING": {"codeOccurrences": 0},
                                                            "FAIL": {"failGateCount": 0}}},
@@ -435,10 +481,27 @@ class PublicV2Tests(unittest.TestCase):
                 first = v2.run_pipeline(snapshot, "2026-10-29", root / "out-a")
                 second = v2.run_pipeline(snapshot, "2026-10-29", root / "out-b")
                 self.assertEqual(first["generationDigest"], second["generationDigest"])
+                ranged = v2.run_pipeline(snapshot, None, root / "out-range",
+                                         ("2026-10-29", "2026-10-31"), fingerprint)
                 payload_file = root / "out-a" / "public-candidates" / v2.ROUTE_FILENAMES["Hikawadai"]
                 text = payload_file.read_text(encoding="utf-8")
                 self.assertNotIn("raw-secret-trip", text)
                 self.assertNotIn("originTripId", text)
+                range_manifest = json.loads((root / "out-range" / "private-generator-manifest.json").read_text())
+                range_payload = json.loads((root / "out-range" / "public-candidates" /
+                                            v2.ROUTE_FILENAMES["Hikawadai"]).read_text())
+                self.assertEqual(ranged["serviceDates"],
+                                 ["2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01"])
+                self.assertEqual(range_manifest["evaluationServiceDateRange"],
+                                 {"from": "2026-10-29", "through": "2026-10-31"})
+                self.assertEqual(range_payload["serviceDateRange"],
+                                 {"from": "2026-10-28", "through": "2026-11-01"})
+                self.assertIsNone(range_manifest["applicationPeriod"])
+                self.assertIs(range_manifest["publicationApproved"], False)
+                with self.assertRaisesRegex(v2.V2Error, "source_fingerprint_unexpected"):
+                    v2.run_pipeline(snapshot, None, root / "out-wrong-fingerprint",
+                                    ("2026-10-29", "2026-10-31"), "c" * 64)
+                self.assertFalse((root / "out-wrong-fingerprint").exists())
                 self.assertEqual((root / "out-a" / "private-generator-manifest.json").stat().st_mode & 0o777,
                                  0o600)
 
@@ -451,7 +514,8 @@ class PublicV2Tests(unittest.TestCase):
             inventory = ([{"path": "snapshot.json", "sizeBytes": 1, "sha256": "b" * 64}],
                          fingerprint, {"gtfs": {"feedVersion": "fixture"}, "json": {}})
             def qa_report(*args, **kwargs):
-                dates = ["2026-10-28", "2026-10-29", "2026-10-30"]
+                dates = kwargs.get("requested_service_dates", ["2026-10-28", "2026-10-29", "2026-10-30"])
+                anchor = args[1]
                 days = [{"stationId": station, "serviceDate": day, "journeyCount": 2,
                          "primaryDirectCount": 2, "primaryTransferCount": 0,
                          "odptMatchStatusCounts": {"unique_match": 2}, "status": "ok",
@@ -460,9 +524,10 @@ class PublicV2Tests(unittest.TestCase):
                          "routeCoverage": {r: {"dataState": "complete"} for r in v2.ROUTES}}
                         for station in v2.DESTINATIONS for day in dates]
                 return {"status": "PASS", "sourceFingerprint": fingerprint,
-                        "serviceDate": "2026-10-29",
-                        "requestedServiceDates": ["2026-10-28", "2026-10-29", "2026-10-30"],
-                        "stationCount": 8, "dayResultCount": 24, "dayResults": days,
+                        "serviceDate": anchor,
+                        "requestedServiceDates": dates,
+                        "serviceDateRange": {"from": dates[0], "through": dates[-1]},
+                        "stationCount": 8, "dayResultCount": 8 * len(dates), "dayResults": days,
                         "summary": {"resolution": odpt_snapshot_qa._resolution_summary([]), "unmatchedOdptJourneyCount": 0,
                                     "diagnosticSeverity": {"WARNING": {"codeOccurrences": 0},
                                                            "FAIL": {"failGateCount": 0}}},

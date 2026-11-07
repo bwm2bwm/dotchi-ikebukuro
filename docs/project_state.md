@@ -2,6 +2,8 @@
 
 最終整理: 2026-11-07。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
 
+ODPT非公開candidate pipelineは明示した長期間service-date範囲と前後1日のbufferを扱い、range指定時に明示snapshotと期待source fingerprintを要求する。旧3日方式は維持。2026-11-07取得batch（fingerprint `d948b326…508b41`）から評価30日・serviceDays 32日のcandidateを生成し、全日品質/coverage、bundle validator、QA staging、代表日・月境界DOM harnessをPASS。payload合計約52.4 MB、最大駅file約7.55 MB、生成約8分・max RSS約503 MiB。QA loader上限をrelease file capの25 MiBに合わせたが、production runtimeは未変更。先行する5/9/16日candidate PASSは旧`local_data/odpt`由来で、取得batch検証としては無効。125日最大候補と全期間DOM QAは未完了。実データ公開・applicationPeriod・publication approvalへは進めていない。詳細は [odpt_research.md](odpt_research.md) と [devlog.md](devlog.md)。
+
 ODPT-2Fの更新・鮮度管理方式は設計提案として文書化済み（未実装）。ODPT News確認を一次情報とし、7 sourceの取得履歴・hash・差分検証・非公開candidate・人間承認・期限切れfail-closedを段階導入する案。実データ公開、自動公開、取得workflowはいずれも未承認・未実施。詳細は [odpt_research.md](odpt_research.md) のODPT-2F節。
 
 ODPT-2G Phase 0〜1D、Phase 2A基本差分、Phase 2B-2a/2b意味比較を実装済み。意味比較対象はODPT JSON 6 source（TrainTimetable、Railway、Station、StationTimetable）で、両storeと両側7原本のhash/byte数を検証する。StationTimetableの動的boolean keyはopaque extensionとしてcoverage partial。GTFSの補助関係やStationTimetableのopaque keyは部分評価のため、実自己比較の全体semanticStatusはindeterminate。取得履歴は不明で、鮮度・同一ダイヤ性・旅程品質・公開資格は判定しない。詳細はODPT-2G節とdevlogを参照。
@@ -39,6 +41,7 @@ Phase 2C-3d-4では固定実source観測時刻4点（JST 10/29 23:59:59、10/30 
 - **公開synthetic版:** 公開builder・validator・runtimeと手動起動CIはsynthetic fixture専用。公開データは実ダイヤではない。
 - **Cloudflare Pages staging:** synthetic release-managed配信の初回・第2世代更新を確認済み。rollback、旧タブ継続利用など一部QAは未完了。
 - **非公開ODPT v2 QA:** 保存済みローカルODPT/GTFSからcandidateを作り、localhost専用画面で検証する独立経路。公開artifactやv1 synthetic builderに接続していない。
+- **長期serviceDays candidate:** 明示日付範囲の生成・検証入口と全日品質/coverage監査は実装済み。長期間一括処理は負荷未評価で、最大125日の実行は完了していない。ブラウザadapterは表示に必要な日だけ投影するが、hash検証時に駅別payload全体を読む。
 - **実ODPT公開:** 未承認。自動公開も未承認。公開可能との判断は行っていない。
 
 ## 完了した主要機能
@@ -54,7 +57,7 @@ Phase 2C-3d-4では固定実source観測時刻4点（JST 10/29 23:59:59、10/30 
 - 保存sourceの取得成功日時、最新性、ODPTとGTFSの同一ダイヤ版性。
 - 実データの承認済み `applicationPeriod` と、GTFS feed期間との整合規則。
 - JSON 6件の公式endpoint/filterと全件性。東京メトロGTFSのdate省略時の版とJSONとの整合は取得後に要審査。`date=current/next/latest`の解明・将来の通知運用は初回取得の必須条件にしない。
-- 2D-3Cで明示ライブ許可・環境provider・受信範囲検査まで実装。実通信/実キーでの検証は未実施。未知selector・補助参照の意味解明、candidate gateは未完。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
+- 手動CLIは明示ライブ許可・環境provider・受信範囲検査を備える。初回取得は完了済み。candidateのODPT-0品質ゲートは根拠付きA/B/C/D区分を保持して実装済み。保存済みsourceの鮮度・JSON/GTFS版整合・承認済み適用期間は公開審査事項。
 - 公開payloadの再構成リスク、表示・クレジット条件の実データ公開適用確認。
 - release-managedのrollback実地確認、旧タブ・cache境界QA。
 - 運行日境界を跨ぐ乗換探索は未実装。
@@ -63,9 +66,9 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. 初回正式公開を優先し、[Phase 2D-3B](odpt_research.md#phase-2d-3b)の未確認事項（JSON endpoint/filter・全件性、date省略版、初回取得の許可範囲/非公開保存先）を確定する。指定PDF/画像の一般API根拠は2026-11-07に直接確認し、該当ページをresearchへ記録した。
-2. 2D-3Cの最小実装・オフライン検証結果をレビューする。コードの完成と実通信の許可は別で、実取得はまだ実施しない。
-3. 明示許可後の非公開7 source取得、版/全件性確認、既存2A〜2C評価へ進む。未解決QA・適用期間・公開条件を審査し、公開承認は別に行う。自動更新・監視設計は追加しない。
+1. 長期間candidateの実行負荷を抑える方法を最小範囲で検討し、125日を一括または検証可能なchunkで全日品質/coverage確認する。chunkの連続性・fingerprint・累積容量は再検証し、単純連結を承認としない。
+2. 実際の長期payloadサイズとブラウザ転送量を測定する。現行adapterは選択日の表示に限定する一方、候補JSON全体を読みhash検証する。25 MiB release file上限を超える場合は公開前に最小の配信単位設計が必要。
+3. 長期候補の全validator/代表日DOM確認後、適用期間・鮮度・版整合・公開条件を人間が審査し、公開承認は別途判断する。自動更新・監視は追加しない。
 
 この文書は状態の要約であり、履歴の数値や手順を重複管理しない。
 

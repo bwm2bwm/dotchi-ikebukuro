@@ -24,6 +24,29 @@ from test_odpt_public_v2 import _bundle  # noqa: E402
 
 
 class PrepareOdptV2QaTests(unittest.TestCase):
+    def test_long_bundle_stages_full_range_but_qa_state_uses_only_required_three_days(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            dates = [f"2026-10-{day:02d}" for day in range(27, 32)]
+            bundle, _, _ = _bundle(root / "bundle", dates=dates)
+            output = root / "private-qa" / "site"
+            result = prepare.prepare(bundle, "2026-10-29", output)
+            self.assertEqual(result["serviceDates"], dates[1:-1])
+            import json
+            state = json.loads((output / prepare.STATE_FILENAME).read_text())
+            self.assertEqual(state["serviceDates"], dates[1:-1])
+            candidate = json.loads((output / v2.ROUTE_FILENAMES["Hikawadai"]).read_text())
+            self.assertEqual(candidate["serviceDateRange"], {"from": dates[0], "through": dates[-1]})
+            self.assertEqual([day["serviceDate"] for day in candidate["serviceDays"]], dates)
+
+    def test_long_bundle_qa_date_must_be_inside_evaluation_range(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
+            root = Path(directory)
+            dates = [f"2026-10-{day:02d}" for day in range(27, 32)]
+            bundle, _, _ = _bundle(root / "bundle", dates=dates)
+            with self.assertRaisesRegex(prepare.PrepareError, "qa_date_outside_candidate_range"):
+                prepare.prepare(bundle, "2026-10-27", root / "site")
+
     def test_prepares_private_site_without_manifest_and_preserves_source(self):
         with tempfile.TemporaryDirectory(dir="/private/tmp") as directory:
             root = Path(directory)

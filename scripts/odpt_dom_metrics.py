@@ -82,7 +82,8 @@ def _response(response, request):
 
 
 def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=None, engine=None,
-                   root=quality.ROOT, detail_limit=1000, timeout=20, station_ids=None):
+                   root=quality.ROOT, detail_limit=1000, timeout=20, station_ids=None,
+                   observation_instant=INSTANT):
     if type(detail_limit) is not int or not 0 <= detail_limit <= 10000: raise ValueError('detail_limit_invalid')
     if type(timeout) not in (int,float) or not math.isfinite(timeout) or not 0 < timeout <= 120: raise ValueError('timeout_invalid')
     if station_ids is None:
@@ -108,8 +109,16 @@ def collect_dom_qa(store, source_dir, *, quality_context=None, display_context=N
     try:
         frozen_engine = copy.deepcopy(engine) if engine is not None else quality.build_engine(root)
         quality._validate_engine(frozen_engine)
-        q = quality.normalize_context(quality_context if quality_context is not None else quality.initial_context(frozen_engine['engineFingerprint']))
-        d = display.normalize_context(display_context, q) if display_context is not None else display.create_context(q,[INSTANT])
+        if quality_context is None and display_context is None:
+            default_q = quality.initial_context(frozen_engine['engineFingerprint'])
+            default_q.pop('contextFingerprint')
+            default_q['serviceDates'] = display.required_dates(observation_instant)
+            q = quality.normalize_context(default_q, seal=True)
+        else:
+            q = quality.normalize_context(quality_context if quality_context is not None
+                                          else quality.initial_context(frozen_engine['engineFingerprint']))
+        d = (display.normalize_context(display_context, q) if display_context is not None
+             else display.create_context(q, [observation_instant]))
         # DOM cells are selectable while the shared QA state always covers all eight stations.
         if len(d['observationInstants']) != 1: quality.fail('dom_smoke_scope_invalid')
         instant = d['observationInstants'][0]; days = d['requiredServiceDates'][instant]
@@ -243,8 +252,11 @@ def main(argv=None):
     parser.add_argument('--store',type=Path,required=True)
     parser.add_argument('--source-dir',type=Path,required=True)
     parser.add_argument('--all-stations',action='store_true',help='evaluate all eight stations instead of the default Senkawa/Hikawadai smoke')
+    parser.add_argument('--observation-instant',default=INSTANT,
+        help='one UTC observation instant; the runtime derives JST service date ±1')
     args = parser.parse_args(argv)
-    report = collect_dom_qa(args.store,args.source_dir,station_ids=quality.STATIONS if args.all_stations else None)
+    report = collect_dom_qa(args.store,args.source_dir,station_ids=quality.STATIONS if args.all_stations else None,
+                            observation_instant=args.observation_instant)
     # Safe summary only; observations, candidate IDs and journey text stay inside private IPC/memory.
     import json
     for key in ('snapshotId','contentFingerprint','engineFingerprint','qualityContextFingerprint','displayContextFingerprint','evaluationScope','summary','domQaStatus','reasonCodes','notEvaluated','resultDigest','timings','resources'):

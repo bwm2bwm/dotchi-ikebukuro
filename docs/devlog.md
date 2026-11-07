@@ -1139,3 +1139,21 @@
 - 保存済みcandidateの実バイト列を既存DOM protocolへ渡し、JST 11/7 00:00/12:00/23:59:59×8駅×4scenario＝96セル/1,056 checks PASS。全8駅の副都心線で、土曜始発候補の60分前表示解放境界と平日終電発車境界を各±1秒・当秒で検証し48セル/528 checks PASS。追加の平日11/6 12:00は同じSnapshotの11/5〜7をメモリ内再生成し、8駅×4scenario＝32セル/352 checks PASS。計176セル/1,936 checks PASS。境界には前service dateの24時台の扱いを含む。実ブラウザーの視覚/HTTP/公開環境検証は含まない。
 - 元QA reportは `/private/tmp/dotchi-odpt-candidate-20261107-quality-gate-v2-qa-report/odpt-snapshot-qa.json`（status WARNING）。最終validatorと現行generator fingerprint一致も独立再確認。入力48ファイルのhash/bytes/inode/mtime/ctime不変、既存source/store/取得batchはread-only。candidateはapplicationPeriod=null/publicationApproved=false。外部通信・再取得・実APIキー使用・公開操作なし。
 - 今回の阻害件数は0であり非公開候補生成を完了。残件は候補/差分の人間レビュー、鮮度・JSON/GTFS適用期間/版整合と公開条件の判断、明示公開承認。Commit/Push/Merge/Deployは行わない。git diff --check PASS。変更はcode3/test3/docs3の9ファイルで、references/3資料は未追跡のまま保持。
+
+## 2026-11-07 — 長期間serviceDays candidate対応
+
+- 開始branch `main` / HEAD `4d3a616218bf98e5a3ba39919d5bfa586699374b`。開始時のtracked変更なし、`references/`のみ未追跡。作業差分は長期candidate対応に限定し、referencesを保持。
+- `odpt_public_v2.py`にinclusive `--service-date-range START END` を追加。既存`--service-date`/既定3日方式を維持し、評価期間の前後1日をcandidate serviceDaysに含める。連続性、feed境界、manifest/payload date range、station-date scope、source fingerprint、full QA/exclusion audit/routeCoverageを厳密照合。validatorの安全条件は維持。QA stateは対象日に必要な前後1日のみ、adapterのboard projectionも従来の必要日だけ。DOM metricsは1実行1観測時刻を指定可能。
+- 長期matcher処理で、同一路線・同一service dateの全active GTFS trip IDを各ODPT matchごとに再set化していることを発見し、既存の衝突判定を変えず共有frozensetを再利用する小さな性能修正を`odpt_itinerary.py`/`odpt_train_matcher.py`へ追加。matcher 13件、itinerary 28件PASS。
+- 保存Snapshotのcalendar/date例外をオフライン走査し、2026-11-08〜2027-03-12の全125日にactive service、端点probeもPASSを確認。小範囲target 2026-11-09〜11-11はPASSし、serviceDays 11/8〜12、40 station-date、80 route-date complete、16,604 departures、unmatched 48を保持。QA status WARNING、applicationPeriod=null/publicationApproved=false。candidate payload合計8,270,929 bytes、最大駅JSON 1,191,006 bytes。private bundle validator PASS、prepare QA PASS（payload全体保持、QA stateは3日）。
+- 最大target範囲2026-11-09〜2027-03-11（serviceDays 11/8〜3/12）はsnapshot QAのgenerator/matcher負荷が大きく、候補出力前に約4分で中断。長期candidateは生成されておらず、全125日の品質/coverage・サイズ・DOM評価は未完了。代表日DOM collectorは既存のrepository外store境界によりrepository内storeを拒否したため、実source DOMセル評価なし。観測時刻に合わせたquality context日付を生成する変更を加え、合成fixture全8駅・352 checks PASSを確認。DOM metrics既存18件+動的日付1件とNode adapter長payload 12件もPASS。
+- そのほか `test_odpt_public_v2.py`29、`test_odpt_snapshot_qa.py`17、prepare long bundle 2、matcher 13、itinerary 28がPASS。候補ファイルのhash/bytes integrityとboardの必要3日projectionを確認。生成物は/private/tmp配下のみ。ODPT通信・API key使用なし。batch/Snapshot/originalは変更なし、applicationPeriod/publicationApproved不変、公開/Deploy/Commit等なし。
+- 未解決: 125日一括の品質/coverage実測、代表日DOMのrange candidate実測、125日payloadサイズおよび転送量。5日最大ファイル約1.19 MBからの単純外挿は未確定だが、既存release per-file 25 MiB上限と全JSON読込/hashingのため実測前に長期candidateを公開経路へ接続しない。最小次作業は重複生成の性能計測と、品質ゲートを維持した範囲chunk検証の可否評価。`applicationPeriod`設定・公開承認なし。
+
+## 2026-11-07 — 取得batch固定と長期candidate QA loader容量
+
+- Solレビューで判明した通り、先行5/9/16日candidateは旧`local_data/odpt`由来（7 source中7件一致）であり、2026-11-07取得batchとはGTFSのみ一致、JSONは0/6一致。先行結果は取得batchの品質PASSとして扱わない。
+- range candidateでは`--snapshot`と期待source fingerprintを明示必須化し、inventory直後に`d948b3265975a55cd7f38f08bfcab971e88883dfb554e529bdeae6f04d508b41`との一致を確認。不一致はcandidate生成前に停止する。旧3日方式は既定入力・契約を維持。
+- QA専用payload上限を25 MiBへ引き上げ、bytes/SHA-256・schema・ID検証と上限超過fail-closedを維持。実batch由来7,532,954-byte payloadはDOM harnessで読込・表示、25 MiB超合成payloadは拒否。production runtimeは未変更。
+- 実取得batchの小範囲（評価11/9〜11/11、serviceDays 11/8〜12）と30日範囲（評価11/9〜12/8、serviceDays 11/8〜12/9）はfingerprint一致・quality/coverage/validator/prepare QA PASS。30日は256 station-date/512 route-date complete、payload 52,416,217 bytes、最大file 7,547,220 bytes、477.55秒、max RSS 526,942,208 bytes。ODPT QA WARNINGと480未照合/480 warningの元数は保持し、A240/B240/C0/D0、未解決0。
+- 実candidate payloadによるDOM harnessはJST 11/9 06:00、11/30 23:59:59、12/1 00:00で表示正常。これは実ブラウザー視覚検証ではない。`applicationPeriod=null`、`publicationApproved=false`、取得batch/Snapshot read-only。外部通信・APIキー・公開操作なし。

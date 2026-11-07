@@ -222,6 +222,7 @@ def _envelope(station, days, cache):
         _fail(bad[0]['reasonCode'], bad[0]['availability'])
     payload = copy.deepcopy(cache[days[0]]['payload'])
     payload['serviceDays'] = [copy.deepcopy(cache[d]['payload']['serviceDays'][0]) for d in days]
+    payload['serviceDateRange'] = {'from': days[0], 'through': days[-1]}
     v2.validate_v2_payload(payload)
     if [d['serviceDate'] for d in payload['serviceDays']] != days or payload['stationId'] != station:
         _fail('payload_date_or_station_inconsistent')
@@ -231,7 +232,8 @@ def _envelope(station, days, cache):
     v2._validate_exclusion_audit(audit, [station], days, actual, audit['totalGeneratedCount'])
     raw = _json_bytes(payload)
     integrity = {'path':v2.ROUTE_FILENAMES[station], 'bytes':len(raw), 'sha256':hashlib.sha256(raw).hexdigest()}
-    manifest = {'quality':{'exclusionAudit':audit}, 'candidateFiles':{station:integrity}}
+    manifest = {'evaluationServiceDates': days,
+                'quality':{'exclusionAudit':audit}, 'candidateFiles':{station:integrity}}
     state = _qa_state(manifest, [station], days)
     if state['candidateFiles'][station] != {k:integrity[k] for k in ('bytes','sha256')}:
         _fail('qa_payload_integrity_mismatch')

@@ -1681,3 +1681,30 @@ Bの停車順検証を通したことはgenerator内部のpassenger_match_verifi
 各駅日のQA reportにresolutionとrouteCoverageを追加し、summaryに分類とunmatched/warningCodesのoriginal/resolved/unresolvedを合算する。QA status=WARNINGは保持する。候補生成ゲートは、scope/fingerprint/構造FAIL、24駅日の重複・欠落、全route complete、C/D=0、unresolved=0、原数=解決数+未解決数、駅日別と総計の一致を検証する。Aは1行2WARNING、BはWARNINGなしという原数の関係も検証する。単純にWARNINGを無視する許可フラグは設けない。
 
 private manifestのodpt0には、元status/未照合数/診断集計と、全体および駅日別resolutionを記録する。既存bundle validatorはこの新しいmetadataがあるbundleで同じ算術・scope・総計とODPT照合数の一致を検証し、候補hash/bytes/schema/旅程/routeCoverage検証を維持する。旧private bundleの検証互換は維持するが、新しいpipelineは新しいQA根拠を必須とする。非公開候補生成の成功は公開承認ではなく、applicationPeriod=null/publicationApproved=falseを維持する。
+
+## 長期間serviceDays候補の範囲拡張（2026-11-07）
+
+`scripts/odpt_public_v2.py` と `scripts/odpt_snapshot_qa.py` に、明示した包含service-date範囲を処理する非公開pipeline入口を追加した。CLIは `--service-date-range START END` を受ける。評価対象範囲は最大364日（実装上の上限は前後bufferを含むserviceDays 366日）で、candidateはその前後各1日を含む。範囲は連続・重複なし、anchorを含み、全日がGTFS feed期間内でなければ失敗する。従来の `--service-date` と基準日省略時の3日動作は維持する。manifest/payloadのserviceDateRange・evaluationServiceDateRange・全日リスト、source fingerprint、全駅日QA/routeCoverage、ODPT-0 original/resolved/unresolvedの件数・auditは完全一致検査する。品質ゲート/validatorは緩和していない。
+
+ブラウザQA adapterは長いpayload全体の連続日・ID・hash/契約を検証し、実際のboard projectionでは引き続き観測時刻に必要な3日だけを選ぶ。DOM collectorの観測時刻は1回の実行ごとに明示指定できる。QA stagingは長い候補payload全体を保存する一方、QA stateは指定観測日の前日・当日・翌日だけを対象にする。公開runtime・release-managed契約への接続、時刻窓の変更、公開承認はない。
+
+### 検証結果と制約
+
+- GTFS calendar/calendar_datesをローカルで走査し、2026-11-08〜2027-03-12の125日すべてにactive serviceがあること、端点probe（11/8〜10、3/10〜12）がPASSであることを確認済み。これは運行日候補のデータ根拠で、公開承認期間を意味しない。
+- 小範囲 `--service-date-range 2026-11-09 2026-11-11` はPASS。candidateは2026-11-08〜12の5 serviceDays、8駅×5日=40 station-date、全80 route-date complete、16,604 departures、ODPT照合unique_match 17,240/unmatched 48（元品質診断保持）、QA status WARNINGのまま。applicationPeriod=null / publicationApproved=false。manifest payloadは合計8,270,929 bytes、最大駅ファイル1,191,006 bytes。validator PASS、prepare QA PASS（QA stateは8駅×指定日3日、payload全体は保持）。
+- 最大候補の評価範囲2026-11-09〜2027-03-11（bufferを含むserviceDays 2026-11-08〜2027-03-12）も起動したが、全日snapshot QAのgenerator/matcher処理が大きく、出力開始前に約4分で手動中断した。したがって125日全体の品質/coverage、candidate bytes、DOM QAは未検証で、長期間candidateは生成済みではない。中断時にも取得batch/Snapshotは変更していない。
+- 代表日DOMの実source collectorは完了していない。ローカルrepository配下のstoreは既存QAの安全境界（storeをrepository外に置く要件）で拒否され、長期candidateも未生成のためDOMセル評価まで到達していない。拒否結果をPASS扱いしない。観測時刻に合わせて品質contextの日付を導出する変更を加え、合成fixtureで指定観測時刻/全8駅DOM評価の回帰がPASSしたが、実source代表日DOM結果ではない。
+- 5日candidateの最大JSONは約1.19 MB。125日ファイルの容量は未計測であり、線形外挿は確定値ではない。ただし既存release builderの単一file 25 MiB上限に近づく/超える懸念がある。加えて現adapterは全payload hash検証のため全駅JSONを読み込む。125日を実際に公開する場合、サイズ上限とブラウザ転送量を実測し、必要なら日付分割/lazy loadingを別途設計するまでrelease候補として扱わない。
+- 検証では `test_odpt_public_v2.py` 29件、`test_odpt_snapshot_qa.py` 17件、`test_odpt_train_matcher.py` 13件、`test_odpt_itinerary.py` 28件、長範囲prepare 2件、Node adapter 12件、DOM metrics全体18件と追加動的日付テスト1件がPASS。小範囲実データcandidate/prepareもPASS。125日候補のDOM実測ではない。
+
+### 取得batch再検証とQA loader上限修正（2026-11-07）
+
+先行する5/9/16 serviceDays candidateの「実データPASS」は取得batchに対する結果ではなかった。各manifestのsourceFiles 7件は旧`local_data/odpt`と7/7一致し、2026-11-07取得batchとはGTFSだけ1/7一致、JSONは0/6一致だった。このため旧候補の品質結果・容量は旧Snapshotの測定としてのみ扱い、実取得batchの結果から分離する。
+
+範囲指定pipelineに`--expected-source-fingerprint`を追加し、range指定では`--snapshot`と期待fingerprintを必須化。inventory後、QA生成前に7 source集合fingerprintを比較し、不一致・未指定ではcandidate出力を開始しない。旧3日CLIは従来の既定snapshotを維持する。取得batch rawを明示した小範囲candidateと30日candidateは、どちらも期待値`d948b3265975a55cd7f38f08bfcab971e88883dfb554e529bdeae6f04d508b41`に一致した。
+
+QA専用`preview_odpt_v2.mjs`の駅payload取得上限を1,500,000 bytesから25 MiBへ変更し、release-managedの最大file boundに合わせた。設定サイズを超えるpayloadは拒否し、読み込み後もQA stateの期待bytes/SHA-256、厳密payload/ID検証を維持する。本番runtimeやrelease validatorは変更していない。QA画面相当のDOM harnessで7,532,954-byteの実batch由来駅payloadをhash確認後に読込み・表示できた。25 MiB超合成payloadはエラーとなり、候補を表示しない。旧3日payloadの`serviceDateRange`なし互換もPython/Node validatorで確認。
+
+実取得batchから評価範囲2026-11-09〜2026-12-08（30日）、前後buffer込みserviceDays 2026-11-08〜2026-12-09（32日）を生成。source fingerprint一致、candidate pipeline/bundle validator PASS、prepare QA PASS。全256 station-date・512 route-dateがcomplete、105,272候補、4,392除外。ODPT QA statusはWARNINGを保持し、未照合480件とwarning480件は原数=解決数、未解決0。分類A=240/B=240/C=0/D=0。`applicationPeriod=null`、`publicationApproved=false`。生成477.55秒、max RSS 526,942,208 bytes（約503 MiB）、payload合計52,416,217 bytes、最大駅file 7,547,220 bytes。中間期・月境界（JST 2026-11-30 23:59:59 / 2026-12-01 00:00:00）を実batch candidateでDOM評価し、いずれも正常な候補表示を確認。
+
+これは長範囲の生成・検証機能が実装されたことと、125日一括実行が完了したことを区別する。次の最小作業は生成の重複処理/性能を計測して、QAを保ったまま小さな日付chunk単位で全期間の品質・coverageを確認できるか判断すること。chunkを単純連結して公開可能と見なさず、範囲・fingerprint・日付の隙間/重複・累積payloadサイズを再検証する。`applicationPeriod`設定・publication approvalは別判断。

@@ -489,8 +489,8 @@ class ItineraryGenerator:
             destination_heads,
             {stop_id: row.get("stop_name", "") for stop_id, row in self.stops.items()},
         )
-        active_ids = {route_id: [trip_id for trip_id, trip in trips.items()
-                                 if trip.route_id == route_id]
+        active_ids = {route_id: frozenset(trip_id for trip_id, trip in trips.items()
+                                          if trip.route_id == route_id)
                       for route_id in ROUTES}
         return matcher, active_ids
 

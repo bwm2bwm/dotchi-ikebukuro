@@ -70,6 +70,27 @@ def _strict_date(value: str) -> date:
     return parsed
 
 
+def _candidate_date_scope(service_date: str | None,
+                          service_date_range: tuple[str, str] | None) -> tuple[date, dict[str, str], list[str]]:
+    """Resolve user-visible dates and one-day service-date buffers."""
+    if service_date_range is None:
+        anchor = _strict_date(service_date or "2026-10-29")
+        start = end = anchor
+    else:
+        if service_date is not None or not isinstance(service_date_range, tuple) or len(service_date_range) != 2:
+            raise V2Error("service_date_scope_invalid")
+        start, end = (_strict_date(value) for value in service_date_range)
+        if end < start or (end - start).days > 364:
+            raise V2Error("service_date_range_limit_exceeded")
+        anchor = start
+    first, last = start - timedelta(days=1), end + timedelta(days=1)
+    count = (last - first).days + 1
+    if count > 366:
+        raise V2Error("service_date_range_limit_exceeded")
+    dates = [(first + timedelta(days=offset)).isoformat() for offset in range(count)]
+    return anchor, {"from": start.isoformat(), "through": end.isoformat()}, dates
+
+
 def _inventory(snapshot: Path) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
     try:
         entries, source_meta = snapshot_qa._inventory(snapshot)
@@ -253,7 +274,9 @@ def _build_station_payload(generator: ItineraryGenerator, station_id: str,
             "generatedAt": generated_at, "timezone": "Asia/Tokyo",
             # Public applicability has not been approved. Null is intentional;
             # the separate QA evaluation window is kept only in the manifest.
-            "applicationPeriod": None, "stationId": station_id,
+            "applicationPeriod": None,
+            "serviceDateRange": {"from": service_dates[0], "through": service_dates[-1]},
+            "stationId": station_id,
             "originStationId": "Ikebukuro", "serviceDays": days}, metrics)
 
 
@@ -430,9 +453,12 @@ def validate_v2_payload(payload: Any,
     if (not _safe_nonnegative_int(max_transfer_wait_seconds)
             or max_transfer_wait_seconds not in {600, V2_MAX_TRANSFER_SECONDS}):
         raise V2Error("transfer_wait_policy_invalid")
-    top = _exact_fields(payload, {"schemaVersion", "dataScope", "generatedAt", "timezone",
-                                 "applicationPeriod", "stationId", "originStationId", "serviceDays"},
-                        "payload")
+    base_fields = {"schemaVersion", "dataScope", "generatedAt", "timezone",
+                   "applicationPeriod", "stationId", "originStationId", "serviceDays"}
+    range_fields = base_fields | {"serviceDateRange"}
+    if not isinstance(payload, dict) or set(payload) not in (base_fields, range_fields):
+        raise V2Error("payload_fields_invalid")
+    top = payload
     if top["schemaVersion"] != SCHEMA_VERSION or top["dataScope"] != DATA_SCOPE:
         raise V2Error("profile_invalid")
     if top["timezone"] != "Asia/Tokyo" or top["applicationPeriod"] is not None:
@@ -460,6 +486,9 @@ def validate_v2_payload(payload: Any,
         _strict_date(service_date)
         if service_date in seen_dates:
             raise V2Error("service_date_duplicate")
+        if index and service_date != (date.fromisoformat(days[index - 1]["serviceDate"])
+                                      + timedelta(days=1)).isoformat():
+            raise V2Error("service_dates_not_contiguous")
         seen_dates.add(service_date)
         coverage = day["routeCoverage"]
         if not isinstance(coverage, dict) or set(coverage) != set(ROUTES):
@@ -522,6 +551,12 @@ def validate_v2_payload(payload: Any,
                 raise V2Error("data_state_invalid")
             if item["scheduledTripCount"] == 0 and item["dataState"] == "complete":
                 raise V2Error("empty_schedule_cannot_be_complete")
+    if "serviceDateRange" in top:
+        value = top["serviceDateRange"]
+        if (not isinstance(value, dict) or set(value) != {"from", "through"}
+                or value["from"] != days[0]["serviceDate"]
+                or value["through"] != days[-1]["serviceDate"]):
+            raise V2Error("service_date_range_mismatch")
     return payload
 
 
@@ -531,7 +566,10 @@ def validate_bundle(bundle_dir: Path, manifest: dict[str, Any],
     if set(expected_station_ids) != set(DESTINATIONS) or len(expected_station_ids) != len(DESTINATIONS):
         raise V2Error("expected_station_set_invalid")
     dates = [_strict_date(value).isoformat() for value in expected_dates]
-    if not dates or len(set(dates)) != len(dates):
+    if (not dates or len(dates) > 366 or len(set(dates)) != len(dates)
+            or dates != sorted(dates)
+            or any(date.fromisoformat(right) - date.fromisoformat(left) != timedelta(days=1)
+                   for left, right in zip(dates, dates[1:]))):
         raise V2Error("expected_dates_invalid")
     if manifest.get("dataScope") != MANIFEST_SCOPE:
         raise V2Error("private_manifest_scope_invalid")
@@ -539,6 +577,20 @@ def validate_bundle(bundle_dir: Path, manifest: dict[str, Any],
         raise V2Error("source_fingerprint_mismatch")
     if manifest.get("evaluationServiceDates") != dates:
         raise V2Error("manifest_date_set_mismatch")
+    if len(dates) > 3 and not {"serviceDateRange", "evaluationServiceDateRange"} <= set(manifest):
+        raise V2Error("manifest_service_date_range_required")
+    if "serviceDateRange" in manifest or "evaluationServiceDateRange" in manifest:
+        data_range = manifest.get("serviceDateRange")
+        target_range = manifest.get("evaluationServiceDateRange")
+        if (not isinstance(data_range, dict) or set(data_range) != {"from", "through"}
+                or data_range != {"from": dates[0], "through": dates[-1]}
+                or not isinstance(target_range, dict) or set(target_range) != {"from", "through"}):
+            raise V2Error("manifest_service_date_range_invalid")
+        target_start, target_end = (_strict_date(target_range[key]) for key in ("from", "through"))
+        if (target_end < target_start or (target_end - target_start).days > 364
+                or dates[0] != (target_start - timedelta(days=1)).isoformat()
+                or dates[-1] != (target_end + timedelta(days=1)).isoformat()):
+            raise V2Error("manifest_service_date_range_mismatch")
     transfer_policy = manifest.get("transferSearchPolicy")
     if transfer_policy is None:
         # Earlier private bundles were generated with the shared generator's
@@ -576,6 +628,8 @@ def validate_bundle(bundle_dir: Path, manifest: dict[str, Any],
         validate_v2_payload(payload, max_transfer_wait_seconds=bundle_max_transfer_wait)
         if payload["stationId"] != station_id:
             raise V2Error("candidate_station_mismatch")
+        if len(dates) > 3 and "serviceDateRange" not in payload:
+            raise V2Error("candidate_service_date_range_required")
         if [item["serviceDate"] for item in payload["serviceDays"]] != dates:
             raise V2Error("candidate_service_dates_mismatch")
         for day in payload["serviceDays"]:
@@ -666,6 +720,7 @@ def _validate_odpt0_report(report: dict[str, Any], anchor: date,
     if (report.get("status") not in {"PASS", "WARNING"} or report.get("sourceFingerprint") != source_fp
             or report.get("serviceDate") != anchor.isoformat()
             or report.get("requestedServiceDates") != requested_dates
+            or report.get("serviceDateRange") != {"from": requested_dates[0], "through": requested_dates[-1]}
             or report.get("stationCount") != len(DESTINATIONS)
             or report.get("dayResultCount") != len(DESTINATIONS) * len(requested_dates)):
         raise V2Error("odpt0_quality_gate_failed")
@@ -756,13 +811,20 @@ def _assert_station_date_generation_matches(report: dict[str, Any],
         raise V2Error("odpt0_station_date_generation_mismatch")
 
 
-def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dict[str, Any]:
-    anchor = _strict_date(service_date)
-    requested_dates = [(anchor + timedelta(days=offset)).isoformat() for offset in (-1, 0, 1)]
+def run_pipeline(snapshot_dir: Path, service_date: str | None, output_dir: Path,
+                 service_date_range: tuple[str, str] | None = None,
+                 expected_source_fingerprint: str | None = None) -> dict[str, Any]:
+    anchor, evaluation_range, requested_dates = _candidate_date_scope(service_date, service_date_range)
+    if service_date_range is not None and (not isinstance(expected_source_fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_source_fingerprint)):
+        raise V2Error("expected_source_fingerprint_required")
     snapshot = snapshot_dir.expanduser().resolve()
     output = _safe_output(output_dir, snapshot)
     source_files, source_fp, source_metadata = _inventory(snapshot)
-    qa_report = snapshot_qa.run_qa(snapshot, anchor.isoformat(), output)
+    if expected_source_fingerprint is not None and source_fp != expected_source_fingerprint:
+        raise V2Error("source_fingerprint_unexpected")
+    qa_report = snapshot_qa.run_qa(snapshot, anchor.isoformat(), output,
+                                   requested_service_dates=requested_dates)
     _validate_odpt0_report(qa_report, anchor, requested_dates, source_fp)
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     payloads: dict[str, dict[str, Any]] = {}
@@ -845,6 +907,8 @@ def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dic
                       "generatorFingerprint": qa_report["generatorFingerprint"]},
             "generatorFingerprint": _source_generator_fingerprint(),
             "evaluationAnchorServiceDate": anchor.isoformat(),
+            "evaluationServiceDateRange": evaluation_range,
+            "serviceDateRange": {"from": requested_dates[0], "through": requested_dates[-1]},
             "evaluationServiceDates": requested_dates,
             "transferSearchPolicy": {
                 "minimumWaitSeconds": V2_MIN_TRANSFER_SECONDS,
@@ -909,13 +973,24 @@ def run_pipeline(snapshot_dir: Path, service_date: str, output_dir: Path) -> dic
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--snapshot", type=Path, default=snapshot_qa.DEFAULT_SNAPSHOT)
-    parser.add_argument("--service-date", default="2026-10-29", help="YYYY-MM-DD")
+    parser.add_argument("--snapshot", type=Path,
+                        help="explicit source directory; defaults to the legacy local snapshot only for 3-day mode")
+    parser.add_argument("--expected-source-fingerprint",
+                        help="required with --service-date-range; SHA-256 fingerprint of all seven input sources")
+    date_group = parser.add_mutually_exclusive_group()
+    date_group.add_argument("--service-date", help="legacy anchor YYYY-MM-DD; evaluates anchor ±1 day")
+    date_group.add_argument("--service-date-range", nargs=2, metavar=("START", "END"),
+                            help="inclusive user-visible range; adds one previous and next service day")
     parser.add_argument("--output", type=Path, required=True,
                         help="new, non-existing output directory outside the repository and snapshot")
     args = parser.parse_args(argv)
     try:
-        result = run_pipeline(args.snapshot, args.service_date, args.output)
+        ranged = args.service_date_range is not None
+        if ranged and (args.snapshot is None or args.expected_source_fingerprint is None):
+            raise V2Error("explicit_snapshot_and_fingerprint_required_for_range")
+        result = run_pipeline(args.snapshot or snapshot_qa.DEFAULT_SNAPSHOT, args.service_date, args.output,
+                              tuple(args.service_date_range) if ranged else None,
+                              args.expected_source_fingerprint)
     except (V2Error, snapshot_qa.QAError, OSError, ValueError) as exc:
         code = exc.code if isinstance(exc, V2Error) else str(exc)
         print(f"FAIL: {code}", file=sys.stderr)

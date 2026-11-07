@@ -86,8 +86,12 @@ def _qa_state(manifest: dict, station_ids: list[str], service_dates: list[str]) 
         raise PrepareError("exclusion_audit_missing")
     rows = {(row.get("stationId"), row.get("serviceDate")): row
             for row in audit["byStationDate"] if isinstance(row, dict)}
-    expected_pairs = {(station, day) for station in station_ids for day in service_dates}
-    if set(rows) != expected_pairs:
+    candidate_dates = manifest.get("evaluationServiceDates")
+    if not isinstance(candidate_dates, list) or not candidate_dates:
+        raise PrepareError("candidate_service_dates_missing")
+    expected_pairs = {(station, day) for station in station_ids for day in candidate_dates}
+    requested_pairs = {(station, day) for station in station_ids for day in service_dates}
+    if set(rows) != expected_pairs or not requested_pairs <= set(rows):
         raise PrepareError("exclusion_audit_station_date_mismatch")
     stations = {}
     for station_id in station_ids:
@@ -145,7 +149,20 @@ def prepare(bundle_dir: Path, service_date: str, output_dir: Path | None = None)
         manifest_path = bundle / "private-generator-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entries = manifest.get("candidateFiles", {})
-        v2.validate_bundle(bundle, manifest, list(v2.DESTINATIONS), service_dates,
+        bundle_dates = manifest.get("evaluationServiceDates")
+        if not isinstance(bundle_dates, list):
+            raise PrepareError("candidate_service_dates_missing")
+        target_range = manifest.get("evaluationServiceDateRange")
+        if target_range is not None:
+            target_day = _strict_date(service_date)
+            if (not isinstance(target_range, dict) or target_day < _strict_date(target_range.get("from", ""))
+                    or target_day > _strict_date(target_range.get("through", ""))):
+                raise PrepareError("qa_date_outside_candidate_range")
+        elif manifest.get("evaluationAnchorServiceDate") != service_date:
+            raise PrepareError("qa_date_outside_candidate_range")
+        if not set(service_dates) <= set(bundle_dates):
+            raise PrepareError("qa_required_service_dates_missing")
+        v2.validate_bundle(bundle, manifest, list(v2.DESTINATIONS), bundle_dates,
                            manifest.get("sourceFingerprint"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, v2.V2Error) as exc:
         code = exc.code if isinstance(exc, v2.V2Error) else "bundle_validation_failed"

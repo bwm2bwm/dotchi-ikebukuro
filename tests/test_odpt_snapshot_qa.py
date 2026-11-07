@@ -83,9 +83,26 @@ class SnapshotQATests(unittest.TestCase):
         self.assertEqual(report["stationCount"], 8)
         self.assertEqual(report["dayResultCount"], 24)
         self.assertEqual(report["requestedServiceDates"], ["2026-10-28", "2026-10-29", "2026-10-30"])
+        self.assertEqual(report["serviceDateRange"], {"from": "2026-10-28", "through": "2026-10-30"})
         self.assertEqual(report["status"], "WARNING")
         self.assertTrue(all("sourceDates" in item for item in report["source"]["json"].values()))
         self.assertEqual(report["source"]["json"]["TrainTimetable_Yurakucho.json"]["sourceIssuedDates"], [])
+
+    def test_explicit_contiguous_range_evaluates_every_station_date(self):
+        dates = ["2026-10-28", "2026-10-29", "2026-10-30"]
+        report = qa.run_qa(self.root, dates[1], self.out, requested_service_dates=dates)
+        self.assertEqual(report["requestedServiceDates"], dates)
+        self.assertEqual(report["serviceDateRange"], {"from": dates[0], "through": dates[-1]})
+        self.assertEqual(report["dayResultCount"], 8 * len(dates))
+
+    def test_explicit_range_rejects_gaps_duplicates_and_oversize(self):
+        for dates in (["2026-10-28", "2026-10-30"],
+                      ["2026-10-28", "2026-10-28"],
+                      ["2026-10-28"] * 367):
+            with self.subTest(dates=len(dates)):
+                with self.assertRaisesRegex(qa.QAError, "service_date_range_invalid"):
+                    qa.run_qa(self.root, "2026-10-29", self.out,
+                              requested_service_dates=list(dates))
 
     def test_missing_required_file(self):
         (self.root / qa.REQUIRED_JSON[0]).unlink()

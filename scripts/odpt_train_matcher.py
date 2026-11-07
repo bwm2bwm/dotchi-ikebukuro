@@ -159,7 +159,10 @@ class OdptTrainMatcher:
         # Detect alias collisions among active GTFS trips that could map to the
         # same ODPT number on this route/calendar/time, including exact spellings.
         competing = []
-        active_ids = set(active_gtfs_ids)
+        # ItineraryGenerator supplies a frozen set shared by all trips for
+        # this route and service day. Avoid rebuilding it for every match.
+        active_ids = (active_gtfs_ids if isinstance(active_gtfs_ids, (set, frozenset))
+                      else set(active_gtfs_ids))
         for other_id in active_ids:
             if other_id == trip.trip_id:
                 continue

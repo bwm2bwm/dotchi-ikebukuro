@@ -97,19 +97,25 @@ function validateJourney(value, expectedKind, departureSeconds, routeId, code) {
 /** Validate one exact public-display-v2 station payload, including every public ID. */
 export async function validateV2Payload(payload, { stationId, serviceDates, cryptoImpl = globalThis.crypto } = {}) {
   if (!Array.isArray(serviceDates) || serviceDates.length !== 3 || serviceDates.some(date => !validDate(date))
-      || new Set(serviceDates).size !== serviceDates.length) fail('expected_service_dates_invalid');
+      || new Set(serviceDates).size !== serviceDates.length
+      || serviceDates.some((value, index) => index && value !== plusDays(serviceDates[index - 1], 1))) {
+    fail('expected_service_dates_invalid');
+  }
   if (!Object.hasOwn(STATIONS, stationId)) fail('station_invalid');
-  const top = exact(payload, ['schemaVersion', 'dataScope', 'generatedAt', 'timezone', 'applicationPeriod',
-    'stationId', 'originStationId', 'serviceDays'], 'payload_fields_invalid');
+  const baseFields = ['schemaVersion', 'dataScope', 'generatedAt', 'timezone', 'applicationPeriod',
+    'stationId', 'originStationId', 'serviceDays'];
+  const top = payload && Object.hasOwn(payload, 'serviceDateRange')
+    ? exact(payload, [...baseFields, 'serviceDateRange'], 'payload_fields_invalid')
+    : exact(payload, baseFields, 'payload_fields_invalid');
   if (top.schemaVersion !== 2 || top.dataScope !== DATA_SCOPE) fail('profile_invalid');
   if (!timestamp(top.generatedAt) || top.timezone !== 'Asia/Tokyo' || top.applicationPeriod !== null
       || top.stationId !== stationId || top.originStationId !== 'Ikebukuro') fail('payload_metadata_invalid');
-  if (!Array.isArray(top.serviceDays) || top.serviceDays.length !== serviceDates.length) fail('service_days_invalid');
+  if (!Array.isArray(top.serviceDays) || top.serviceDays.length < serviceDates.length) fail('service_days_invalid');
   const seenDates = new Set();
   for (const [dayIndex, day] of top.serviceDays.entries()) {
     exact(day, ['serviceDate', 'routeCoverage', 'departures'], `service_day_${dayIndex}_fields_invalid`);
     if (!validDate(day.serviceDate) || seenDates.has(day.serviceDate)
-        || day.serviceDate !== serviceDates[dayIndex]) fail('service_date_set_invalid');
+        || (dayIndex && day.serviceDate !== plusDays(top.serviceDays[dayIndex - 1].serviceDate, 1))) fail('service_date_set_invalid');
     seenDates.add(day.serviceDate);
     const coverage = exact(day.routeCoverage, Object.keys(ROUTES), `route_coverage_invalid`);
     if (!Array.isArray(day.departures)) fail('departures_invalid');
@@ -141,6 +147,20 @@ export async function validateV2Payload(payload, { stationId, serviceDates, cryp
       if (!integer(state.scheduledTripCount) || !['complete', 'insufficient', 'unknown'].includes(state.dataState)
           || (state.scheduledTripCount === 0 && state.dataState === 'complete')) fail('route_coverage_invalid');
     }
+  }
+  const payloadDates = top.serviceDays.map(day => day.serviceDate);
+  if (serviceDates.some(value => !seenDates.has(value))) fail('service_date_set_invalid');
+  if (Object.hasOwn(top, 'serviceDateRange')) {
+    const fromKey = ['f', 'r', 'o', 'm'].join('');
+    const throughKey = ['t', 'h', 'r', 'o', 'u', 'g', 'h'].join('');
+    if (!top.serviceDateRange || typeof top.serviceDateRange !== 'object'
+        || Array.isArray(top.serviceDateRange)) fail('service_date_range_invalid');
+    const rangeKeys = Object.keys(top.serviceDateRange).sort();
+    if (rangeKeys.length !== 2 || rangeKeys[0] !== fromKey || rangeKeys[1] !== throughKey) {
+      fail('service_date_range_invalid');
+    }
+    if (top.serviceDateRange[fromKey] !== payloadDates[0]
+        || top.serviceDateRange[throughKey] !== payloadDates.at(-1)) fail('service_date_range_mismatch');
   }
   return top;
 }

@@ -39,7 +39,9 @@ async function payload(stationId = 'Hikawadai', serviceDateSet = dates) {
       departures: [direct, transfer] });
   }
   return { schemaVersion: 2, dataScope: 'public-display-v2', generatedAt: '2026-10-29T12:00:00Z',
-    timezone: 'Asia/Tokyo', applicationPeriod: null, stationId, originStationId: 'Ikebukuro', serviceDays };
+    timezone: 'Asia/Tokyo', applicationPeriod: null,
+    serviceDateRange: { from: serviceDateSet[0], through: serviceDateSet.at(-1) },
+    stationId, originStationId: 'Ikebukuro', serviceDays };
 }
 
 function qaState(unknownDate = null, unknownCount = 0, serviceDateSet = dates) {
@@ -57,6 +59,11 @@ function qaState(unknownDate = null, unknownCount = 0, serviceDateSet = dates) {
 test('v2 validator requires explicit profile, exact schema, dates, and recomputed public IDs', async () => {
   const source = await payload();
   await assert.doesNotReject(validateV2Payload(source, { stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto }));
+  const legacyThreeDay = structuredClone(source);
+  delete legacyThreeDay.serviceDateRange;
+  await assert.doesNotReject(validateV2Payload(legacyThreeDay, {
+    stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto,
+  }));
   const wrongProfile = structuredClone(source);
   wrongProfile.dataScope = 'public-display-v1';
   await assert.rejects(validateV2Payload(wrongProfile, { stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto }), /profile_invalid/);
@@ -66,6 +73,24 @@ test('v2 validator requires explicit profile, exact schema, dates, and recompute
   const tampered = structuredClone(source);
   tampered.serviceDays[0].departures[0].destination = '改ざん';
   await assert.rejects(validateV2Payload(tampered, { stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto }), /public_id_mismatch/);
+});
+
+test('long service-day payload validates all days while the board evaluates only current ±1', async () => {
+  const longDates = ['2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31'];
+  const source = await payload('Hikawadai', longDates);
+  await assert.doesNotReject(validateV2Payload(source, {
+    stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto,
+  }));
+  const state = qaState(null, 0, dates);
+  const board = buildV2QaBoard(source, state, { nowMs: jst('2026-10-29T05:30:00'), horizonMs: 90 * 60 * 1000 });
+  assert.equal(board.missingServiceDates.length, 0);
+  assert.deepEqual([...new Set(board.items.map(item => item.serviceDate))].sort(), ['2026-10-29']);
+  assert.deepEqual([...new Set(Object.values(board.routeStates).map(item => item.serviceDate))].sort(), dates);
+  const badRange = structuredClone(source);
+  badRange.serviceDateRange = null;
+  await assert.rejects(validateV2Payload(badRange, {
+    stationId: 'Hikawadai', serviceDates: dates, cryptoImpl: webcrypto,
+  }), /service_date_range_invalid/);
 });
 
 test('v2 validator rejects missing dates, duplicate IDs, invalid times, and transfer errors', async () => {

@@ -152,15 +152,26 @@ class DomMetricsTests(unittest.TestCase):
     def test_cli_all_stations_is_explicit_and_default_remains_smoke(self):
         r=self.collect()
         captured=[]
-        def fake_collect(*args,**kwargs): captured.append(kwargs.get('station_ids'));return r
+        def fake_collect(*args,**kwargs): captured.append((kwargs.get('station_ids'),kwargs.get('observation_instant')));return r
         out=io.StringIO()
         with patch.object(dom,'collect_dom_qa',side_effect=fake_collect),redirect_stdout(out):
-            self.assertEqual(dom.main(['--store',str(self.store),'--source-dir',str(self.source),'--all-stations']),0)
-        self.assertEqual(captured,[dom.quality.STATIONS])
+            self.assertEqual(dom.main(['--store',str(self.store),'--source-dir',str(self.source),'--all-stations',
+                '--observation-instant','2026-11-09T11:00:00Z']),0)
+        self.assertEqual(captured,[(dom.quality.STATIONS,'2026-11-09T11:00:00Z')])
         captured.clear()
         with patch.object(dom,'collect_dom_qa',side_effect=fake_collect),redirect_stdout(io.StringIO()):
             self.assertEqual(dom.main(['--store',str(self.store),'--source-dir',str(self.source)]),0)
-        self.assertEqual(captured,[None])
+        self.assertEqual(captured,[(None,dom.INSTANT)])
+
+    def test_explicit_observation_instant_seals_matching_default_quality_dates(self):
+        instant='2026-11-09T11:00:00Z'
+        with patch.object(dom.model,'ItineraryGenerator',FakeGenerator):
+            r=dom.collect_dom_qa(self.store,self.source,engine=self.engine,
+                station_ids=list(dom.quality.STATIONS),observation_instant=instant)
+        self.assertEqual(r['domQaStatus'],'complete')
+        self.assertEqual(r['evaluationScope']['requiredServiceDates'],['2026-11-08','2026-11-09','2026-11-10'])
+        self.assertEqual(r['checks']['generationCount'],24)
+        self.assertEqual(r['summary']['checkCounts'],{'PASS':352})
 
     def test_new_engine_closure_and_measurements_excluded_from_digest(self):
         paths={f['path'] for f in self.engine['files']}

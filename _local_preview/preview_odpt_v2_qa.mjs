@@ -16,6 +16,8 @@ if (!window.crypto?.subtle?.digest) throw new Error('このブラウザーでは
 const serviceDateList = Object.values(ODPT_V2_QA_FILES);
 const stationIds = Object.keys(ODPT_V2_QA_STATIONS);
 const routeIds = Object.keys(ODPT_V2_QA_ROUTES);
+// QA candidate files must fit the release-managed per-file ceiling.
+const MAX_CANDIDATE_BYTES = 25 * 1024 * 1024;
 const stationCache = new Map();
 const destinationList = elements['destination-list'];
 let qaState = null;
@@ -61,7 +63,7 @@ function fetchUrl(path) {
   return url;
 }
 
-async function fetchJsonBytes(path, maximumBytes = 1_500_000) {
+async function fetchJsonBytes(path, maximumBytes = MAX_CANDIDATE_BYTES) {
   const response = await window.fetch(fetchUrl(path), {
     method: 'GET', mode: 'same-origin', credentials: 'omit', cache: 'no-store', redirect: 'error',
   });
