@@ -1106,3 +1106,13 @@
 - researchの資料一覧・ページ根拠、JSON6件のC/GTFS設定A、件数上限/検索全件性、date適用範囲と初回取得前の残課題を補完。project_stateの直接未閲覧記述を訂正。
 - PDFはPoppler/pypdfが環境になかったためmacOS標準PDFKit経由で読取。調査に必要なページと全文抽出結果を確認。実API/ファイル配布URLへの通信なし。既存原本/store非操作、コード・設定・test変更なし、Commit等なし。文書差分のみ。
 - 先行する同日記録内の「資料を直接参照できず」「全7 source C」「終了時の未コミット変更は3文書のみ」は、資料配置後の作業再開前の状態であり、この追補で更新する。終了時の`git status`には許可された3文書変更に加え、ユーザー配置の未追跡`references/`が表示される。資料はそのまま保持し、stage/addしていない。
+
+## 2026-11-07 — ODPT Phase 2D-3C ライブCLI最小実装・オフライン検証
+
+- 開始main / `58b646cd7ab42fe5284b4546535d625f4f5fd262`。2D-3Bの文書commit反映と、未追跡references 3件以外に差分がないことを確認。
+- `odpt_manual_fetch.py`へ読取専用plan、保存先・固定7 source・retry対象/履歴の確認値、fetch/retry両方の明示opt-inと呼出し内permitを追加。既定拒否、固定経路、排他的な新規非公開保存先、既存HTTP/TLS/redirect制約を維持。旧LIVE_TRANSPORT_ENABLED定数は廃止し、flagだけ・環境値だけでの有効化を許さない。
+- 確認条件成立後だけ環境providerを接続し、未設定/不正credentialはbatch作成/通信前に停止。実キーの設定・読取・使用なし。JSONは既存parserに加え非空/@type/識別子/operator/指定railwayを検査。ZIP validator、raw二巡hash/bytes/metadata、retry・provenance・strict契約・評価adapter・公開状態は再利用/維持。
+- 新規テストではpermitを実際に発動せず、確認条件を純粋関数で確認。許可後CLI dispatchはsession/driverをstubに置換し、env providerもdummy mock。HTTP/TLSは完全mock。既存の取得/評価fixtureはscope-correctな非空合成JSONへ更新。実ODPT通信をテストに使わない。
+- 編集途中の暫定runはdisplay評価/engine変更検出で停止したため、その結果を採用せず、コードを固定して関連回帰を実行。最終164件PASS（145.345秒）：manual fetch/取得評価、Source契約/inventory/store/2A、train意味比較/GTFS loader/GTFS意味比較/統合semantics/quality input。新規クラスが共通基本6ケースを継承するため、164実行にはその再実行分を含む。2A〜2C接続は合成live形式も含め検証、Node DOMまでの範囲であり実ダイヤ・外部疎通の証明ではない。socket接続自体を拒否mockにした状態でPASS。
+- 既存原本7件＋store8ファイルを回帰前後にread-onlyで照合し、SHA-256/bytes/inode/mtime/ctime一致。原本/storeへの書込・上書き・移動・コピーなし。referencesは未追跡のまま非操作。Cloudflare/公開builder/runtime、承認状態、Commit/Push/Merge/Deploy操作なし。
+- 変更はmanual fetch、manual fetch test、取得評価test、README、project_state、research、本履歴の7ファイル。help-offlineとgit diff --check PASS。初回実取得前には公式個別endpoint/filter/全件性確認方法、通信/転送先・保存先の人間の明示許可と、この差分のレビューが残る。

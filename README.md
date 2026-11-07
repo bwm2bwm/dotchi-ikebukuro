@@ -35,9 +35,11 @@ find local_data/odpt -maxdepth 1 -type f -print
 
 取得スクリプトは対象JSONを最大6リクエストでローカル保存します。`local_data/odpt/` はGit管理対象外です。GTFSのCKAN配布URL・認証条件は未確認のため自動ダウンロードしません。入手済みZIPを同フォルダに置くと解析対象になります。解析結果はターミナルに表示され、データ未配置時に実データ結果を作りません。
 
-### Phase 2D-3A 手動取得driver・CLI（実通信禁止）
+### Phase 2D-3C 手動取得CLI（既定で通信拒否）
 
-`python3 -B scripts/odpt_manual_fetch.py help-offline` で通信無効を確認できます。通常の `fetch --batch <新規絶対path>` と `retry --batch <未完了batch> --source <固定sourceId>` は実通信を拒否して終了2となり、認証情報を読みません。`--enable-live-transport`も通信を許可しません。単なる定数変更では解除できないコード上のpolicy停止を維持しています。実取得先・selectorの公式確認と人による取得許可を得た別工程でのみ、実通信の配線を変更します。
+`python3 -B scripts/odpt_manual_fetch.py help-offline` は既定拒否の状態を表示します。通常の`fetch --batch <新規絶対path>`/`retry --batch <未完了batch> --source <固定sourceId>`は終了2となり、認証情報を読みません。
+
+通信なしの`plan --batch <新規の非公開絶対path>`で固定7 source・URL/filter・保存先・GTFS転送許可範囲と`confirmation`を確認します。retryの事前確認は`plan --batch <未完了live-batch> --source <固定sourceId>`です。planは保存先を作らず、秘密・通信も使用しません。将来、人が実通信を許可した場合に限り、fetch/retryの同じ引数へ`--enable-live-transport --confirm-plan <表示されたconfirmation>`を付けるとライブ経路へ進みます。確認値は保存先・対象・retry履歴に対応し、承認証明/秘密値ではありません。`--enable-live-transport`だけでは取得しません。**今回の検証ではライブ許可を発動せず、実通信していません。**
 
 CLIのdriver接続はPythonのテスト入口 `main(argv, exchange=mock, credential_provider=dummy_provider)` で検証できます。CLIからmockコードやURL、秘密値を指定する機能はありません。`run_fetch()`は新規非公開batchを作り、固定順（Railway、Station、TrainTimetable有楽町/副都心、StationTimetable有楽町/副都心、GTFS）で取得します。最初の失敗/中断で止まり、7件が成功してraw再照合できた場合だけSnapshotを確定します。自動retryなし。
 
@@ -45,7 +47,9 @@ CLIのdriver接続はPythonのテスト入口 `main(argv, exchange=mock, credent
 
 ローカル操作は `init --batch <新規の非公開絶対path>`、`inspect --batch <batch>`、`finalize --batch <batch>`。`fetch`自体が新規先を要求するため、`init`で作った同じ先へ`fetch`を実行する手順ではありません。repository/公開風path/preview/QA出力先やsymlink経路は使えません。保存失敗後の孤立rawや壊れた履歴は上書きせず調査します。
 
-補助batch/evidenceの新形式はschemaVersion 2で、mockの`offline-injected`と将来の`live-https`を区別します。mock取得は必ずoffline記録となり、live batchへmockを追記できません。従来v1 offline記録も読み取れます。Source/Snapshot strict schemaは変更せず、公開承認false・適用期間null・版整合not-evaluatedを維持します。実APIキーは使用せず、`env_credential()`も通常CLIから呼びません。テストは `python3 -m unittest tests.test_odpt_manual_fetch tests.test_odpt_fetch_evaluate`（合成データとmockのみ）。
+補助batch/evidence v2はmockの`offline-injected`とnativeの`live-https`を区別し、従来v1 offlineも読み取れます。mockとライブ許可の併用・live batchへのmock追記を拒否します。Source/Snapshot契約と公開承認false・適用期間null・版整合not-evaluatedを維持します。確認条件成立後だけ`env_credential()`が`ODPT_API_KEY`を受け取り、未設定/不正形式なら保存先作成・通信前に停止します。実キーをCLI引数・チャット・履歴・URL欄に入れないでください。今回実キーは設定・読取・使用していません。
+
+受信したJSONは既存parserに加え、非空・@type・識別子・TokyoMetro operator・指定railwayを検査し、GTFSは既存ZIP/metadata validatorを使います。保存rawは再整形せず、確定前にhash/bytes/metadataを再照合します。件数上限/全件性・ダイヤ版整合の保証は別途必要です。公式根拠と未確認事項は[research](docs/odpt_research.md#phase-2d-3b)参照。テストは`python3 -B -m unittest tests.test_odpt_manual_fetch tests.test_odpt_fetch_evaluate`（合成データとmockのみ）。
 
 ### Phase 2D-2B オフライン評価入口
 

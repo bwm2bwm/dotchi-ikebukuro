@@ -12,7 +12,7 @@ from scripts import odpt_evaluation_input as adapter
 from scripts import odpt_fetch_evaluate as entry
 from scripts import odpt_source_store as store
 from scripts import odpt_source_contract as contract
-from tests.test_odpt_manual_fetch import Response
+from tests.test_odpt_manual_fetch import Response, source_body
 from tests.test_odpt_gtfs_loader import fixture, archive
 from tests.test_odpt_snapshot_qa import make_snapshot
 
@@ -24,7 +24,7 @@ class FetchEvaluationTests(unittest.TestCase):
         self.raw = self.root/'legacy-raw'; self.raw.mkdir()
         tables = fixture()
         tables['feed_info'][0].update(feed_version='fixture', feed_start_date='20260101', feed_end_date='20261231')
-        self.responses = {sid: (200, 'application/json', b'[]') for sid in contract.SOURCE_IDS}
+        self.responses = {sid: (200, 'application/json', source_body(sid)) for sid in contract.SOURCE_IDS if sid != 'metro.gtfs'}
         self.responses['metro.gtfs'] = (200, 'application/zip', archive(tables))
         for sid, name in contract.SOURCE_FILES.items(): (self.raw/name).write_bytes(self.responses[sid][2])
         self.legacy = self.root/'legacy'; store.persist_snapshot(self.legacy, self.raw)
@@ -172,6 +172,8 @@ class FetchEvaluationTests(unittest.TestCase):
 
     def test_phase2c_real_synthetic_generator_v2_board_and_dom(self):
         raw=make_snapshot(self.root/'quality-raw')
+        for sid, name in contract.SOURCE_FILES.items():
+            if sid != 'metro.gtfs': (raw/name).write_bytes(source_body(sid))
         legacy=self.root/'quality-store';store.persist_snapshot(legacy,raw)
         responses={sid:(200,'application/zip' if sid=='metro.gtfs' else 'application/json',(raw/name).read_bytes()) for sid,name in contract.SOURCE_FILES.items()}
         batch=self.root/'quality-fetch';fetch.capture_mock_batch(batch,responses)

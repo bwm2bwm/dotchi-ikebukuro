@@ -1607,6 +1607,8 @@ U1 p. 8では検索結果がシステム上限を超えると上限以下に絞�
 
 ### 既存CLIの準備状態と次工程の変更分類
 
+以下は2D-3B終了時の設計判断。2D-3Cで対応した実装状況は末尾の2D-3C節を参照する。
+
 開始時はbranch `main`、HEAD `05508995ce1fd6d14dad3b90c55563828141320c`、status clean。HEADのPhase 2D-3A commit（manual fetch/評価adapter/testと4文書の計7ファイル）を確認した。既存2D-2A/2D-2B/2D-3Aの契約詳細・テスト実績は各節を正本とし、以下は初回実取得に関わる差分だけを列挙する。今回テストは変更・再実行していない。
 
 | 分類 | ファイル・機能 | 次工程で必要な最小対応 |
@@ -1642,3 +1644,19 @@ U1 p. 8では検索結果がシステム上限を超えると上限以下に絞�
 8. **Snapshotを確定する。** 7 sourceが同一batchで各1成功した時だけ、全retry/契約検査、raw全件二巡hash/bytes/形式/metadata照合、最後の完成markerである`snapshot.json`保存を既存`finalize()`で行う。現在のdriverは7件成功後に自動でこれを行うため、手動finalizeを重ねない。Snapshot完成は取得履歴の確定であり、全件性・同一版・公開承認の確定ではない。
 9. **read-onlyで版/全件性とPhase 2A〜2Cを評価する。** `odpt_fetch_evaluate.py`へbaseline store/rawとcandidate batchを明示し、`--stage 2a`→`2b`→`2c`で既存入口を使用する。2Cは共通に有効なservice dates、固定UTC観測1点、DOM対象8駅を明示し、同じ凍結engine/context/runtimeで旧新を再計算する。観測JST日と前後1日の3日closureを含め、平日/土曜/休日と必要な深夜/改正境界の確認を計画する。必要なら別観測点の評価を明示的に追加する。共通期間がなければ比較不能を保持し、candidate単体評価を旧世代比較の代用としない。CLI終了0やpartial/indeterminateを公開PASSへ読み替えない。詳細結果は既存APIのメモリ上で非公開審査し、CLIの状態要約だけで品質を判断しない。
 10. **公開承認を別工程にする。** 全件性、実feed/適用日、公式改正情報、JSONとの整合、評価で残った欠落・未知/未評価を秘密抜きの判断記録にまとめる。生データや詳細旅程をGit/公開経路へ複写しない。必要な公開QA/期間・条件の審査と人間の明示承認が揃うまで公開しない。今回もCommit/Push/Merge/Deploy、Cloudflare/公開経路の操作はない。
+
+## ODPT-2D-3C 初回取得CLIの最小実装（2026-11-07）
+
+2D-3Bの公式根拠・A/C分類・全件性/版の未確認事項を維持し、`odpt_manual_fetch.py`の実行経路を実装した。今回の実装承認は実取得の許可ではない。実ODPT通信・実データ取得・実キー読取/使用は行っていない。
+
+- **事前確認と既定拒否:** `plan --batch <new-private-absolute-path>`は既存path validatorで新規保存先を検査し、固定7 source・URL/filter/filename・GTFS一回転送先・selector不使用・保存先を表示する。secretを読まず、保存先を作らず、通信しない。`plan --batch <unfinished-live-batch> --source <sourceId>`はretry対象と履歴fingerprintも確認値へ含める。fetch/retryは両方とも`--enable-live-transport`と`--confirm-plan <confirmation>`が必要で、現在のplanを再計算して一致を確認する。確認値は操作範囲の確認用で、秘密・署名・公式適合や人間の承認を証明するものではない。
+- **native許可の寿命:** 一致確認・credential検査の後だけ呼出し内のContextVarへplanを置き、終了/例外時に解除する。transportとnative adapterはこの呼出しpermitを要求し、driver/acquireは保存先一致も要求する。旧bool定数は廃止。任意URL/transportをCLIへ追加せず、固定初期pathか既存の許可転送先だけをnative adapterでも検査する。mock exchangeとlive permit/flagの混在は拒否する。
+- **credential:** 既存`env_credential()`を確認条件成立後にだけ通常CLIへ接続。`ODPT_API_KEY`の非空・ASCII可視文字を既存規則で検査し、未設定・空・空白/制御文字/非ASCII・非文字列ならbatch作成と通信の前に停止する。実キーの固有形式を推測した正規表現は加えない。CLI秘密引数、`.env.local` reader、URL/header/例外全文出力は追加しない。認証URLはメモリだけで使用し、GTFS転送先へキーを付け直さない。
+- **応答:** 既存HTTP/status/MIME/encoding/サイズ/長さ、JSON duplicate-key/配列parser、ZIP/metadata validatorを再利用。JSON成功record作成前に非空・source種別に対応する`@type`、非空文字列の`@id/owl:sameAs`、全recordのTokyoMetro operatorと指定railwayの完全一致を追加確認する。空/別種/範囲外を除去・補完せず、固定error codeの失敗として停止する。finalize/retry前のraw検査でもscopeを再確認する。ローカルの期待source条件であり、公式の全件保証・便の正確性・同版保証ではない。
+- **履歴と評価:** 既存`run_fetch/acquire/finalize`、固定7件の順序・最初の失敗/中断停止、成功raw上書き禁止、retry親・全attempt/provenance、二巡hash/bytes/metadata検証を維持。strict Source/Snapshotとv2補助envelopeを変えず、`publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluated`を維持する。2A〜2C adapter/engineには変更なし。合成の取得fixtureを非空のscope-correct recordへ更新し、同じ評価入口で検証する。
+
+ライブ許可contextを発動する試験はしていない。確認条件は副作用なし関数で検証し、条件成立後のCLI dispatchは`_live_session`とdriverをmock化、TLS/native adapterはguardとHTTPSConnection全体をmock化する。固定7件取得・失敗停止・retry・2A〜2Cの実評価はoffline-injectedまたは合成live形式のfixtureのみで行う。回帰時はsocket接続も拒否mockにする。
+
+最終関連回帰は164件PASS（145.345秒）。manual fetch/取得評価、Source契約/inventory/store/2A、train意味比較/GTFS loader/GTFS意味比較/7 source統合/品質入力を実行した。2C接続は同じ凍結engine/contextの実generator→v2→board→Node DOMを合成fixtureで評価しており、実ダイヤ品質・実HTTP/TLS疎通の証明ではない。回帰前後の既存7原本＋store8ファイルはSHA-256/bytes/inode/mtime/ctime一致。原本/storeへ書込・コピーしない。
+
+初回実取得前の残件は、JSON個別endpoint/filterと必要範囲/全件性の確認方法、GTFS転送先を含む通信範囲と保存先の人間による明示許可、この差分のレビュー。取得後はfeed/calendar・公式改正情報・JSONとの版整合と品質評価を実施し、公開承認は別工程。`date`指定・ページング・自動取得/監視・公開builder/runtimeは追加していない。新たな公式仕様との不一致は発見していない。

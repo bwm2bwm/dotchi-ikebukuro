@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Offline-safe manual ODPT batch capture primitives and disabled-by-default CLI.
 
-Live transport is intentionally unavailable until ODPT endpoint policy is reviewed.
+Native HTTPS requires a reviewed plan and explicit CLI confirmation.
 """
 from __future__ import annotations
 import argparse, hashlib, json, os, sys, uuid
 import fcntl, http.client, socket, ssl
 from contextlib import contextmanager
+from contextvars import ContextVar
 from urllib.parse import parse_qsl, urljoin, unquote
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ else:
     from odpt_source_inventory import _stable_read, _record, _read_gtfs_metadata, _parse_json, MAX_SOURCE_BYTES
     from odpt_source_store import _safe_new_store_path, PRIVATE_MODE, FILE_MODE, _safe_existing_store_path, _load_json_object, _json_bytes
 
-LIVE_TRANSPORT_ENABLED = False
+_LIVE_PLAN = ContextVar('odpt_live_plan', default=None)
 TRANSPORT_MODES = frozenset({'offline-injected', 'live-https'})
 ENDPOINT_IDS = {s: "odpt-" + s.replace(".", "-") for s in SOURCE_IDS}
 MAX_RESPONSE_BYTES = MAX_SOURCE_BYTES
@@ -37,6 +38,7 @@ def make_fetch_record(source_id, batch_id, attempt_id, started, finished, status
         if source_id == "metro.gtfs": metadata={"status":"parsed","gtfs":_read_gtfs_metadata(raw),"odpt":None}
         else:
             rows=_parse_json(raw)
+            validate_response_scope(source_id, rows)
             dc=sorted({r["dc:date"] for r in rows if isinstance(r.get("dc:date"),str)})
             issued=sorted({r["dct:issued"] for r in rows if isinstance(r.get("dct:issued"),str)})
             for row in rows:
@@ -66,19 +68,17 @@ class FetchError(ValueError):
 
 
 def _require_live_policy():
-    """Deliberate code-level stop until official endpoints and live use are approved.
-
-    Neither LIVE_TRANSPORT_ENABLED nor CLI options can bypass this stop.
-    """
-    raise FetchError('live_transport_disabled')
+    """A constant/environment change cannot authorize a native request."""
+    if _LIVE_PLAN.get() is None:
+        raise FetchError('live_transport_disabled')
 
 
 def _transport_mode(exchange):
     if exchange is None:
         _require_live_policy()
-        if not LIVE_TRANSPORT_ENABLED:
-            raise FetchError('live_transport_disabled')
         return 'live-https'
+    if _LIVE_PLAN.get() is not None:
+        raise FetchError('transport_provenance_mismatch')
     if not callable(exchange):
         raise FetchError('exchange_invalid')
     return 'offline-injected'
@@ -98,11 +98,15 @@ def endpoint(source_id):
 
 
 def _https_exchange(url):
-    """Real adapter has two timeouts; CLI and adapter both forbid live use."""
+    """Native adapter requires the invocation permit and verifies TLS/host/timeouts."""
     _require_live_policy()
-    if not LIVE_TRANSPORT_ENABLED:
-        raise FetchError("live_transport_disabled")
     parsed = urlsplit(url)
+    if (parsed.scheme != 'https' or parsed.port not in (None, 443)
+            or parsed.username or parsed.password or parsed.fragment
+            or not ((parsed.hostname == 'api.odpt.org' and parsed.path in
+                     {urlsplit(endpoint(s)[0]).path for s in SOURCE_IDS})
+                    or parsed.hostname == 'dataodpt.blob.core.windows.net')):
+        raise FetchError('redirect_rejected')
     conn = http.client.HTTPSConnection(parsed.hostname, port=443,
                                        timeout=CONNECT_TIMEOUT, context=ssl.create_default_context())
     try:
@@ -128,14 +132,35 @@ def env_credential():
     return os.environ.get("ODPT_API_KEY")
 
 
+def checked_credential(value):
+    if not isinstance(value, str) or not value or any(ord(c) < 33 or ord(c) > 126 for c in value):
+        raise FetchError('credential_invalid')
+    return value
+
+
+def validate_response_scope(source_id, rows):
+    """Minimal request-scope check, not a completeness or timetable-version claim."""
+    if not rows:
+        raise FetchError('response_empty')
+    base, filters = endpoint(source_id)
+    kind = urlsplit(base).path.rsplit('/', 1)[-1]
+    for row in rows:
+        if row.get('@type') != kind:
+            raise FetchError('response_type_mismatch')
+        if any(not isinstance(row.get(k), str) or not row[k] for k in ('@id', 'owl:sameAs')):
+            raise FetchError('response_identifier_invalid')
+        if any(row.get(k) != v for k, v in filters.items()):
+            raise FetchError('response_filter_mismatch')
+
+
 def transport(source_id, credential_provider, exchange=None):
     """Injected exchange must return status/getheader/read/close; no auto retry."""
+    if source_id not in SOURCE_IDS:
+        raise FetchError('source_id_invalid')
     _transport_mode(exchange)  # Deny before reading a credential.
     responses = []
     try:
-        secret = credential_provider()
-        if not isinstance(secret, str) or not secret or any(ord(c) < 33 or ord(c) > 126 for c in secret):
-            raise FetchError("credential_invalid")
+        secret = checked_credential(credential_provider())
         base, filters = endpoint(source_id)
         url = base + "?" + urlencode({**filters, "acl:consumerKey": secret})
         send = exchange or _https_exchange
@@ -327,6 +352,7 @@ def acquire(path, source_id, credential_provider, *, exchange=None):
     """One manual attempt. Retry follows only the latest failed/interrupted attempt."""
     if source_id not in SOURCE_IDS: raise FetchError("source_id_invalid")
     mode = _transport_mode(exchange)
+    _check_live_batch(path)
     with _locked(path) as root:
         if (root / "snapshot.json").exists() or (root / "snapshot.json").is_symlink(): raise FetchError("batch_sealed")
         batch, records = history(root)
@@ -384,6 +410,8 @@ def _verify_raw(root, records, batch):
     for rec in records:
         if rec["outcome"] != "succeeded": continue
         raw, metadata = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
+        if rec['sourceId'] != 'metro.gtfs':
+            validate_response_scope(rec['sourceId'], _parse_json(raw))
         artifact = rec["artifact"]
         if (hashlib.sha256(raw).hexdigest() != artifact["sha256"] or len(raw) != artifact["sizeBytes"]
                 or metadata != rec["metadata"] or rec["batchId"] != batch["batchId"]):
@@ -411,6 +439,7 @@ def run_fetch(path, credential_provider, *, exchange=None, retry_source=None):
     Dependency injection is a Python test seam, never a CLI transport/URL option.
     """
     mode = _transport_mode(exchange)  # Never read secrets/create a batch while live is prohibited.
+    _check_live_batch(path)
     if not callable(credential_provider):
         raise FetchError('credential_provider_required')
     order = list(SOURCE_FILES)
@@ -488,15 +517,66 @@ class SafeArgumentParser(argparse.ArgumentParser):
         self.exit(2, "cli_arguments_invalid\n")
 
 
+def acquisition_plan(path, retry_source=None):
+    """Read-only, secret-free preview. The digest binds destination, scope and retry history."""
+    if retry_source is None:
+        root = _safe_new_store_path(path)
+        history_hash = None
+    else:
+        if retry_source not in SOURCE_IDS:
+            raise FetchError('source_id_invalid')
+        with _locked(path) as root:
+            if (root / 'snapshot.json').exists():
+                raise FetchError('batch_sealed')
+            batch, records = history(root)
+            if validate_batch(batch) != 'live-https':
+                raise FetchError('transport_provenance_mismatch')
+            history_hash = hashlib.sha256(_json_bytes([batch, sorted(records, key=lambda r: r['attemptId'])])).hexdigest()
+    plan = {'operation': 'retry' if retry_source else 'fetch', 'batch': str(root),
+            'retrySource': retry_source, 'historyFingerprint': history_hash,
+            'sources': [{'sourceId': s, 'filename': SOURCE_FILES[s],
+                         'endpoint': endpoint(s)[0], 'filters': endpoint(s)[1]} for s in SOURCE_FILES],
+            'gtfsRedirect': 'https://dataodpt.blob.core.windows.net:443; maximum one 302',
+            'selector': None, 'publicationApproved': False, 'applicationPeriod': None}
+    plan['confirmation'] = hashlib.sha256(_json_bytes(plan)).hexdigest()
+    return plan
+
+
+def validate_live_confirmation(plan, enabled, confirmation):
+    if enabled is not True or confirmation != plan['confirmation']:
+        raise FetchError('live_transport_disabled')
+
+
+@contextmanager
+def _live_session(plan):
+    token = _LIVE_PLAN.set(plan)
+    try:
+        yield
+    finally:
+        _LIVE_PLAN.reset(token)
+
+
+def _check_live_batch(path):
+    plan = _LIVE_PLAN.get()
+    if plan is not None and str(path) != plan['batch']:
+        raise FetchError('live_batch_mismatch')
+
+
 def main(argv=None, *, exchange=None, credential_provider=None):
     parser = SafeArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    live = commands.add_parser("fetch", help="live fetch is disabled")
+    live = commands.add_parser("fetch", help="explicitly confirmed fixed-source capture")
     live.add_argument("--batch", type=Path, required=True)
-    live.add_argument("--enable-live-transport", action="store_true", help="reserved; cannot enable communication")
+    live.add_argument("--enable-live-transport", action="store_true")
+    live.add_argument("--confirm-plan")
     retry = commands.add_parser("retry", help="explicit retry of one failed/interrupted source, then remaining unattempted sources")
     retry.add_argument("--batch", type=Path, required=True)
     retry.add_argument("--source", choices=sorted(SOURCE_IDS), required=True)
+    retry.add_argument("--enable-live-transport", action="store_true")
+    retry.add_argument("--confirm-plan")
+    plan_command = commands.add_parser('plan', help='preview only; no secrets, writes or communication')
+    plan_command.add_argument('--batch', type=Path, required=True)
+    plan_command.add_argument('--source', choices=sorted(SOURCE_IDS), help='preview retry of this source')
     commands.add_parser("help-offline", help="show offline transport status")
     for name in ("init", "inspect", "finalize"):
         command = commands.add_parser(name, help="local batch operation only")
@@ -504,14 +584,25 @@ def main(argv=None, *, exchange=None, credential_provider=None):
     args = parser.parse_args(argv)
     try:
         if args.command in ('fetch', 'retry'):
-            if getattr(args, 'enable_live_transport', False):
-                raise FetchError('live_transport_disabled')
-            result = run_fetch(args.batch, credential_provider, exchange=exchange,
-                               retry_source=args.source if args.command == 'retry' else None)
+            source = args.source if args.command == 'retry' else None
+            if exchange is not None:
+                if args.enable_live_transport or args.confirm_plan is not None:
+                    raise FetchError('transport_provenance_mismatch')
+                result = run_fetch(args.batch, credential_provider, exchange=exchange, retry_source=source)
+            else:
+                if not args.enable_live_transport or args.confirm_plan is None:
+                    raise FetchError('live_transport_disabled')
+                plan = acquisition_plan(args.batch, source)
+                validate_live_confirmation(plan, args.enable_live_transport, args.confirm_plan)
+                secret = checked_credential((credential_provider or env_credential)())
+                with _live_session(plan):
+                    result = run_fetch(args.batch, lambda: secret, retry_source=source)
             print(json.dumps(result, sort_keys=True))
             return 0 if result['driverStatus'] == 'complete' else 2
-        if args.command == "help-offline":
-            print("live_transport=disabled; offline tests only")
+        if args.command == 'plan':
+            print(json.dumps(acquisition_plan(args.batch, args.source), sort_keys=True))
+        elif args.command == "help-offline":
+            print("live_transport=default-deny; explicit plan confirmation required")
         elif args.command == "init":
             new_batch(args.batch)
             print("batch_created; publicationApproved=false; applicationPeriod=null")

@@ -9,10 +9,34 @@ def gtfs():
             z.writestr(n,'feed_version,feed_start_date,feed_end_date\nfixture,20260101,20261231\n' if n=='feed_info.txt' else 'fixture\n')
     return b.getvalue()
 
+
+def source_body(sid):
+    """Synthetic scope-correct records; no saved ODPT input is used."""
+    kind = {'railway':'Railway', 'station':'Station', 'train-timetable':'TrainTimetable',
+            'station-timetable':'StationTimetable'}[sid.split('.')[1]]
+    lines = [sid.split('.')[2].capitalize()] if len(sid.split('.')) == 3 else ['Yurakucho', 'Fukutoshin']
+    rows = []
+    for line in lines:
+        railway = 'odpt.Railway:TokyoMetro.' + line
+        station = 'odpt.Station:TokyoMetro.' + line + '.Fixture'
+        row = {'@context':'http://vocab.odpt.org/context_odpt_' + kind + '.jsonld',
+               '@type':'odpt:' + kind, '@id':'urn:test:' + kind + line,
+               'owl:sameAs':railway if kind == 'Railway' else station if kind == 'Station' else 'urn:test:' + kind + line,
+               'dc:date':'2026-10-08', 'odpt:operator':'odpt.Operator:TokyoMetro'}
+        if kind != 'Railway': row['odpt:railway'] = railway
+        if kind == 'TrainTimetable':
+            from tests.test_odpt_train_semantic_diff import record
+            row = record(line=line); row['odpt:operator'] = 'odpt.Operator:TokyoMetro'
+        if kind == 'StationTimetable':
+            row.update({'odpt:station':station, 'odpt:railDirection':'urn:direction:north',
+                        'odpt:calendar':'urn:calendar:weekday', 'odpt:stationTimetableObject':[]})
+        rows.append(row)
+    return json.dumps(rows, separators=(',', ':')).encode()
+
 class ManualFetchTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(dir='/private/tmp'); self.root=Path(self.tmp.name); self.parent=self.root/'private';self.parent.mkdir(mode=0o700);os.chmod(self.parent,0o700)
-        self.responses={s:(200,'application/json',json.dumps([{'@id':'urn:test','dc:date':'2026-10-08'}],separators=(',',':')).encode()) for s in contract.SOURCE_IDS}
+        self.responses={s:(200,'application/json',source_body(s)) for s in contract.SOURCE_IDS if s != 'metro.gtfs'}
         self.responses['metro.gtfs']=(200,'application/zip',gtfs())
     def tearDown(self): self.tmp.cleanup()
     def test_seven_raw_sources_and_fetch_snapshot(self):
@@ -32,7 +56,7 @@ class ManualFetchTests(unittest.TestCase):
     def test_invalid_payload_and_oversize_rejected(self):
         with self.assertRaises(Exception): fetch.make_fetch_record('metro.station', '00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z',200,'application/json',b'{')
         with self.assertRaises(Exception): fetch.make_fetch_record('metro.station','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z',200,'application/json',b'x'*(fetch.MAX_RESPONSE_BYTES+1))
-    def test_live_transport_is_disabled(self): self.assertFalse(fetch.LIVE_TRANSPORT_ENABLED)
+    def test_live_transport_is_disabled(self): self.assertIsNone(fetch._LIVE_PLAN.get())
 
 
 from unittest.mock import patch
@@ -52,7 +76,7 @@ class TransportAndHistoryTests(unittest.TestCase):
     tearDown = ManualFetchTests.tearDown
     def make(self): return fetch.new_batch(self.parent/'batch')
     def attempt(self, root, response=None, sid='metro.station', exchange=None):
-        return fetch.acquire(root,sid,lambda:'DUMMY-SECRET-123',exchange=exchange or (lambda url: response or Response()))
+        return fetch.acquire(root,sid,lambda:'DUMMY-SECRET-123',exchange=exchange or (lambda url: response or Response(body=source_body(sid))))
     def test_http_errors_timeout_tls_are_safe_failed_records(self):
         cases=[(lambda url:Response(404),'http_status_failed'),(lambda url:Response(500),'http_status_failed')]
         for exc,code in [(TimeoutError('DUMMY-SECRET-123'),'timeout'),(ssl.SSLCertVerificationError('DUMMY-SECRET-123'),'tls_failed')]:
@@ -153,7 +177,7 @@ class TransportAndHistoryTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()),[])
     def test_transport_tls_verification_and_two_timeouts(self):
         # No real socket: the HTTPSConnection adapter is replaced in its entirety.
-        with patch.object(fetch,'_require_live_policy'),patch.object(fetch,'LIVE_TRANSPORT_ENABLED',True),patch.object(fetch.http.client,'HTTPSConnection') as conn:
+        with patch.object(fetch,'_require_live_policy'),patch.object(fetch.http.client,'HTTPSConnection') as conn:
             conn.return_value.getresponse.return_value=Response()
             response=fetch._https_exchange('https://api.odpt.org/api/v4/odpt:Station')
             kwargs=conn.call_args.kwargs
@@ -303,7 +327,7 @@ class DriverAndProvenanceTests(unittest.TestCase):
 
     def test_constant_option_and_environment_cannot_enable_network(self):
         root=self.parent/'blocked'
-        with patch.object(fetch,'LIVE_TRANSPORT_ENABLED',True),patch.object(fetch,'env_credential',side_effect=AssertionError('secret read')) as key,patch.object(fetch.http.client,'HTTPSConnection',side_effect=AssertionError('network')) as network:
+        with patch.object(fetch,'env_credential',side_effect=AssertionError('secret read')) as key,patch.object(fetch.http.client,'HTTPSConnection',side_effect=AssertionError('network')) as network:
             for extra in ([],['--enable-live-transport']):
                 output=io.StringIO()
                 with contextlib.redirect_stderr(output):self.assertEqual(fetch.main(['fetch','--batch',str(root)]+extra),2)
@@ -378,6 +402,77 @@ class DriverAndProvenanceTests(unittest.TestCase):
         for p in root.rglob('*'):
             if p.is_file():self.assertNotIn(b'DUMMY-DRIVER-KEY',p.read_bytes())
         self.assertNotIn('url headers',out+err)
+
+
+class LivePreparationTests(ManualFetchTests):
+    def test_plan_and_confirmation_are_read_only_and_bound_to_destination(self):
+        path = self.parent/'planned'
+        with patch.object(fetch, 'env_credential', side_effect=AssertionError('secret')), patch.object(fetch.http.client, 'HTTPSConnection', side_effect=AssertionError('network')):
+            plan = fetch.acquisition_plan(path)
+            self.assertFalse(path.exists())
+            self.assertEqual([r['sourceId'] for r in plan['sources']], list(contract.SOURCE_FILES))
+            self.assertNotIn('consumerKey', json.dumps(plan))
+            fetch.validate_live_confirmation(plan, True, plan['confirmation'])
+            self.assertIsNone(fetch._LIVE_PLAN.get())  # Pure validation never enables live use.
+            for enabled, value in [(False, plan['confirmation']), (True, None), (True, 'wrong')]:
+                with self.assertRaises(fetch.FetchError): fetch.validate_live_confirmation(plan, enabled, value)
+            other = fetch.acquisition_plan(self.parent/'other')
+            self.assertNotEqual(plan['confirmation'], other['confirmation'])
+            with self.assertRaises(fetch.FetchError): fetch.validate_live_confirmation(other, True, plan['confirmation'])
+
+    def test_cli_authorized_dispatch_is_stubbed_before_any_live_session(self):
+        path = self.parent/'planned'; plan = fetch.acquisition_plan(path)
+        complete = {'driverStatus':'complete'}
+        with patch.object(fetch, '_live_session', return_value=contextlib.nullcontext()) as session, patch.object(fetch, 'env_credential', return_value='DUMMY-ONLY') as provider, patch.object(fetch, 'run_fetch', return_value=complete) as driver, patch.object(fetch.http.client, 'HTTPSConnection', side_effect=AssertionError('network')):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(fetch.main(['fetch','--batch',str(path),'--enable-live-transport','--confirm-plan',plan['confirmation']]), 0)
+            self.assertEqual(driver.call_args.args[1](), 'DUMMY-ONLY')
+            provider.assert_called_once(); session.assert_called_once_with(plan)
+            self.assertIsNone(fetch._LIVE_PLAN.get()); self.assertFalse(path.exists())
+
+    def test_invalid_credentials_never_reach_exchange_or_create_live_batch(self):
+        path = self.parent/'planned'; plan = fetch.acquisition_plan(path)
+        for secret in (None, '', 'white space', 'line\n', '日本語', 123):
+            with patch.object(fetch, '_live_session', side_effect=AssertionError('live session')) as session, patch.object(fetch.http.client, 'HTTPSConnection', side_effect=AssertionError('network')), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(fetch.main(['fetch','--batch',str(path),'--enable-live-transport','--confirm-plan',plan['confirmation']], credential_provider=lambda: secret), 2)
+                session.assert_not_called(); self.assertFalse(path.exists())
+            calls = []
+            with self.assertRaises(fetch.FetchError):
+                fetch.transport('metro.station', lambda: secret, lambda url: calls.append(url))
+            self.assertFalse(calls)
+
+    def test_scope_failures_stop_driver_and_keep_failed_history(self):
+        sid = 'metro.railway'; rows = json.loads(source_body(sid))
+        cases = [b'', b'[]', b'{}', b'[null]']
+        for field, value in [('@type','odpt:Station'), ('@type',[]), ('odpt:operator','odpt.Operator:Other'), ('@id',None)]:
+            wrong = [dict(rows[0], **{field:value})]; cases.append(json.dumps(wrong).encode())
+        for index, body in enumerate(cases):
+            calls = []
+            root = self.parent/('bad'+str(index))
+            def send(url): calls.append(url); return Response(body=body)
+            result = fetch.run_fetch(root, lambda:'DUMMY-SCOPE', exchange=send)
+            self.assertEqual(result['driverStatus'], 'stopped'); self.assertEqual(len(calls), 1)
+            self.assertFalse((root/'snapshot.json').exists()); self.assertFalse((root/'raw'/contract.SOURCE_FILES[sid]).exists())
+            self.assertEqual(fetch.history(root)[1][0]['outcome'], 'failed')
+        sid = 'metro.train-timetable.yurakucho'; wrong = json.loads(source_body(sid))
+        wrong[0]['odpt:railway'] = 'odpt.Railway:TokyoMetro.Fukutoshin'
+        root = fetch.new_batch(self.parent/'wrong-line')
+        rec = fetch.acquire(root, sid, lambda:'DUMMY-SCOPE', exchange=lambda url:Response(body=json.dumps(wrong).encode()))
+        self.assertEqual(rec['errorCode'], 'response_filter_mismatch')
+
+    def test_retry_plan_binds_history_and_rejects_offline_or_sealed_batches(self):
+        root = fetch.new_batch(self.parent/'offline')
+        with self.assertRaises(fetch.FetchError): fetch.acquisition_plan(root, 'metro.station')
+        # Format-only fixture. No live session is entered.
+        root = fetch.new_batch(self.parent/'live-format', transport_mode='live-https')
+        first = fetch.acquisition_plan(root, 'metro.railway')
+        self.assertNotEqual(first['confirmation'], fetch.acquisition_plan(root, 'metro.station')['confirmation'])
+        self.assertIsNone(fetch._LIVE_PLAN.get())
+
+    def test_live_flags_cannot_be_combined_with_mock_exchange(self):
+        with patch.object(fetch.http.client,'HTTPSConnection',side_effect=AssertionError('network')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(fetch.main(['fetch','--batch',str(self.parent/'never'),'--enable-live-transport','--confirm-plan','wrong'], exchange=lambda url:Response(), credential_provider=lambda:'DUMMY'), 2)
+        self.assertFalse((self.parent/'never').exists())
 
 
 if __name__ == '__main__': unittest.main()
