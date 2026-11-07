@@ -1167,3 +1167,17 @@
 - 実取得30日candidateはread-only `inspect_candidate`のみPASS。digest `5f331ad0eb8c9550e22818ce259656418857574bd93df3e11681af07cde859fc`、期待fingerprint `d948b3265975a55cd7f38f08bfcab971e88883dfb554e529bdeae6f04d508b41`、serviceDays 11/8〜12/9の32日、QA WARNING、A240/B240/C0/D0、未照合/警告ともoriginal480/resolved480/unresolved0を再確認。実取得からの公開artifact生成なし。candidate/batch/Snapshotのnull/falseは維持。
 - read-only照合開始時から検証終了時まで、取得batch・旧原本・既存store8件・30日candidateの57 filesはSHA-256/bytes/inode/mtime/ctime一致。生成はsyntheticテストの/private/tmp配下だけ。API通信/キー使用/Deploy/Commit/Push/Mergeなし。references未操作。
 - 14日retention capは未変更。残存適用期間が12日を超える退役でassemblyは安全停止する。次Phaseでは実承認期間に必要な有限上限を審査し、最低7日/適用終了+48時間/総容量256 MiBを維持する最小変更を検討する。Phase 1完了は公開承認を意味しない。
+
+
+## 2026-11-07 — v2公開接続Phase 2（公開runtime・非公開検証）
+
+- 開始main / HEAD `4e5a6f6b45edbe400ca934316f5602ae50faf858`、tracked差分なし、referencesのみ未追跡。Phase 1 commit反映を確認。新v2 entrypoint/HTML/CSSとbrowser契約moduleを追加し、既存preview coreには明示的adapter接続・v2の最早着ラベル/情報欄・期限停止だけを追加。v1公開entrypoint/loader、synthetic Actions、Python公開契約/validator、旧世代保持は未変更。
+- v2 browserはPhase 1 manifest/envelopeを厳密に検証。source fingerprint・metadata hash・descriptor release ID・station raw bytes/hash・public ID・全日/8駅scope・品質集計の原数/解決数/未解決数・除外監査算術を検査する。必要集計欠落は拒否し、selected payloadの候補数も再照合。世代pin/no-cache manifest/default station fetch/2駅LRUを維持。unknown schema・別世代・破損・過大body・Web Cryptoなしはfail-closed。
+- buildV2QaBoardの純粋計算を共有し、UNKNOWNの終電抑止・限定最早着を維持。公開manifestの半開区間を毎tick判定し、開いたまま終了した画面も消去。candidateのapplicationPeriod=nullは維持。仮想時計・QA操作画面・QA state fileは公開entrypointへ接続しない。鉄道の乗降判定はgeneratorで検証されたcandidateを利用し、列車名やIDのruntime例外を追加しない。
+- 通常の折畳み情報欄に出典/Phase 1 retrievedAt/承認期間と既存根拠に沿った非公式・非リアルタイム・正確性/完全性の注意を追加。既存カードとdockの寸法を維持し、長い限定最早着ラベルはv2 CSS内だけで折返す。運営者問い合わせURLは既存repositoryに無く未設定。HTTPS URL設定用導線を実装し、架空の連絡先は設定しない。公開前必須として残す。
+- 最終関連Node 96 tests PASS（18.643秒）：新v2 runtime13、既存v2 adapter12/DOM22、v1公開core/世代loader/表示/selection/terminal/Actions49。新テスト内で8駅×平日・土曜・日曜×4表示設定の96 board比較がQA adapterと完全一致。公開DOMの8駅・乗換/直通・種別・最早着/限定最早着・始発解放境界・24時台終電badge・日跨ぎ・開いたままの期限切れ・失敗時非表示を確認。metadata改変やC/Dはhash再計算後も拒否し、品質auditと実候補数の不一致も拒否。テスト中の誤ったmutation値/DOM mock accessorは修正し、旧terminal UIのstatic assertionもv1の既存呼出しを維持してPASS。PASS数は最終結果のみ。
+- Python関連71 tests PASS：旅客coverage7、itinerary28（100.775秒）、Phase 1公開契約13、既存公開builder/validator/profile23。S-TRAINの乗降禁止・不確かな乗降情報、停車pattern/種別、乗換と運行日判定は既存generator回帰で確認。描画fixtureだけで実運行ルールを証明したとは扱わない。
+- テストfixtureは明示synthetic。Phase 1 builder/独立validatorを通したrelease-data-only artifactからassetを追加したQA copyを`/private/tmp/dotchi-phase2-synthetic-runtime-final`へ保存。固定運行日10/28〜11/2、synthetic承認期間10/29〜11/1で、実時間が範囲外なら画面は停止する。full-site承認済み成果物ではなく、asset hash bindingとassemblyはPhase 3。
+- 実取得candidateはPhase 1 read-only preflightで固定7 source/期待fingerprint一致・未承認null/falseを再確認してPASS。Wakoshi 7,547,220 bytes/32日もJS payload validatorでread-only確認してPASS。公開承認/期間の合成・公開artifact化なし。参考Node検証時間3,207ms、max RSS126,944 KiB。ブラウザ/スマホ/通信性能の測定ではない。
+- 実ブラウザ操作ツールは2回kernel起動エラーで利用不能。実描画/スマホviewport/safe-area/focus/HTTP/cache QAは未実施と明記し、DOM PASSと区別。Phase 3にfull-site validator・asset binding・世代assembly・問い合わせ先設定・実機配信QAを残す。14日保持期限と正式な公開期間は未変更。
+- 取得batch・旧原本・既存Snapshot store・candidateの57 filesはSHA-256/bytes/inode/mtime/ctimeで前後一致。外部Web/ODPT通信・再取得・APIキー参照・公開承認・Deploy/Commit/Push/Mergeなし。references未操作。

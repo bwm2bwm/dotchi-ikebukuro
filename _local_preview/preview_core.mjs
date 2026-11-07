@@ -42,13 +42,17 @@ function collectElements(documentRef) {
 
 /** Start the shared display runtime with an explicit payload profile and cache policy. */
 export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cacheMode, nowProvider = Date.now,
-  releaseManaged = false, hooks = {}, documentRef = document, windowRef = window } = {}) {
-  if (![LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE].includes(expectedProfile)) {
+  releaseManaged = false, releaseAdapter = null, hooks = {}, documentRef = document, windowRef = window } = {}) {
+  const isV2 = expectedProfile === 'public-display-v2';
+  if (![LOCAL_DATA_SCOPE, PUBLIC_DATA_SCOPE, 'public-display-v2'].includes(expectedProfile)) {
     throw new TypeError('explicit supported expected payload profile required');
   }
   const requiredCacheMode = expectedProfile === LOCAL_DATA_SCOPE ? 'no-store' : 'default';
   if (cacheMode !== requiredCacheMode) throw new TypeError(`${expectedProfile} requires cacheMode ${requiredCacheMode}`);
   if (typeof nowProvider !== 'function') throw new TypeError('nowProvider must be a function');
+  if (isV2 && (!releaseManaged || typeof releaseAdapter?.createSession !== 'function'
+      || typeof releaseAdapter?.buildBoard !== 'function')) throw new TypeError('v2 requires its explicit release adapter');
+  if (!isV2 && releaseAdapter !== null) throw new TypeError('v1 cannot use a v2 release adapter');
   const elements = collectElements(documentRef);
   const {
     clock,
@@ -76,12 +80,13 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
   let prepared = null;
   let loadFailure = null;
   let loading = true;
-  if (releaseManaged && expectedProfile !== PUBLIC_DATA_SCOPE) throw new TypeError('release-managed mode requires public profile');
+  if (releaseManaged && expectedProfile !== PUBLIC_DATA_SCOPE && !isV2) throw new TypeError('release-managed mode requires public profile');
   const releaseReloadGuard = releaseManaged ? createReleaseReloadGuard(windowRef) : null;
   let releaseSessionPromise = null;
   let pinnedReleaseId = null;
   if (releaseManaged) {
-    releaseSessionPromise = createReleaseRuntimeSession({ fetchImpl: windowRef.fetch.bind(windowRef), expectedProfile })
+    const createSession = isV2 ? releaseAdapter.createSession : createReleaseRuntimeSession;
+    releaseSessionPromise = createSession({ fetchImpl: windowRef.fetch.bind(windowRef), expectedProfile })
       .then(session => { pinnedReleaseId = session.releaseId; return session; });
   }
   const preparedPayloadCache = createPreparedPayloadCache(2, { namespace: releaseManaged ? () => pinnedReleaseId ?? 'pending-release' : null });
@@ -230,6 +235,18 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
     metadataEl.hidden = false;
   }
 
+  function renderPublication(meta) {
+    if (!isV2 || !meta) return;
+    const panel = documentRef.getElementById('publication-information');
+    if (!panel) return;
+    documentRef.getElementById('publication-provider').textContent = meta.attribution.provider;
+    documentRef.getElementById('publication-source').setAttribute('href', meta.attribution.sourceUrl);
+    documentRef.getElementById('publication-retrieved').textContent = displayTimestamp(meta.retrievedAt);
+    documentRef.getElementById('publication-period').textContent =
+      `${displayTimestamp(meta.applicationPeriod.startsAt)} 〜 ${displayTimestamp(meta.applicationPeriod.endsAt)}（終了日時は含まない）`;
+    panel.hidden = false;
+  }
+
   function typeStyle(item) {
     if (item.kind === 'Fライナー') return 'type-brand';
     if (item.kind === '急行' || item.kind === '通勤急行') return 'type-express';
@@ -241,8 +258,8 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
 
   function renderGroups(groups, nowMs, serviceState) {
     const visible = groups.flatMap(group => group.items);
-    const best = earliestVisible(groups);
-    const signature = `${mode}|${directOnlyEl.checked}|${serviceState}|${visible.map(item => `${item.id}:${item.isLastDeparture === true}:${item.terminalBasis ?? ''}`).join(',')}|${best?.id ?? ''}`;
+    const best = isV2 ? visible.find(item => item.isBest) : earliestVisible(groups);
+    const signature = `${mode}|${directOnlyEl.checked}|${serviceState}|${visible.map(item => `${item.id}:${item.isLastDeparture === true}:${item.terminalBasis ?? ''}`).join(',')}|${best?.id ?? ''}|${best?.bestLabel ?? ''}`;
     if (signature !== selectedSignature) {
       const fragment = documentRef.createDocumentFragment();
       if (serviceState !== 'ended') {
@@ -255,7 +272,7 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
             card.style.setProperty('--line-color', item.color);
             card.innerHTML = `<div class="primary"><div class="train-head"><span class="route"></span><span class="bestmark"></span></div><div class="depart"><span class="departure-text time-value"></span><span class="depart-suffix">発</span><span class="type-destination"><span class="type-label"></span><span class="destination-label"></span><span class="terminal-badge"></span></span></div><div class="sub"></div></div><div class="countwrap"><div class="minitxt">発車まで</div><div class="count"></div></div><div class="arrival-wrap"><div class="minitxt arrival-caption">到着</div><div class="arrival time-value"></div></div>`;
             card.querySelector('.route').textContent = item.line;
-            card.querySelector('.bestmark').textContent = item.id === best?.id ? '● 最早着' : '';
+            card.querySelector('.bestmark').textContent = item.id === best?.id ? (item.bestLabel ?? '● 最早着') : '';
             card.querySelector('.departure-text').textContent = item.departureText;
             const typeLabel = card.querySelector('.type-label');
             typeLabel.textContent = item.kind;
@@ -278,6 +295,7 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
         empty.className = serviceState === 'ended' ? 'empty terminal-ended' : 'empty';
         empty.setAttribute('role', 'status');
         empty.textContent = emptyBoardText(serviceState);
+        if (isV2 && serviceState !== 'ended') empty.textContent = '現在から約1時間以内に案内できる列車はありません。';
         fragment.appendChild(empty);
       }
       boardEl.replaceChildren(fragment);
@@ -314,7 +332,8 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
     try {
       const adapterStarted = performanceClock();
       adapterStartedAt = adapterStarted;
-      const result = buildBoard(prepared, { nowMs, directOnly: directOnlyEl.checked, mode,
+      const project = isV2 ? releaseAdapter.buildBoard : buildBoard;
+      const result = project(prepared, { nowMs, directOnly: directOnlyEl.checked, mode,
         expectedProfile });
       const adapterMs = performanceClock() - adapterStarted;
       if (measurement) measurement.boardMs = adapterMs;
@@ -323,10 +342,11 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
       const selectionMs = performanceClock() - selectionStarted;
       if (measurement) measurement.selectionMs = selectionMs;
       const domStarted = performanceClock();
-      const state = result.validity === 'valid' ? 'ok' : 'warning';
+      const state = result.statusState ?? (result.validity === 'valid' ? 'ok' : 'warning');
       setStatus(result.statusMessage, state);
       statusEl.title = result.periodText;
       renderMetadata(result.diagnostics);
+      renderPublication(result.publication);
       if (result.validity !== 'valid') {
         selectedSignature = '';
         boardEl.replaceChildren();
@@ -342,7 +362,8 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
       if (measurement && adapterStartedAt !== null && measurement.boardMs === null) {
         measurement.boardMs = performanceClock() - adapterStartedAt;
       }
-      loadFailure = 'payloadの形式または必須メタデータを確認できません。プレビューを再生成してください。';
+      loadFailure = isV2 ? '時刻表の内容を確認できません。ページを更新してください。'
+        : 'payloadの形式または必須メタデータを確認できません。プレビューを再生成してください。';
       tick(eventStarted, measurement);
     }
   }
@@ -374,7 +395,8 @@ export function createPreviewRuntime({ expectedProfile = LOCAL_DATA_SCOPE, cache
       result = await loadLatestDestination(destinationId);
     } catch {
       result = { prepared: null,
-        failure: '実ダイヤpayloadを読み込めませんでした。ローカルpreviewを再生成してください。',
+        failure: isV2 ? '時刻表を読み込めませんでした。ページを更新してください。'
+          : '実ダイヤpayloadを読み込めませんでした。ローカルpreviewを再生成してください。',
         stale: false, timings: null };
     }
     hooks.onLoad?.({

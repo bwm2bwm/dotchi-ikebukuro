@@ -1,0 +1,15 @@
+.publication-information {
+  margin: 24px 0 0;
+  padding: 12px;
+  border: 1px solid #d9d7d1;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.publication-information summary { cursor: pointer; font-weight: 600; }
+.publication-information dl { margin: 12px 0; }
+.publication-information dt { font-weight: 600; }
+.publication-information dd { margin: 0 0 8px; }
+.publication-information a { color: #4a4587; text-decoration: underline; }
+.train-head { flex-wrap: wrap; white-space: normal; }

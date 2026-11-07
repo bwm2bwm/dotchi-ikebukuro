@@ -1726,3 +1726,22 @@ candidateDigestはprivate manifestと固定8 candidate fileの各raw bytesから
 実取得30日candidateは承認なしのread-only preflightのみPASS。candidateDigest `5f331ad0eb8c9550e22818ce259656418857574bd93df3e11681af07cde859fc`、sourceFingerprint `d948b3265975a55cd7f38f08bfcab971e88883dfb554e529bdeae6f04d508b41`、32 serviceDays、QA WARNING、A240/B240/C0/D0、未照合/警告とも原数480・解決480・未解決0を確認。実取得用承認入力・公開artifactは作成せず、candidate/Snapshotはnull/falseのまま。
 
 世代保持policyは未変更。既存`retention_deadline`は`max(退役+7日, 適用終了+48時間) <= 退役+14日`を要求する。残る適用期間が12日を超える時点での更新は停止する。例として（未承認の仮定）11/9〜12/8を案内する版を11/10に更新する場合、12/9終了+48時間の12/11まで保持が必要で、11/24の14日capを超える。次Phaseでは承認された最大残存期間に必要な有限上限を明示審査し、最低7日/適用終了+48時間と総容量上限を維持する案が最小。今回のPhase 1では延長・旧世代削除・既存assembly変更を行わない。
+
+
+## v2公開接続 Phase 2：browser runtimeと公開画面（2026-11-07）
+
+設計上の変更であり、新たな公式資料確認や実取得の公開承認ではない。Phase 1のPython契約・builder・独立validatorは変更しない。`odpt_public_runtime.mjs`がschema 2/public-display-v2/dotchi-odpt-public-v2を明示検証し、専用`preview_public_v2.js`/`public_odpt_index.html`から既存preview coreへ接続する。v1は従来entrypointとloaderのまま、未知schema・v1/v2混在を拒否する。v1のbuilder/file allowlist/Actionsは変更しない。
+
+新browser検証はcanonical UTF-8 JSON、descriptor由来release ID、metadata hash、固定7 source fingerprint、承認形式・期間buffer・feed範囲、8駅の固定same-origin URL、bytes/SHA-256、全日payload ID/構造/complete coverage、選択駅の候補数と監査件数を検査する。bodyは25 MiBで制限しredirectを拒否。manifestは起動時no-cache、stationは世代固定URL/default cache、coreの2駅LRUを維持する。新起動はmanifestを再検証し、旧sessionは旧世代をpinする。公開JSは原本を取得せず、Phase 1独立validatorによるraw/candidate/承認照合を置き換えない。
+
+品質metadataの元WARNING/未照合/A/B/C/D/original-resolved-unresolvedと除外監査は保持。全駅日scope・算術・C/D/未解決0を検証してから、QA adapterと同じinfoCount/noValidArrivalCount/otherUnknownCountを渡す。欠落を0補完しない。候補・直通/乗換・最早着・終電の純粋計算は既存buildV2QaBoardを再利用し、公開用のstatusへ射影する。表示外の最良候補を別カードへ付け替えず、部分比較では「表示候補内の最早着」とし、UNKNOWNによる終電未確認を維持する。S-TRAIN等を表示名で除外する例外処理は追加しない。旅客利用可否は検証済みcandidateと既存generatorの責務とする。
+
+内側applicationPeriodはnullのまま、外側承認期間を毎tick判定する（開始を含み終了を含まない）。開始前・期限切れ・必要日前後日不足で候補を表示しない。開いたまま終了を迎えると既存DOMも消去する。QA adapterの現在日±1・24/25時処理・約60分の候補解放・直通/小竹向原乗換・600秒のODPT-0元QAと3600秒のcandidate policyの区別は維持。公開entrypointの時計はDate.now固定で、仮想時計・QA state file・QA操作entrypointを公開画面へ読み込まない。
+
+公開用HTMLは既存画面を基に通常の折畳み情報欄だけ追加し、Phase 1 retrievedAt・出典・承認期間を表示する。generatedAtは取得日時に流用しない。既存台帳のガイドライン/事務局回答を踏まえ、非公式・非リアルタイム・正確性/完全性非保証・提供者の責任・事業者への問い合わせを控える旨を記載。運営者連絡先はrepositoryに未設定であり、HTTPS問い合わせURLをdata-contact-urlへ設定できる導線を用意したが、架空の実連絡先は設定しない。未設定の間は公開不可の残件。情報欄は折畳み/折返し、長い最早着ラベルはv2専用CSSで折返し、既存スマホカード/dock寸法を維持する。
+
+syntheticのPhase 1 data artifactを独立validatorで検証後、repo外のQA copyへ画面assetを追加して非公開DOM評価。データcontractとassetを最終的に結ぶfull-site descriptor/validator/assemblyは未接続であり、このQA copyをdeploy可能と扱わない。固定synthetic service datesは2026-10-28〜11-02、テスト承認範囲は10/29〜11/01。実取得用の仮承認・期間・公開artifactは作成していない。
+
+実取得candidateはPhase 1 read-only preflightで固定7 sourceと期待fingerprint一致を再確認してPASS。最大駅Wakoshi（7,547,220 bytes/32 serviceDays）も既存JS payload validatorでread-only検証しPASS。Node上のID/構造検証は約3.2秒、process peak RSS約124 MiB（JSON parse後からの検証時間、並行回帰実行中の参考値）で、スマホ性能やHTTP転送の測定ではない。applicationPeriod=nullを維持し、公開用metadataを合成して実画面へ通してはいない。
+
+ブラウザ操作ツールは2回ともkernel起動エラーで利用できず、実Chrome/Safari描画・375px等のviewport・実機focus/safe-area・HTTP/cache実挙動は未検証。DOM harnessとHTML/CSS確認を実描画PASSに読み替えない。Phase 3へはfull-site validator/asset binding/世代assembly、運営者問い合わせ設定、スマホ実描画と配信QAを残す。旧世代の最低7日/適用終了+48時間/最大14日は今回変更していない。
