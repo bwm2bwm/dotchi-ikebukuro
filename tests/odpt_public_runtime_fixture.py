@@ -1,7 +1,8 @@
-"""Stage SYNTHETIC v2 data + runtime for private tests. Not a full-site builder.
+"""Stage SYNTHETIC v2 data + runtime for private tests.
 
 The source/candidate/approval inputs exist only in a synthetic temporary area.
-Phase 1's independent validator runs before assets are added to a QA copy.
+Default: Phase 2 QA copy. full_site=True: delegate to the Phase 3A assembler
+and independent validator, rather than manufacturing a full-site manifest here.
 """
 import copy
 import json
@@ -15,7 +16,7 @@ import build_public_site
 from test_odpt_public_v2 import _payload
 
 
-def stage(output, unknown=0):
+def stage(output, unknown=0, full_site=False):
     fixture = ReleaseTests()
     fixture.setUp()
     try:
@@ -80,6 +81,11 @@ def stage(output, unknown=0):
         fixture.request['approval']['approvedAt'] = '2026-10-28T01:00:00Z'
         fixture.save_request()
         result = fixture.build()
+        if full_site:
+            from assemble_odpt_public_site import assemble
+            return assemble(data_release=fixture.output, candidate=fixture.candidate, source=fixture.source,
+                approval=fixture.approval, output=output, contact_url='https://example.invalid/contact',
+                expected_candidate_digest=fixture.request['candidateDigest'], expected_source_fingerprint=fixture.fp, now=NOW)
         shutil.copytree(fixture.output, output)
         for name, source in build_public_site.SOURCE_FILES.items():
             shutil.copyfile(source, output / name)
@@ -92,4 +98,5 @@ def stage(output, unknown=0):
 
 
 if __name__ == '__main__':
-    print(json.dumps(stage(Path(sys.argv[1]), int(sys.argv[2]) if len(sys.argv)>2 else 0)))
+    print(json.dumps(stage(Path(sys.argv[1]), int(sys.argv[2]) if len(sys.argv)>2 else 0,
+                           len(sys.argv)>3 and sys.argv[3]=='full-site')))

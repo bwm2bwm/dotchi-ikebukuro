@@ -9,7 +9,8 @@ sys.dont_write_bytecode = True
 import odpt_release_contract as c
 
 
-def validate_artifact(root, *, candidate, source, approval, expected_candidate_digest, expected_source_fingerprint, now=None):
+def validate_artifact(root, *, candidate, source, approval, expected_candidate_digest, expected_source_fingerprint, now=None,
+                      full_site=False, contact_url=None):
     root = c.safe_path(root)
     c.require(root.is_dir(), "artifact_missing")
     raw = c.read_file(root / "manifest.json")
@@ -19,6 +20,7 @@ def validate_artifact(root, *, candidate, source, approval, expected_candidate_d
         c.require(isinstance(manifest, dict) and manifest.get("metadata", {}).get("evidenceKind") == "synthetic",
                   "test_clock_requires_synthetic")
     c.validate_manifest(manifest, now)
+    c.require(manifest["artifactKind"] == (c.SITE_KIND if full_site else c.KIND), "artifact_kind_mismatch")
     meta = manifest["metadata"]
     request = c.load_json(c.read_file(approval))
     c.exact(request, {"candidateDigest", "sourceFingerprint", "applicationPeriod", "approval",
@@ -43,6 +45,8 @@ def validate_artifact(root, *, candidate, source, approval, expected_candidate_d
     c.require(original.get("sourceFiles") == meta["sourceFiles"], "source_files_mismatch")
     release = manifest["releaseId"]
     expected = {"manifest.json", *(f"releases/{release}/{name}" for name in c.STATION_FILES.values())}
+    if full_site:
+        expected.update(c.SITE_ASSETS)
     expected_dirs = {"releases", f"releases/{release}"}
     files = {}
     dirs = set()
@@ -56,6 +60,9 @@ def validate_artifact(root, *, candidate, source, approval, expected_candidate_d
             files[name] = c.read_file(path)
     c.require(set(files) == expected and dirs == expected_dirs, "artifact_tree_invalid")
     c.require(sum(map(len, files.values())) <= c.MAX_TOTAL_BYTES, "artifact_oversize")
+    if full_site:
+        from validate_odpt_public_site import validate_site_assets
+        validate_site_assets(root, manifest, contact_url)
     payloads = {station: c.validate_envelope(files[f"releases/{release}/{name}"], manifest, station)
                 for station, name in c.STATION_FILES.items()}
     c.require(len({p["generatedAt"] for p in payloads.values()}) == 1, "generated_at_mismatch")
@@ -78,7 +85,7 @@ def validate_artifact(root, *, candidate, source, approval, expected_candidate_d
               and q["odptMatchStatusCounts"] == original["quality"]["odptMatchStatusCounts"], "candidate_quality_mismatch")
     c.require(c.candidate_digest(candidate) == expected_candidate_digest, "candidate_changed")
     c.require(c.qa._inventory(c.safe_path(source))[0] == entries, "source_changed")
-    return {"releaseId": release, "artifactKind": c.KIND, "stationCount": 8,
+    return {"releaseId": release, "artifactKind": manifest["artifactKind"], "stationCount": 8,
             "serviceDates": manifest["serviceDates"], "bytes": sum(map(len, files.values())),
             "evidenceKind": meta["evidenceKind"], "deployable": False}
 

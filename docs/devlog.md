@@ -1181,3 +1181,15 @@
 - 実取得candidateはPhase 1 read-only preflightで固定7 source/期待fingerprint一致・未承認null/falseを再確認してPASS。Wakoshi 7,547,220 bytes/32日もJS payload validatorでread-only確認してPASS。公開承認/期間の合成・公開artifact化なし。参考Node検証時間3,207ms、max RSS126,944 KiB。ブラウザ/スマホ/通信性能の測定ではない。
 - 実ブラウザ操作ツールは2回kernel起動エラーで利用不能。実描画/スマホviewport/safe-area/focus/HTTP/cache QAは未実施と明記し、DOM PASSと区別。Phase 3にfull-site validator・asset binding・世代assembly・問い合わせ先設定・実機配信QAを残す。14日保持期限と正式な公開期間は未変更。
 - 取得batch・旧原本・既存Snapshot store・candidateの57 filesはSHA-256/bytes/inode/mtime/ctimeで前後一致。外部Web/ODPT通信・再取得・APIキー参照・公開承認・Deploy/Commit/Push/Mergeなし。references未操作。
+
+
+## 2026-11-07 — Phase 3A v2 full-site assembly・独立validator
+
+- 開始main / HEAD `bcd5f97ccafb1eb8fed84b7551554a8806963cf1`、tracked差分なし、referencesのみ未追跡。新`assemble_odpt_public_site.py`/`validate_odpt_public_site.py`を追加。data-only builder/validator・既存release-managed path/ID形式・canonical/hash処理を再利用し、公開assetとの結合だけを実装した。
+- full-site descriptorへ固定12 asset（HTML1/JS8/CSS3）のpath/bytes/SHA-256を追加し、新builder contract IDとartifactKind release-full-siteでrelease IDを再計算。8 envelopeは内側payloadを保持したままnew ID/URLへ付け直す。metadata・別承認入力・元data-only/candidateは変更しない。source fingerprint・candidate digest・期間・品質/終電集計・公開8駅/全日・容量上限を既存Phase 1 validatorで再検証する。
+- 独立validatorはassemblerをimportしない。全assetのbytes/hash/allowlist、現在の選択checkoutのsource bytes、metadata codeCommit=HEAD、明示問い合わせURL、専用entrypoint/profile、import graph・inline/embeddedコード・重複IDを検査。asset hashを再計算した改変JSや別問い合わせ先も拒否。data-only CLIはfull-siteを拒否し、full-site用内部入口もasset検査を迂回しない。QA操作UI/private state/仮想時計entrypointは公開treeに含めず、純粋adapterのみ共有。
+- 正常系は明示syntheticだけ。`/private/tmp/dotchi-phase3a-synthetic-full-site`に21 files/496,614 bytesを生成。release ID `r1-e64f040203b413c2f98494f2e9fa7547fffd8206cf91f7c983ef4c03aa18d7b7`。serviceDays 10/28〜11/02、synthetic承認期間10/29〜11/01、問い合わせ先example.invalid。独立validator PASS、siteComplete=true、deploymentPerformed=false。結果のdeployable=falseはProduction承認が行われていないことを維持する値。実取得用の仮承認・期間・公開artifactは作成していない。
+- 新規Python full-site9 tests PASS（6.443秒）。12 assetそれぞれの改変/欠損、hash自己再計算後の別JS、問い合わせ先の差替え、未知schema、metadata不整合、data-only世代envelope混入、symlink/QA余剰file/retained非空、決定的生成・入力不変性・上書き拒否を確認。Phase 1公開契約13、v1 release/assembly/contract群39（167.125秒）、v1公開builder/validator/profile23もPASS（Python合計84）。
+- 新規Node full-site3 tests PASS、Phase 2 runtime/v1 runtime/DOM/Actions回帰38 tests PASS（Node合計41、全125 tests）。12 assetのbytes/hash、8駅世代URL、公開entrypointからのDOMを確認。ローカルHTTPはsandboxのlisten EPERMで一度停止し、許可されたsandbox外実行で127.0.0.1の一時serverだけを使用して再実行PASS。asset12/manifest1/station8の21 requestsを確認し、serverを終了。外部Web/ODPT通信なし。実Chrome/Safari描画の検証ではない。
+- 世代assemblyはcurrent 1世代/retained空に限定。既存v1 assembler/Actions・最低7日/適用終了+48時間/最大14日の保持期限は変更しない。旧世代/余分なrelease treeを黙って削除・正常化しない。v2 retained metadata/descriptor、旧toolchain検証、旧タブ/rollbackと30日版の途中更新時の14日cap問題はPhase 3Bへ残す。実問い合わせURL・スマホ実機/HTTP cache QA・正式承認/期間・Production操作も未実施。
+- 保護対象の原本/batch/既存store/candidate57 filesはSHA-256/bytes/inode/mtime/ctimeが前後一致。参照資料未操作。ODPT再取得/キー使用、公開承認変更、Deploy/Commit/Push/Mergeなし。git diff --check・新規file空白検査PASS。

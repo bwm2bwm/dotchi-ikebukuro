@@ -2,6 +2,8 @@
 
 最終整理: 2026-11-07。仕様の正本は [product_spec.md](product_spec.md) と [ui_spec.md](ui_spec.md)、ODPT/GTFSの根拠と未解決事項は [odpt_research.md](odpt_research.md)、配信方式は [hosting_research.md](hosting_research.md)。詳細な作業履歴は [devlog.md](devlog.md)。
 
+Phase 3A: `assemble_odpt_public_site.py`と独立`validate_odpt_public_site.py`でv2 data-only→full-siteを接続。固定12 asset（HTML1/JS8/CSS3）のbytes/SHA-256をdescriptorへ結合し、release IDと8 envelope URLを再確定する。内側payload/metadata/承認入力は変更しない。21-file synthetic full-siteをrepo外に生成し、独立検証・8駅runtime・loopback HTTP PASS。v1経路とdata-only契約は維持。current 1世代/retained空のみを受理し、旧世代結合・14日capの扱いはPhase 3Bへ残す。実取得用承認/期間/公開artifactは未作成。実問い合わせURL・スマホ実描画/配信QA・Production承認も未実施。
+
 v2公開接続Phase 2: 専用公開entrypoint/HTMLとbrowser-safe v2 release検証を追加し、既存公開coreに明示したv2 adapterを接続。QA adapterの純粋な候補/終電計算を共有し、公開manifestの承認期間を毎tick判定する。元WARNING/未照合/解決集計を保持し、欠損は0補完しない。出典・取得日時・期間・免責の通常情報欄を追加。v1 synthetic経路/Actions/保持期限/Phase 1契約は維持。公開artifact生成はsynthetic非公開QA copyのみ、実取得の承認なし。問い合わせ先URLは未設定のため公開前必須。実ブラウザ操作ツールが起動不能でスマホ実描画は未確認。Phase 3はfull-site validator、asset binding、世代assembly、問い合わせ設定と実機/HTTP QA。現在のdata-only manifestとQA用siteをdeploy可能と扱わない。
 
 v2公開接続Phase 1: `odpt_release_contract.py`、`build_odpt_public_release.py`、独立`validate_odpt_public_release.py`を追加。明示したcandidate/rawと別入力の承認・期間・取得日時を検証し、candidate内のnull/falseを変更せず、metadata・品質集計・8駅payloadをrelease IDに結び付ける。出力は`artifactKind=release-data-only`（画面・deploy機能なし）で、既存v1公開validator/runtimeは受理しない。syntheticのみで正常系を検証。実取得30日candidateは読取preflight PASS、承認入力も公開artifactも未作成。次Phaseは公開runtime・UIとfull-site検証/世代assemblyの接続。現行14日retention上限は変更していない。

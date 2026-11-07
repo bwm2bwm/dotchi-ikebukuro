@@ -1,4 +1,4 @@
-"""Offline v2 release DATA contract. No runtime, deployment, or approval creation.
+"""Offline v2 data/full-site contracts. No deployment or approval creation.
 
 The candidate stays unapproved; applicability belongs to separately approved
 publication metadata. Hashes bind content, not the identity of an approver.
@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 import json
+import html
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 
 import odpt_public_v2 as v2
 import odpt_snapshot_qa as qa
@@ -17,10 +19,37 @@ from release_contract import canonicalize_jcs as canonical, sha256_hex as digest
 SCOPE = "public-display-v2"
 RUNTIME = "dotchi-odpt-public-v2"
 KIND = "release-data-only"
+SITE_KIND = "release-full-site"
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_TOTAL_BYTES = 256 * 1024 * 1024
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = (*qa.REQUIRED_JSON, qa.GTFS_NAME)
+SITE_ASSETS = {
+    "index.html": ROOT / "_local_preview/public_odpt_index.html",
+    "styles.css": ROOT / "styles.css",
+    **{name: ROOT / "_local_preview" / name for name in (
+        "preview.css", "odpt_public.css", "preview_public_v2.js", "preview_core.mjs",
+        "odpt_public_runtime.mjs", "odpt_v2_qa_adapter.mjs", "selection.mjs", "terminal_ui.mjs")},
+    **{name: ROOT / "scripts" / name for name in ("timetable_adapter.mjs", "local_preview_payload_loader.mjs")},
+}
+
+
+def site_asset_bytes(contact_url, evidence_kind):
+    """Pinned public allowlist; no private source, QA UI, or arbitrary input tree."""
+    require(isinstance(contact_url, str) and 0 < len(contact_url) <= 2048
+            and "\\" not in contact_url and not any(ord(ch) < 33 for ch in contact_url), "contact_url_required")
+    url = urlsplit(contact_url)
+    require(url.scheme == "https" and url.hostname and not url.username and not url.password
+            and url.port in (None, 443), "contact_url_invalid")
+    if evidence_kind != "synthetic":
+        require(url.hostname not in {"example.invalid", "example.com", "example.org", "example.net", "localhost"}
+                and not url.hostname.endswith(".invalid"), "contact_placeholder_rejected")
+    assets = {name: read_file(path) for name, path in SITE_ASSETS.items()}
+    marker = b'data-contact-url=""'
+    require(assets["index.html"].count(marker) == 1, "contact_template_invalid")
+    assets["index.html"] = assets["index.html"].replace(marker,
+        ('data-contact-url="' + html.escape(contact_url, quote=True) + '"').encode())
+    return assets
 
 
 class ContractError(ValueError):
@@ -191,13 +220,24 @@ def validate_quality(quality, payloads, dates):
 
 
 def release_id(descriptor):
+    require(isinstance(descriptor, dict), "descriptor_invalid")
+    is_site = "assets" in descriptor
     exact(descriptor, {"manifestSchemaVersion", "jsonEnvelopeSchemaVersion", "payloadSchemaVersion",
-                       "publicDataScope", "runtimeContract", "builderContractVersion", "metadataSha256", "stations"})
+                       "publicDataScope", "runtimeContract", "builderContractVersion", "metadataSha256", "stations"}
+          | ({"assets"} if is_site else set()))
     require(type(descriptor["manifestSchemaVersion"]) is int and descriptor["manifestSchemaVersion"] == 2
             and type(descriptor["payloadSchemaVersion"]) is int and descriptor["payloadSchemaVersion"] == 2
             and type(descriptor["jsonEnvelopeSchemaVersion"]) is int and descriptor["jsonEnvelopeSchemaVersion"] == 1
             and descriptor["publicDataScope"] == SCOPE and descriptor["runtimeContract"] == RUNTIME
-            and descriptor["builderContractVersion"] == "dotchi-odpt-release-builder-v1", "descriptor_profile_invalid")
+            and descriptor["builderContractVersion"] == ("dotchi-odpt-site-assembler-v1" if is_site
+                else "dotchi-odpt-release-builder-v1"), "descriptor_profile_invalid")
+    if is_site:
+        require(isinstance(descriptor["assets"], list) and len(descriptor["assets"]) == len(SITE_ASSETS), "asset_set_invalid")
+        for row, path in zip(descriptor["assets"], sorted(SITE_ASSETS)):
+            exact(row, {"path", "bytes", "sha256"})
+            require(row["path"] == path and type(row["bytes"]) is int and 0 < row["bytes"] <= MAX_FILE_BYTES,
+                    "asset_record_invalid")
+            hash_value(row["sha256"])
     hash_value(descriptor["metadataSha256"])
     require(isinstance(descriptor["stations"], list) and len(descriptor["stations"]) == 8, "descriptor_stations_invalid")
     for row, station in zip(descriptor["stations"], sorted(STATION_FILES)):
@@ -213,12 +253,13 @@ def validate_manifest(manifest, now=None):
     require(type(manifest["schemaVersion"]) is int and manifest["schemaVersion"] == 2
             and type(manifest["payloadSchemaVersion"]) is int and manifest["payloadSchemaVersion"] == 2
             and manifest["dataScope"] == SCOPE and manifest["runtimeContract"] == RUNTIME
-            and manifest["artifactKind"] == KIND and manifest["retainedReleases"] == [], "manifest_profile_invalid")
+            and manifest["artifactKind"] in {KIND, SITE_KIND} and manifest["retainedReleases"] == [], "manifest_profile_invalid")
     now = now or datetime.now(timezone.utc)
     require(now.tzinfo is not None, "validation_time_invalid")
     validate_metadata(manifest["metadata"], manifest["serviceDates"], now)
     descriptor = manifest["releaseDescriptor"]
     require(release_id(descriptor) == manifest["releaseId"], "release_id_mismatch")
+    require((manifest["artifactKind"] == SITE_KIND) == ("assets" in descriptor), "artifact_kind_mismatch")
     require(descriptor["metadataSha256"] == digest(canonical(manifest["metadata"])), "metadata_hash_mismatch")
     exact(manifest["stations"], STATION_FILES)
     for station, filename in STATION_FILES.items():

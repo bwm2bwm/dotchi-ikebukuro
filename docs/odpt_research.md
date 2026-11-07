@@ -1745,3 +1745,20 @@ syntheticのPhase 1 data artifactを独立validatorで検証後、repo外のQA c
 実取得candidateはPhase 1 read-only preflightで固定7 sourceと期待fingerprint一致を再確認してPASS。最大駅Wakoshi（7,547,220 bytes/32 serviceDays）も既存JS payload validatorでread-only検証しPASS。Node上のID/構造検証は約3.2秒、process peak RSS約124 MiB（JSON parse後からの検証時間、並行回帰実行中の参考値）で、スマホ性能やHTTP転送の測定ではない。applicationPeriod=nullを維持し、公開用metadataを合成して実画面へ通してはいない。
 
 ブラウザ操作ツールは2回ともkernel起動エラーで利用できず、実Chrome/Safari描画・375px等のviewport・実機focus/safe-area・HTTP/cache実挙動は未検証。DOM harnessとHTML/CSS確認を実描画PASSに読み替えない。Phase 3へはfull-site validator/asset binding/世代assembly、運営者問い合わせ設定、スマホ実描画と配信QAを残す。旧世代の最低7日/適用終了+48時間/最大14日は今回変更していない。
+
+
+## Phase 3A：v2 full-site assemblyと独立検証（2026-11-07）
+
+実装上の契約拡張。新たな公式資料確認・実データ公開承認ではない。`assemble_odpt_public_site.py`はPhase 1の検証済みrelease-data-onlyと明示した原candidate/raw/承認入力を読み、固定public assetを結合する。新規repo外出力のみ許可し、独立validator成功後に確定。入力data-only/candidate/原本は変更せず、内側payloadと公開metadataはそのまま保つ。assetとenvelopeへのrelease ID付与だけを新しいfull-site世代として再計算する。
+
+manifestはschemaVersion 2/dataScope public-display-v2、artifactKindを`release-full-site`とする。descriptorのbuilderContractVersionは`dotchi-odpt-site-assembler-v1`、assetsはpath順の固定12件（HTML1/JS8/CSS3）のpath/bytes/SHA-256。metadata hash/8 payload hashと合わせてr1 release IDへ結合し、`releases/<newId>/<station-file>`の8 envelope/manifest recordを再確定する。21 files。Phase 1 data-only descriptor/IDの計算は変更せず、kindとassetsの対応を厳密に検証する。manifest自体は循環hashに含めずcanonical JSON/descriptor/release ID/metadata/record整合で検証する。
+
+独立`validate_odpt_public_site.py`はassemblerをimportしない。既存Phase 1 validatorのraw/candidate digest/期待fingerprint/別承認入力・期間・前後日・品質/coverage・payload/bytes/hash検証を共有し、full-site用に固定asset allowlistとasset検査を追加する。data-onlyの既定入口はfull-siteを拒否する。全assetの実bytes/hashをdescriptorに照合し、現在の選択toolchain（metadata codeCommit=checkout HEAD）の固定source bytesとも照合する。問い合わせURLは明示した外部入力とHTML上の値が一致しなければ拒否。hashを自己再計算して別のJSや問い合わせ先を紛れ込ませても、その検証を回避できない。HTML entrypoint/CSS順・profile marker・inline code/embedded document・重複ID・import graphも確認する。完全な旧toolchainの検証まで現在checkoutで代用する設計ではない。
+
+CLIは`assemble_odpt_public_site.py --data-release <data-only> --candidate <private-bundle> --source <raw> --approval <separate-input> --expected-candidate-digest <digest> --expected-source-fingerprint <fingerprint> --contact-url <HTTPS-url> --output <new-dir>`。独立検証は`validate_odpt_public_site.py <site> --candidate ... --source ... --approval ... --expected-candidate-digest ... --expected-source-fingerprint ... --contact-url ...`。承認や期間を作る機能は追加しない。HTMLのcontact-urlは安全にescapeしてasset hashへ結合し、未設定/非HTTPS/credential付きURLを拒否する。明示synthetic fixtureだけexample.invalidを許可し、実データ用の連絡先としてplaceholderを採用しない。
+
+browser runtimeはdata-only/full-siteを明示判別し、full-siteでは12 asset recordの固定集合・schema/bytes/hash形状とdescriptor由来release IDを検証する。artifact内の専用v2 entrypointを使い、世代固定JSON URL/metadata/品質/期限の検証を維持する。browserでasset全部を再fetchする仕組みは追加せず、asset実bytesの照合は独立full-site validatorと配信テストで行う。公開artifactにはQA UI/仮想時計entrypoint/private QA stateは含めない。候補計算用の純粋なQA adapter moduleはPhase 2どおり共有する。
+
+既存v1 synthetic builder/validator/runtime/Actionsと世代保持policyは変更しない。現Phaseのv2 full-siteはcurrent 1世代、retainedReleases空のみ。旧世代や余分なrelease directoryを黙って落とさず拒否する。既存v1世代assemblerがv2を受理したと扱わず、v2 retained metadata/descriptorの独立検証・旧toolchainの扱い・旧タブ参照・rollbackをPhase 3Bで接続する。最低7日/適用終了+48時間/最大14日は維持し、残存期間12日超での更新が停止することを回帰確認した。
+
+synthetic full-siteを`/private/tmp/dotchi-phase3a-synthetic-full-site`へ生成。21 files/496,614 bytes、12 asset、8駅、6 serviceDates（10/28〜11/02）、synthetic承認範囲10/29〜11/01。siteComplete=true/deploymentPerformed=falseであり、Production承認を意味しない。HTTPは127.0.0.1だけで12 asset/manifest/8 stationの21 requestを確認。コピーされた公開moduleをNodeで実行して8駅の候補とDOMを確認し、実Chrome/Safari描画とは区別する。実取得candidateへの仮承認・期間・公開artifactは作成しない。問い合わせ先の実設定と実機/HTTP cache QAは公開前に残る。

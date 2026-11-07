@@ -12,6 +12,9 @@ const SOURCES = ['Railway_all.json', 'Station_all.json', 'TrainTimetable_Yurakuc
 const REASONS = { explicit_pass_info: 'INFO', transfer_wait_limit_info: 'INFO', no_valid_arrival: 'UNKNOWN',
   primary_arrival_missing: 'UNKNOWN', quality_warning: 'WARNING', unknown: 'UNKNOWN' };
 const MAX_BYTES = 25 * 1024 * 1024;
+const SITE_ASSETS = ['index.html', 'styles.css', 'preview.css', 'odpt_public.css', 'preview_public_v2.js',
+  'preview_core.mjs', 'odpt_public_runtime.mjs', 'odpt_v2_qa_adapter.mjs', 'selection.mjs', 'terminal_ui.mjs',
+  'timetable_adapter.mjs', 'local_preview_payload_loader.mjs'].sort();
 const preparedValues = new WeakSet();
 
 export class V2ReleaseError extends TypeError {
@@ -123,8 +126,9 @@ function validateQuality(q, dates) {
 export async function validateV2ReleaseManifest(m, cryptoImpl = globalThis.crypto) {
   exact(m, ['schemaVersion', 'artifactKind', 'releaseId', 'releaseDescriptor', 'runtimeContract',
     'payloadSchemaVersion', 'dataScope', 'serviceDates', 'metadata', 'stations', 'retainedReleases']);
+  const fullSite = m.artifactKind === 'release-full-site';
   check(m.schemaVersion === 2 && m.payloadSchemaVersion === 2 && m.dataScope === V2_PROFILE
-    && m.runtimeContract === RUNTIME && m.artifactKind === 'release-data-only'
+    && m.runtimeContract === RUNTIME && (fullSite || m.artifactKind === 'release-data-only')
     && Array.isArray(m.retainedReleases) && m.retainedReleases.length === 0, 'runtime_incompatible');
   const dates = m.serviceDates;
   check(Array.isArray(dates) && dates.length >= 3 && dates.length <= 366, 'service_dates_invalid');
@@ -159,10 +163,17 @@ export async function validateV2ReleaseManifest(m, cryptoImpl = globalThis.crypt
     && meta.attribution.sourceUrl === 'https://www.odpt.org/', 'attribution_invalid');
   check(same(meta.transferSearchPolicy, { minimumWaitSeconds: 60, maximumWaitSeconds: 3600, crossServiceDateSearch: false }), 'transfer_policy_invalid');
   const d = exact(m.releaseDescriptor, ['manifestSchemaVersion', 'jsonEnvelopeSchemaVersion', 'payloadSchemaVersion',
-    'publicDataScope', 'runtimeContract', 'builderContractVersion', 'metadataSha256', 'stations']);
+    'publicDataScope', 'runtimeContract', 'builderContractVersion', 'metadataSha256', 'stations', ...(fullSite ? ['assets'] : [])]);
   check(d.manifestSchemaVersion === 2 && d.jsonEnvelopeSchemaVersion === 1 && d.payloadSchemaVersion === 2
     && d.publicDataScope === V2_PROFILE && d.runtimeContract === RUNTIME
-    && d.builderContractVersion === 'dotchi-odpt-release-builder-v1', 'descriptor_profile_invalid');
+    && d.builderContractVersion === (fullSite ? 'dotchi-odpt-site-assembler-v1' : 'dotchi-odpt-release-builder-v1'), 'descriptor_profile_invalid');
+  if (fullSite) {
+    check(Array.isArray(d.assets) && d.assets.length === SITE_ASSETS.length, 'asset_set_invalid');
+    d.assets.forEach((row, i) => {
+      exact(row, ['path', 'bytes', 'sha256']); hash(row.sha256);
+      check(row.path === SITE_ASSETS[i] && count(row.bytes) > 0 && row.bytes <= MAX_BYTES, 'asset_record_invalid');
+    });
+  }
   check(await jsonHash(meta, cryptoImpl) === d.metadataSha256, 'metadata_hash_mismatch');
   check(Array.isArray(d.stations) && d.stations.length === 8, 'station_set_invalid');
   const stationIds = Object.keys(FILES).sort();
@@ -170,6 +181,7 @@ export async function validateV2ReleaseManifest(m, cryptoImpl = globalThis.crypt
   check(m.releaseId === `r1-${await jsonHash(d, cryptoImpl)}`, 'release_id_mismatch');
   exact(m.stations, Object.keys(FILES));
   let totalBytes = new TextEncoder().encode(canonicalPublicJson(m)).length;
+  if (fullSite) totalBytes += d.assets.reduce((total, row) => total + row.bytes, 0);
   for (const [id, filename] of Object.entries(FILES)) {
     const record = exact(m.stations[id], ['url', 'sha256', 'bytes']); hash(record.sha256);
     check(record.url === `/releases/${m.releaseId}/${filename}` && count(record.bytes) > 0 && record.bytes <= MAX_BYTES, 'station_record_invalid');
