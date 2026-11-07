@@ -1050,3 +1050,19 @@
 - synthetic fixed-clock suitesでT−181/T−180前後/T−1ms/T/T+1ms、60分ゲート、24/25時、serviceDate、all8 routeState/UNKNOWN/INFO/coverage/best/cardLimit、known0/unavailable/missingを確認。実sourceは深夜境界4時刻と10/31 coverage条件のみ。すべての実source時刻/全8駅境界DOM、始発境界は未評価。
 - 品質到達点と公開前要件をresearchへ整理：2A source/input fingerprint・hash/bytesと異世代比較基盤（実際の異世代Snapshot評価は未実施）、2B JSON/GTFS semantics（opaque coverage limitationあり）、2C generator/v2 audit/quality diff、adapter board/model/state diff、3d DOM意味整合を切り分け。比較条件は同じengine/context/runtime/timezone/station/scenario/required daysと揃った評価セル。same-Snapshot diff0/DOM completeは鮮度、異世代正確性、公開資格を証明しない。公開前に新Snapshotと時刻根拠、改正切替、license/承認・applicationPeriod、coverage不足運用、祝日/臨時日、実ブラウザー/accessibility/HTTP、更新/rollbackを要する。公開gate/approval/applicationPeriod/publicationApprovedは変更しない。
 - 関連Node67件PASS（19.946秒）。Pythonのquality input/metrics/details/diffs、display context/collector/diff/state diff、DOM collector、HTMLの152件PASS（533.861秒）。開始前後source/store不変を確認。未評価は実描画/CSS/layout/font/safe-area/dialog focus/accessibility/HTTP/CSP/cache、鮮度/公開資格、異世代実Snapshot、全駅×全境界のDOM全展開。変更は3指定docのみ。API/new source/store変更/複製/公開gate/Deploy/Commit/Push/Mergeなし。
+# 2026-11-07 — ODPT Phase 2D-2 オフライン取得基盤の部分実装
+
+- 開始時 branch `main`、HEAD `00a295cd05cf3068c35abf1aefda65d6fd2cdc64`、git status cleanを確認。
+- `scripts/odpt_manual_fetch.py` と合成テストを追加。Phase 1Bのraw JSON/GTFS parse、Phase 1Aのstrict Source/Snapshot validation・fingerprintを再利用し、新規private batchへraw bytes/historyを保存。7件同一batch成功時のみfetch Snapshot作成。既存legacy store/rawは参照しない。
+- 新規5 tests PASS。Source contract/inventory/store、2A diff、2B semantic、2C quality/display/DOMの関連回帰計128 tests PASS（約333秒）。実APIアクセスなし。
+- **Phase 2D-2未完了:** ライブtransport/TLS/redirect/key handling、retry履歴の追記、公式経路/selector evidence、失敗/中断の持続履歴、Snapshot直前のraw再照合、Phase 2A/2B/2C評価入口、要求された異常系・回帰suiteは未実装。CLIはライブ取得を常時拒否する。これらを実装するまで本基盤を実取得へ使わない。
+- 変更は`README.md`、`docs/project_state.md`、`docs/odpt_research.md`、本履歴、新script、新test。Cloudflare/広告/公開経路変更、実データ取得、既存原本/store操作、Commit/Push/Merge/Deployなし。
+
+## 2026-11-07 — ODPT Phase 2D-2A transport・履歴・証拠・raw再照合
+
+- 開始main/`00a295cd05cf3068c35abf1aefda65d6fd2cdc64`。前回の未コミット6ファイルだけを確認し、継続変更として保持した。想定外の変更なし。
+- 既存manual fetchのrecord/Snapshot生成とcapture mockを拡張。交換関数を注入するtransport、TLS証明書/host検証・接続/読取timeout・MIME/status/長さ/上限検査、GTFS限定1回redirectと秘密転送拒否を実装。実adapterとCLIの通信guardは無効のまま。env providerは用意したが実秘密値は登録/読込/使用しない。
+- attempt別に開始interrupted recordを先に保存し、raw/証拠保存後に結果を確定。手動retry親参照・履歴保存失敗・強制終了相当のresult欠落をfail-closedで扱う。raw/historyを上書きしない。Snapshot確定前に7成功record/全retry契約・rawの二巡hash/bytes・形式/metadata・batch対応を検証。公開承認false/period null、ダイヤ版整合not-evaluatedを維持。
+- 最終の新規manual fetch 20件＋既存Source contract/inventory/store/diff、semantic/GTFS loader 61件、計81件PASS（4.107秒）。HTTP4xx/5xx、timeout、TLS、redirect、サイズ/形式/部分失敗、中断/retry、各保存境界の失敗、上書き/symlink、不正path、raw改変/不足/途中変更、source/batch不整合、秘密echo/例外/header/署名URL/不正CLI引数、通信guardを合成/mocked transportだけで検証。実HTTP/TLS疎通は未検証。
+- 2D-2B残件はbatch/全attemptと既存2A〜2C評価への接続。strict store readerは7記録だけのためretry親履歴を含む本batchを直接読めない。契約変更やretry情報破棄で回避しない。公開資格・実v2公開対応は対象外。
+- 変更は前回と同じ6ファイル。既存raw/storeは一切操作せず、新規合成一時データだけを使用。原本の開始前後hash計測は実施していない。Cloudflare/公開builder/runtime/広告変更、APIアクセス、実取得、Commit/Push/Merge/Deployなし。git diff --check PASS。

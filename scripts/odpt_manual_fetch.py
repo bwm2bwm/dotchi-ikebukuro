@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""Offline-safe manual ODPT batch capture primitives and disabled-by-default CLI.
+
+Live transport is intentionally unavailable until ODPT endpoint policy is reviewed.
+"""
+from __future__ import annotations
+import argparse, hashlib, json, os, sys, uuid
+import fcntl, http.client, socket, ssl
+from contextlib import contextmanager
+from urllib.parse import parse_qsl, urljoin, unquote
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit, urlencode
+
+if __package__:
+    from .odpt_source_contract import SOURCE_IDS, SOURCE_FILES, validate_source_record, validate_snapshot, content_fingerprint
+    from .odpt_source_inventory import _stable_read, _record, _read_gtfs_metadata, _parse_json, MAX_SOURCE_BYTES
+    from .odpt_source_store import _safe_new_store_path, PRIVATE_MODE, FILE_MODE, _safe_existing_store_path, _load_json_object, _json_bytes
+else:
+    from odpt_source_contract import SOURCE_IDS, SOURCE_FILES, validate_source_record, validate_snapshot, content_fingerprint
+    from odpt_source_inventory import _stable_read, _record, _read_gtfs_metadata, _parse_json, MAX_SOURCE_BYTES
+    from odpt_source_store import _safe_new_store_path, PRIVATE_MODE, FILE_MODE, _safe_existing_store_path, _load_json_object, _json_bytes
+
+LIVE_TRANSPORT_ENABLED = False
+ENDPOINT_IDS = {s: "odpt-" + s.replace(".", "-") for s in SOURCE_IDS}
+MAX_RESPONSE_BYTES = MAX_SOURCE_BYTES
+
+def now(): return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
+
+def make_fetch_record(source_id, batch_id, attempt_id, started, finished, status, content_type, raw=None, error=None, retry_of=None):
+    if source_id not in SOURCE_IDS: raise ValueError("source_id_invalid")
+    metadata = {"status":"unavailable","gtfs":None,"odpt":None}
+    artifact = None; retrieved = None; outcome = "failed" if error else "succeeded"
+    if raw is not None:
+        if len(raw) > MAX_RESPONSE_BYTES: raise ValueError("source_size_limit_exceeded")
+        if source_id == "metro.gtfs": metadata={"status":"parsed","gtfs":_read_gtfs_metadata(raw),"odpt":None}
+        else:
+            rows=_parse_json(raw)
+            dc=sorted({r["dc:date"] for r in rows if isinstance(r.get("dc:date"),str)})
+            issued=sorted({r["dct:issued"] for r in rows if isinstance(r.get("dct:issued"),str)})
+            for row in rows:
+                if any(k in row and row[k] is not None and not isinstance(row[k],str) for k in ("dc:date","dct:issued")): raise ValueError("odpt_metadata_invalid")
+            metadata={"status":"parsed","gtfs":None,"odpt":{"recordCount":len(rows),"dcDates":dc,"issuedDates":issued,"dcDateMissingCount":sum("dc:date" not in r or r["dc:date"] is None for r in rows),"issuedMissingCount":sum("dct:issued" not in r or r["dct:issued"] is None for r in rows)}}
+        retrieved=finished
+        artifact={"path":"raw/"+SOURCE_FILES[source_id],"representation":"response-body","sha256":hashlib.sha256(raw).hexdigest(),"sizeBytes":len(raw)}
+    rec=_record(source_id,"raw/"+SOURCE_FILES[source_id],raw or b"",metadata,finished)
+    rec.update(mode="fetch",batchId=batch_id,attemptId=attempt_id,retryOfAttemptId=retry_of,observedAt=None,startedAt=started,finishedAt=finished,retrievedAt=retrieved,outcome=outcome,http={"responses":[{"endpointId":ENDPOINT_IDS[source_id],"status":status,"contentType":content_type}]} if status is not None else None,errorCode=error,artifact=artifact,unknownReasons=[])
+    validate_source_record(rec)
+    return rec
+
+def create_fetch_snapshot(records, created_at=None):
+    records=list(records); selected={r["sourceId"]:r for r in records if r.get("outcome")=="succeeded"}
+    if len(selected)!=7 or sum(r.get("outcome")=="succeeded" for r in records)!=7 or set(selected)!=SOURCE_IDS or len({r.get("batchId") for r in records})!=1: raise ValueError("batch_incomplete")
+    snapshot={"contract":"odpt-source-snapshot","schemaVersion":1,"snapshotId":str(uuid.uuid4()),"createdAt":created_at or now(),"mode":"fetch","batchId":records[0]["batchId"],"selectedRecords":{s:selected[s]["recordId"] for s in sorted(SOURCE_IDS)},"contentFingerprint":content_fingerprint(selected.values()),"completeness":"complete","acquisitionStatus":"fetch-success","crossSourceConsistency":"not-evaluated"}
+    validate_snapshot(snapshot,records)
+    return snapshot
+
+CONNECT_TIMEOUT = 15
+READ_TIMEOUT = 30
+BASE = "https://api.odpt.org/api/v4/"
+
+
+class FetchError(ValueError):
+    """Only fixed codes may cross the transport boundary."""
+
+
+def endpoint(source_id):
+    if source_id not in SOURCE_IDS:
+        raise FetchError("source_id_invalid")
+    if source_id == "metro.gtfs":
+        return BASE + "files/TokyoMetro/data/TokyoMetro-Train-GTFS.zip", {}
+    resource = {"railway": "Railway", "station": "Station",
+                "train-timetable": "TrainTimetable", "station-timetable": "StationTimetable"}[source_id.split(".")[1]]
+    filters = {"odpt:operator": "odpt.Operator:TokyoMetro"}
+    if len(source_id.split(".")) == 3:
+        filters["odpt:railway"] = "odpt.Railway:TokyoMetro." + source_id.split(".")[2].capitalize()
+    return BASE + "odpt:" + resource, filters
+
+
+def _https_exchange(url):
+    """Real adapter has two timeouts; CLI and adapter both forbid live use."""
+    if not LIVE_TRANSPORT_ENABLED:
+        raise FetchError("live_transport_disabled")
+    parsed = urlsplit(url)
+    conn = http.client.HTTPSConnection(parsed.hostname, port=443,
+                                       timeout=CONNECT_TIMEOUT, context=ssl.create_default_context())
+    try:
+        conn.connect()
+        conn.sock.settimeout(READ_TIMEOUT)
+        conn.request("GET", parsed.path + ("?" + parsed.query if parsed.query else ""),
+                     headers={"Accept-Encoding": "identity"})
+        response = conn.getresponse()
+        # Response close also owns the connection (no connection reuse).
+        original_close = response.close
+        def close():
+            original_close()
+            conn.close()
+        response.close = close
+        return response
+    except BaseException:
+        conn.close()
+        raise
+
+
+def env_credential():
+    """Called only explicitly; never read .env.local or accept a CLI key."""
+    return os.environ.get("ODPT_API_KEY")
+
+
+def transport(source_id, credential_provider, exchange=None):
+    """Injected exchange must return status/getheader/read/close; no auto retry."""
+    if exchange is None and not LIVE_TRANSPORT_ENABLED:
+        raise FetchError("live_transport_disabled")
+    responses = []
+    try:
+        secret = credential_provider()
+        if not isinstance(secret, str) or not secret or any(ord(c) < 33 or ord(c) > 126 for c in secret):
+            raise FetchError("credential_invalid")
+        base, filters = endpoint(source_id)
+        url = base + "?" + urlencode({**filters, "acl:consumerKey": secret})
+        send = exchange or _https_exchange
+        for hop in range(2):
+            response = send(url)
+            try:
+                status = response.status
+                ctype = (response.getheader("Content-Type") or "").split(";", 1)[0].strip().lower()
+                allowed = {"application/zip", "application/octet-stream"} if source_id == "metro.gtfs" else {"application/json", "application/ld+json"}
+                # Never retain raw Content-Type, Location, headers or URL.
+                safe_type = ctype if ctype in allowed else None
+                responses.append({"endpointId": ENDPOINT_IDS[source_id] if hop == 0 else "odpt-gtfs-blob",
+                                  "status": status if type(status) is int else None, "contentType": safe_type})
+                if status == 302 and source_id == "metro.gtfs" and hop == 0:
+                    location = response.getheader("Location") or ""
+                    target = urlsplit(urljoin(base, location))
+                    forbidden = {"acl:consumerkey", "consumerkey", "key", "api_key", "apikey", "odpt_api_key"}
+                    if (target.scheme != "https" or target.hostname != "dataodpt.blob.core.windows.net"
+                            or target.port not in (None, 443) or target.username or target.password or target.fragment
+                            or not target.path.startswith("/") or "\\" in location
+                            or secret in unquote(location) or any(ord(c) < 32 for c in location)
+                            or any(k.lower() in forbidden for k, _ in parse_qsl(target.query))):
+                        raise FetchError("redirect_rejected")
+                    url = target.geturl()  # May be signed: memory only, fresh request, no key/header forwarding.
+                    continue
+                if status != 200:
+                    raise FetchError("http_status_failed")
+                if ctype not in allowed:
+                    raise FetchError("content_type_invalid")
+                if response.getheader("Content-Encoding") not in (None, "", "identity"):
+                    raise FetchError("content_encoding_invalid")
+                length = response.getheader("Content-Length")
+                if length is not None and (not length.isascii() or not length.isdigit() or int(length) > MAX_RESPONSE_BYTES):
+                    raise FetchError("response_size_invalid")
+                body = bytearray()
+                while True:
+                    block = response.read(min(65536, MAX_RESPONSE_BYTES + 1 - len(body)))
+                    if not block:
+                        break
+                    body.extend(block)
+                    if len(body) > MAX_RESPONSE_BYTES:
+                        raise FetchError("response_too_large")
+                if length is not None and len(body) != int(length):
+                    raise FetchError("response_incomplete")
+                if secret.encode() in body or urlencode({"x": secret})[2:].encode() in body:
+                    raise FetchError("credential_echo_rejected")
+                return bytes(body), responses
+            finally:
+                response.close()
+        raise FetchError("redirect_rejected")
+    except KeyboardInterrupt as exc:
+        exc.responses = responses
+        raise
+    except Exception as exc:
+        if isinstance(exc, FetchError) and str(exc) in {
+            "credential_invalid", "redirect_rejected", "http_status_failed", "content_type_invalid",
+            "content_encoding_invalid", "response_size_invalid", "response_too_large",
+            "response_incomplete", "credential_echo_rejected", "live_transport_disabled"}: code = str(exc)
+        elif isinstance(exc, ssl.SSLError): code = "tls_failed"
+        elif isinstance(exc, (TimeoutError, socket.timeout)): code = "timeout"
+        else: code = "transport_failed"
+        error = FetchError(code)
+        error.responses = responses
+        raise error from None
+
+
+def _save(directory, filename, value):
+    """Exclusive atomic publication; an existing name is never replaced."""
+    _safe_existing_store_path(directory)
+    tmp = directory / (".pending-" + str(uuid.uuid4()))
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, FILE_MODE)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(tmp, directory / filename, follow_symlinks=False)
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try: os.fsync(fd)
+        finally: os.close(fd)
+    except OSError:
+        raise FetchError("persistence_failed") from None
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _read_json(path):
+    return _load_json_object(path)
+
+
+def new_batch(path):
+    root = _safe_new_store_path(path)
+    root.mkdir(mode=PRIVATE_MODE)
+    os.chmod(root, PRIVATE_MODE)
+    for name in ("raw", "attempts"):
+        (root / name).mkdir(mode=PRIVATE_MODE)
+    _save(root, "batch.json", _json_bytes({"batchId": str(uuid.uuid4()),
+          "contract": "odpt-manual-fetch-batch", "schemaVersion": 1,
+          "provenance": {"transport": "offline-injected", "retrievedAt": None},
+          "applicationPeriod": None, "publicationApproved": False}))
+    return root
+
+
+@contextmanager
+def _locked(path):
+    root = _safe_existing_store_path(path)
+    # Lock the directory inode, without adding or replacing a lock file.
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield root
+    finally:
+        os.close(fd)
+
+
+def history(root):
+    batch = _read_json(root / "batch.json")
+    if (batch.get("contract") != "odpt-manual-fetch-batch" or batch.get("publicationApproved") is not False
+            or batch.get("applicationPeriod") is not None):
+        raise FetchError("batch_invalid")
+    attempts = _safe_existing_store_path(root / "attempts")
+    records = []
+    for directory in sorted(attempts.iterdir()):
+        _safe_existing_store_path(directory)
+        start = _read_json(directory / "started.json")
+        rec = _read_json(directory / "result.json") if (directory / "result.json").exists() else start
+        validate_source_record(start)
+        validate_source_record(rec)
+        if (start["outcome"] != "interrupted" or rec["batchId"] != batch["batchId"]
+                or any(rec[k] != start[k] for k in ("recordId", "attemptId", "sourceId", "batchId", "retryOfAttemptId", "startedAt"))
+                or directory.name != rec["attemptId"]):
+            raise FetchError("history_invalid")
+        if (directory / "result.json").exists():
+            evidence = _read_json(directory / "evidence.json")
+            if evidence != evidence_for(rec): raise FetchError("evidence_invalid")
+        records.append(rec)
+    by_attempt = {r["attemptId"]: r for r in records}
+    if len(by_attempt) != len(records) or len({r["recordId"] for r in records}) != len(records):
+        raise FetchError("history_duplicate")
+    for rec in records:
+        seen = {rec["attemptId"]}
+        cursor = rec
+        while cursor["retryOfAttemptId"] is not None:
+            parent = by_attempt.get(cursor["retryOfAttemptId"])
+            if (parent is None or parent["attemptId"] in seen or parent["outcome"] == "succeeded"
+                    or parent["sourceId"] != cursor["sourceId"] or parent["batchId"] != cursor["batchId"]):
+                raise FetchError("retry_chain_invalid")
+            if parent["finishedAt"] and datetime.fromisoformat(parent["finishedAt"]) > datetime.fromisoformat(cursor["startedAt"]):
+                raise FetchError("retry_chain_invalid")
+            seen.add(parent["attemptId"])
+            cursor = parent
+    return batch, records
+
+
+def evidence_for(rec):
+    base, filters = endpoint(rec["sourceId"])
+    return {"contract": "odpt-fetch-evidence", "schemaVersion": 1,
+            "batchId": rec["batchId"], "attemptId": rec["attemptId"], "sourceId": rec["sourceId"],
+            "endpointId": ENDPOINT_IDS[rec["sourceId"]], "host": "api.odpt.org",
+            "path": urlsplit(base).path, "filters": filters, "selector": None,
+            "selectorStatus": "not-used-unconfirmed", "transport": "offline-injected",
+            "outcome": rec["outcome"], "errorCode": rec["errorCode"]}
+
+
+def acquire(path, source_id, credential_provider, *, exchange=None):
+    """One manual attempt. Retry follows only the latest failed/interrupted attempt."""
+    if source_id not in SOURCE_IDS: raise FetchError("source_id_invalid")
+    with _locked(path) as root:
+        if (root / "snapshot.json").exists() or (root / "snapshot.json").is_symlink(): raise FetchError("batch_sealed")
+        batch, records = history(root)
+        prior = [r for r in records if r["sourceId"] == source_id]
+        # A retry chain, not wall clock order, determines the latest record.
+        parents = {r["retryOfAttemptId"] for r in prior}
+        leaves = [r for r in prior if r["attemptId"] not in parents]
+        if len(leaves) > 1: raise FetchError("retry_chain_invalid")
+        parent = leaves[0] if leaves else None
+        if parent and parent["outcome"] == "succeeded": raise FetchError("source_already_succeeded")
+        raw_root = _safe_existing_store_path(root / "raw")
+        target = raw_root / SOURCE_FILES[source_id]
+        if target.exists() or target.is_symlink(): raise FetchError("raw_already_present")
+        attempt = str(uuid.uuid4())
+        directory = root / "attempts" / attempt
+        directory.mkdir(mode=PRIVATE_MODE)
+        start = make_fetch_record(source_id, batch["batchId"], attempt, now(), now(), None, None,
+                                  error="interrupted", retry_of=parent["attemptId"] if parent else None)
+        start.update(finishedAt=None, outcome="interrupted")
+        validate_source_record(start)
+        _save(directory, "started.json", _json_bytes(start))
+        rec = dict(start)
+        responses = []
+        try:
+            raw, responses = transport(source_id, credential_provider, exchange)
+            rec = make_fetch_record(source_id, batch["batchId"], attempt, start["startedAt"], now(),
+                                    200, responses[-1]["contentType"], raw, retry_of=start["retryOfAttemptId"])
+            rec["recordId"] = start["recordId"]
+            rec["http"] = {"responses": responses}
+        except KeyboardInterrupt as exc:
+            if getattr(exc, "responses", None): start["http"] = {"responses": exc.responses}
+            validate_source_record(start)
+            _save(directory, "evidence.json", _json_bytes(evidence_for(start)))
+            _save(directory, "result.json", _json_bytes(start))
+            return start
+        except Exception as exc:
+            code = str(exc) if isinstance(exc, FetchError) else "body_validation_failed"
+            rec = dict(start, outcome="failed", finishedAt=now(), errorCode=code)
+            observed = getattr(exc, "responses", None) or responses
+            if observed: rec["http"] = {"responses": observed}
+        validate_source_record(rec)
+        _save(directory, "evidence.json", _json_bytes(evidence_for(rec)))
+        if rec["outcome"] == "succeeded":
+            # History result is durable only after raw is durable. Orphan raw blocks retries.
+            _save(root / "raw", SOURCE_FILES[source_id], raw)
+        _save(directory, "result.json", _json_bytes(rec))
+        return rec
+
+
+def finalize(path):
+    with _locked(path) as root:
+        batch, records = history(root)
+        snapshot = create_fetch_snapshot(records)
+        # No raw copies. Stable read applies JSON/GTFS validation and inode checks.
+        _safe_existing_store_path(root / "raw")
+        for rec in records:
+            if rec["outcome"] != "succeeded": continue
+            raw, metadata = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
+            artifact = rec["artifact"]
+            if (hashlib.sha256(raw).hexdigest() != artifact["sha256"] or len(raw) != artifact["sizeBytes"]
+                    or metadata != rec["metadata"] or rec["batchId"] != batch["batchId"]):
+                raise FetchError("raw_mismatch")
+        # A second pass catches changes to early files during later parsing.
+        for rec in records:
+            if rec["outcome"] != "succeeded": continue
+            raw, _ = _stable_read(root / "raw" / SOURCE_FILES[rec["sourceId"]], rec["sourceId"])
+            if (hashlib.sha256(raw).hexdigest(), len(raw)) != (rec["artifact"]["sha256"], rec["artifact"]["sizeBytes"]):
+                raise FetchError("raw_changed_during_finalization")
+        _save(root, "snapshot.json", _json_bytes(snapshot))
+        return snapshot
+
+
+def capture_mock_batch(batch_path, responses):
+    """Compatibility test seam, using the same transport and journal as acquire."""
+    root = new_batch(batch_path)
+    class Response:
+        def __init__(self, value):
+            self.status, self.ctype, self.body = value
+            import io
+            self.stream = io.BytesIO(self.body)
+        def getheader(self, key): return self.ctype if key == "Content-Type" else None
+        def read(self, count): return self.stream.read(count)
+        def close(self): self.stream.close()
+    count = 0
+    for sid in sorted(SOURCE_IDS):
+        def exchange(_url):
+            if sid not in responses: raise OSError("mock missing")
+            return Response(responses[sid])
+        rec = acquire(root, sid, lambda: "mock-credential", exchange=exchange)
+        count += rec["outcome"] == "succeeded"
+    if count == 7: finalize(root)
+    return {"batchId": _read_json(root / "batch.json")["batchId"], "successCount": count, "snapshotCreated": count == 7}
+
+
+class SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse normally echoes unknown arguments (which might contain a key).
+        self.exit(2, "cli_arguments_invalid\n")
+
+
+def main(argv=None):
+    parser = SafeArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    live = commands.add_parser("fetch", help="live fetch is disabled")
+    live.add_argument("--batch", type=Path, required=True)
+    live.add_argument("--enable-live-transport", action="store_true", help="reserved; cannot enable communication")
+    commands.add_parser("help-offline", help="show offline transport status")
+    for name in ("init", "inspect", "finalize"):
+        command = commands.add_parser(name, help="local batch operation only")
+        command.add_argument("--batch", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.command == "fetch":
+        print("live_transport_disabled", file=sys.stderr)
+        return 2
+    try:
+        if args.command == "help-offline":
+            print("live_transport=disabled; offline tests only")
+        elif args.command == "init":
+            new_batch(args.batch)
+            print("batch_created; publicationApproved=false; applicationPeriod=null")
+        elif args.command == "finalize":
+            finalize(args.batch)
+            print("snapshot_created; publicationApproved=false; applicationPeriod=null")
+        else:
+            with _locked(args.batch) as root:
+                _, records = history(root)
+                print("attempts=" + str(len(records)) + "; succeeded=" + str(sum(r["outcome"] == "succeeded" for r in records)))
+        return 0
+    except Exception:
+        # Do not expose paths, exceptions, malformed metadata or credentials.
+        print("local_batch_operation_failed", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__": raise SystemExit(main())

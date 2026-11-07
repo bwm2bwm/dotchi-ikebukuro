@@ -35,6 +35,16 @@ find local_data/odpt -maxdepth 1 -type f -print
 
 取得スクリプトは対象JSONを最大6リクエストでローカル保存します。`local_data/odpt/` はGit管理対象外です。GTFSのCKAN配布URL・認証条件は未確認のため自動ダウンロードしません。入手済みZIPを同フォルダに置くと解析対象になります。解析結果はターミナルに表示され、データ未配置時に実データ結果を作りません。
 
+### Phase 2D-2A 非公開の手動取得基盤（実通信無効）
+
+`python3 -B scripts/odpt_manual_fetch.py help-offline` で通信無効を確認できます。`fetch --batch <絶対path>` は常に終了2となり、`--enable-live-transport`でも通信しません。実秘密値をCLI引数へ渡さないでください。実取得先・selectorの公式確認と明示的な実取得許可は未成立です。
+
+ローカル操作は `init --batch <新規の非公開絶対path>`、`inspect --batch <batch>`、`finalize --batch <batch>`。親directoryは事前に用意し、repository/公開風path/preview/QA出力先やsymlink経路は使えません。`init`は空バッチを作るだけで取得しません。空・未完了バッチの`finalize`は終了2です。既存raw/storeを入力に指定しないでください。
+
+Python API `acquire(batch, sourceId, credential_provider, exchange=mock)` は1回の手動attempt、同sourceへの再呼出は失敗・中断後だけretryを記録します。`capture_mock_batch()`も同じtransport/journalを使います。テストは `python3 -m unittest tests.test_odpt_manual_fetch`。実環境の認証注入用`env_credential()`は環境変数`ODPT_API_KEY`だけを読む関数ですが、現在のCLIはこれを呼びません。`.env.local`は読みません。
+
+rawは再整形せず保存し、attempt別の開始記録・結果・補助証拠を0700/0600で保持します。Snapshot確定前に全7件を再読・再検証します。保存失敗後の孤立rawや壊れた履歴は上書きで修復せず停止し、別途調査してください。`publicationApproved=false`、`applicationPeriod=null`、ダイヤ版整合`not-evaluated`を維持します。Phase 2A〜2Cとの評価接続は2D-2Bで対応します。
+
 ### ローカル実ダイヤpreview
 
 previewのソースは [`_local_preview/`](_local_preview/) にあります。underscore始まりのディレクトリはGitHub PagesのJekyll出力対象外です。実行時のHTML/JSコピーとpayloadはリポジトリ外の `~/Library/Application Support/dotchi-ikebukuro-preview/site/` に置きます。公開モックの `styles.css` を再生成時にpreview出力へコピーし、preview固有の状態・metadata表示を重ねます。ODPT/GTFS生データ、payload、preview生成物をGit管理・公開しません。

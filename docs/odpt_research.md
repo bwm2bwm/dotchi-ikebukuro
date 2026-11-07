@@ -1464,3 +1464,26 @@ v2 routeCoverageはroute9 scheduledTripCount475、originTripCount215、dataInsuf
 - **運用復旧:** 取得→検証→隔離→人手承認→公開→期限切れの実更新runbook、異常通知と担当、誤った更新のrollback/旧版復帰と検証。
 
 公開gate/承認workflowはこのPhaseで変更していない。source hash一致、意味差分0、display/DOM self-check completeのいずれも鮮度・正確性・public eligibilityを保証しない。公開v2 gateとpublication approvalを独立に通過するまでは実sourceは非公開のまま扱う。
+
+## ODPT-2D-2 手動取得基盤実装状況（オフライン範囲）
+
+`scripts/odpt_manual_fetch.py` に、合成response bytesを用いるcapture試験経路を追加した。固定7 sourceのraw bytesを新規private batchへ排他的に保存し、既存Phase 1B readerのODPT JSON/GTFS metadata検査を適用する。Source recordは既存strict schemaでvalidateし、別のhistory envelopeへ保存する。7 sourceが同一batchですべて成功した時だけ既存`validate_snapshot`に通るfetch Snapshotを作成する。`contentFingerprint`は既存のsourceId/hash/bytes定義を再利用し、`crossSourceConsistency=not-evaluated`とする。publication approval、provenance semantics、applicationPeriodは変更していない。
+
+**未実装:** ライブHTTP transport、TLS/redirect検証、秘密管理からのkey読込、実endpoint/selector証拠の永続化、attemptを跨ぐretry追記、失敗時の完成history、Phase 2A/2B/2Cを一括評価する非公開CLI入口。従ってこのCLIは常にネットワークを拒否し、実データ取得には使用できない。公式仕様の確認、transport/履歴の実装とレビューを別作業で終えるまで、2D-2は未完了とする。capture test seamはprivate試験用であり、実source用のbatch作成APIではない。
+
+合成テストは7件成功、1件欠落時のSnapshot非作成、既存batch/symlink拒否、不正JSON、サイズ上限、ライブ通信無効を確認する。hashは作成時に検証するが、Snapshot commit直前の保存ファイル再読照合は未実装。中断・手動retry・秘密漏えい・不正ZIP・hash mismatchの一連テストも未実装であり、現状の完了条件には含まれない。
+
+## ODPT-2D-2A transport・履歴・証拠・raw再照合（2026-11-07）
+
+上記2D-2の部分実装を拡張。`scripts/odpt_manual_fetch.py`の既存record生成とSnapshot契約を維持し、以下を実装した。前節の未実装記述は2D-2終了時の履歴であり、現在の残件は本節を参照。
+
+- transportは交換関数を注入可能。実adapterは標準TLS証明書/host検証、接続15秒・read30秒、非圧縮body上限128 MiB、HTTP 200とsource別MIMEを要求する。未加工bodyを保存しJSON再整形を行わない。Content-Length不一致、未知encoding、サイズ超過、parse失敗は成功にしない。
+- JSONのredirectは拒否。GTFSのみ最初の302からHTTPSの`dataodpt.blob.core.windows.net`/443へ1回許可し、userinfo・fragment・credential query/echo等を拒否。転送先の署名URLはメモリだけに保持し、API key/header/cookieを転送しない。このhostは既存GTFS取得scriptの制約に由来するもので、今回公式仕様を新規確認したものではない。`date=current/next/latest`は未使用・未確認のまま。
+- secretはprovider経由で注入し、実値の登録/読込は未実施。環境変数providerを用意したがCLIは呼ばない。認証付きリクエストURLは通信に必要なメモリ内だけで使用。例外全文・生header・Locationは保存しない。記録するcontentTypeは許可MIMEだけ、errorは固定code。credentialをそのまま/URL encodeでechoするbodyは保存拒否。任意の符号化によるechoの完全検出を保証しない。
+- 新規外部private batchに`batch.json`、`attempts/<attemptId>/started.json`・`result.json`・`evidence.json`、`raw/<固定名>`を保存する。開始前にinterrupted Source recordを耐久保存し、強制終了でresultが残らなければ中断とみなす。手動retryは前attemptを参照し、全履歴を残す。結果はraw/証拠の耐久保存後にだけ確定。途中の書込失敗は成功を返さず、孤立rawや壊れたhistoryは上書きせず停止する。自動retryなし。
+- private path検証、symlink拒否、排他的作成、atomic link・fsync、directory flockで同一batchの操作を直列化する。0700/0600を使用する。POSIXローカルfilesystemを想定し、同一ユーザーの別processによる意図的な改変・ネットワークfilesystemのdurabilityは保証対象外。
+- finalizeは全historyのstrict Source契約・retry関係・同一batch、固定7成功recordを検証し、全rawを二巡再読してhash/bytes、sourceIdから固定filename対応、JSON/GTFS形式・metadataを検証する。最後にのみstrict fetch Snapshotを排他的に確定する。JSONの業務的な路線/便対応や同一ダイヤ版性はここでは証明せず`crossSourceConsistency=not-evaluated`。既存provenance/public period/publication承認契約は変更せず、batch側で`applicationPeriod=null`/`publicationApproved=false`を保持する。Snapshot strict schemaへ承認fieldは追加しない。
+
+CLIの実通信は常時終了2で、実adapterにも通信無効guardがある。テストのTLS adapter検証はHTTPSConnection全体をmockへ置換して行う。実API、実データ、既存raw/store、Cloudflareにはアクセスしない。実TLS/転送/公式endpoint・適用期間・版整合・公開資格は未評価。
+
+2D-2Bでは、このbatch履歴と必要7原本を既存2A/2B/2Cへ安全に渡す入口を用意する。既存store readerは`sources/`7記録＋snapshotのみを受理し、retry親が欠けると契約検証で失敗するため、本batchを直接渡さない。Source/Snapshot schemaの意味を変えず全attempt契約を検証するadapterが必要。新規評価engine、実v2公開builder/runtime、公開承認は今回の対象外。

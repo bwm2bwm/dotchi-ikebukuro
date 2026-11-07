@@ -68,3 +68,5 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
 
 この文書は状態の要約であり、履歴の数値や手順を重複管理しない。
+
+Phase 2D-2A: 既存manual fetchに、TLS検証・接続/読取timeout・制限付きredirect・サイズ/status/contentType検査、注入可能transport、attempt別開始/結果/非秘密証拠、手動retry、Snapshot確定前の全raw二巡照合を追加。実通信はCLI/real adapterとも無効。取得完了は公開資格を意味せず、publicationApproved=false/applicationPeriod=null/crossSourceConsistency=not-evaluatedを維持する。合成テストのみで検証。2D-2Bにはattempt履歴付きbatchと既存Phase 2A〜2C評価の接続を残す。既存store readerへ直接渡す形式ではなく、retry親記録も含めて検証する必要がある。公式取得仕様・実TLS/転送・現行データでの動作は未検証。
