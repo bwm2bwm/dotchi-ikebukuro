@@ -3,7 +3,9 @@
 > Phase 2の実データ解析結果は文書末尾を参照。
 > 利用条件に関する2026-10-26の事務局回答は、過去の未確認事項を更新する情報として文書末尾の「T11 ODPT事務局回答」を参照する。回答の適用範囲を超える包括的許可とは解釈しない。
 
-## 現在の確定事項・未解決事項（2026-11-04）
+## 現在の確定事項・未解決事項（2026-11-07）
+
+初回正式公開を優先する直近の取得判断は、末尾の[Phase 2D-3B](#phase-2d-3b)を参照。2026-11-07の公式資料に関するユーザー確認記録と、Codexが直接確認できた範囲を区別している。実通信は無効のまま。
 
 ### 確定事項
 
@@ -1512,3 +1514,131 @@ CLIの実通信は常時終了2で、実adapterにも通信無効guardがある�
 - live形式はテスト内の合成履歴として構成し、全retry/strict契約・hash/bytes・2A/2B/2Cを実adapterで検証する。これはprovenanceの整合性検査であり、手編集された記録の外部真正性や実取得成功の証明ではない。署名基盤などは追加しない。
 
 取得先は既存`endpoint()`の固定7 sourceだけ。operator/railway filter、GTFS file pathと認証queryは既存値を維持し、未確認のdate selectorやページングを追加しない。TLS/timeout/status/MIME/redirect/サイズ/秘密非出力の既存制約を再利用する。現行値を公式確認済みと扱わない。次工程では公式URL・認証・filter・date省略時の扱い・全件取得条件を照合し、対象/保存先/通信範囲の明示許可と、policy停止の別途レビュー付き変更を経る。旧取得script、既存実原本/store、公開経路は使用・変更しない。
+
+<a id="phase-2d-3b"></a>
+
+## ODPT-2D-3B 公式仕様との照合・初回実取得準備（2026-11-07）
+
+**結論:** 指定されたPDF 2件とGTFS画像をローカルで直接確認し、根拠ページを追記した。API一般仕様・検索上限・date適用範囲・GTFS URL/認証/形式は確認できた。一方、API仕様はdatasetごとにendpointを確認するよう明記し、東京メトロの固定6 JSONごとの確定endpoint/filterと全件性の保証は資料だけでは確定できない。JSON各sourceの総合分類はC、GTFSのURL/認証/形式はAで、省略版等はC。`date`省略は取得後に版を審査する暫定案で、現行版の指定ではない。今回、資料は読取のみ。文書3件以外の変更、実装・テスト・実通信・既存原本/store・公開経路への操作はない。
+
+### 根拠の所在と確認限界
+
+公式資料の確認日は**2026-11-07**。U1/U2はリポジトリ内PDFの本文をPDFKitで読取、ページ番号を確認。U3は指定PNGを直接表示して読取。画像のページ番号は対象外。資料は参照場所から移動・変更・Git追加していない。
+
+| ID | 資料名・版 | ページ・所在 | 今回使う根拠／限界 |
+|---|---|---|---|
+| U1 | ODPT API仕様 Version 4.16（2026-09-03）、`ODPT_開発者サイト_API仕様.pdf`（全103ページ） | pp. 7–10（API一般・endpoint/search/dump/filter/auth）、p. 9（GET例/status） | HTTPS REST API、`acl:consumerKey`をqueryに指定、query値はURI encoding、property filter、複数値・複数property filter、検索結果がシステム上限を超えた場合は上限以下へ絞った結果を返し必要データをquery filterで再検索、datasetごとのendpoint確認が必要。数値上限と本7 source固有のendpoint/filterは資料の一般説明だけでは確定しない |
+| U2 | ODPT APIに関する補足、`ODPT_開発者サイト_APIに関する補足.pdf`（全6ページ） | p. 1（対象範囲）、p. 6（現行/次期/最新） | 記述の対象は会員ポータル経由で提供されるデータ。`current`=現在適用、`next`=明日以降最初に適用する次ダイヤ、`latest`=適用日が最も後のダイヤ。東京メトロ既存GTFS URLへの適用・date省略時の版は示していない |
+| U3 | 東京メトロ 鉄道関連情報、ODPT公式カタログGTFSリソース画面（2026-11-07） | 画像、ページ番号対象外 | URL `https://api.odpt.org/api/v4/files/TokyoMetro/data/TokyoMetro-Train-GTFS.zip?acl:consumerKey=...`、認証query `acl:consumerKey`、形式GTFS/GTFS-JPを画面上で確認。実キーは表示されておらず、資料は改変していない |
+| W1 | ODPT公開Webページ（Codex閲覧、2026-11-07） | 下記リンク先 | 補助確認としてカタログのJSON/GTFS形式を確認。URL・認証の直接根拠はU3画像。 |
+
+W1の参照先は[GTFSリソース](https://ckan.odpt.org/dataset/train-tokyometro/resource/d4f11962-1c5a-4316-9a16-7fb229c227ea)（GTFS/GTFS-JP）、[列車時刻表リソース](https://ckan.odpt.org/dataset/r_train_timetable-tokyometro/resource/f030d032-c3ce-4f3f-ba25-f3b78fbd5848)（JSON）、[駅情報](https://ckan.odpt.org/dataset/r_station-tokyometro)・[路線系統情報](https://ckan.odpt.org/dataset/r_route-tokyometro)・[駅時刻表](https://ckan.odpt.org/dataset/r_station_timetable-tokyometro)（JSON掲載）。個別JSON endpointはPDF記載のdataset別確認事項に従い、ここで推定しない。U3画像のURLはGTFSファイル配布先であり、実API/GTFS URLへ通信していない。
+
+### 固定7 sourceの照合
+
+コード根拠は[`odpt_source_contract.py`](../scripts/odpt_source_contract.py)の`SOURCE_FILES`と、[`odpt_manual_fetch.py`](../scripts/odpt_manual_fetch.py)の`endpoint/transport/evidence_for/run_fetch`。分類は **A=公式資料と一致、B=公式資料との不一致あり、C=公式資料だけでは未確定**。PDFのpp. 8–10はAPI一般のendpoint形式・認証・filterを示すと同時に、実際のendpointはdatasetごとに確認するよう指示する。よってJSON 6件は形式上のAPI一般仕様との一致（A相当の部分）と、東京メトロ個別endpoint/filter/全件性の未確定（C）が併存し、source全体をCとする。既知の公式記載に反する設定は見つからず、B該当はない。GTFSはU3画像上のURL・認証・形式が現行初期設定と一致するため当該項目A、date省略時の版・転送先等はC。
+
+現行baseは`https://api.odpt.org/api/v4/`。下表の`O`は`odpt:operator=odpt.Operator:TokyoMetro`、`Y`は`odpt:railway=odpt.Railway:TokyoMetro.Yurakucho`、`F`は`odpt:railway=odpt.Railway:TokyoMetro.Fukutoshin`。複数filterを同時に送るが、公式の組合せ動作も確認対象とする。
+
+| source（保存名） | 公式endpointの根拠 | 現行endpoint（base以降）・filter | 必要な取得範囲（設計上の契約） | 項目別／source全体の判定 |
+|---|---|---|---|---|
+| `metro.railway` (`Railway_all.json`) | U1 pp. 7–10はAPI検索/dumpの一般endpointを説明。dataset個別の対応は未記載 | `/api/v4/odpt:Railway`（現行検索形）、O | 東京メトロの全路線系統。`all`は全事業者ではない | API HTTPS/auth/search形式=A相当(p. 8–9)、個別URL・Oの適用・全件性=C、全体C |
+| `metro.station` (`Station_all.json`) | 同上 | `/api/v4/odpt:Station`（現行検索形）、O | 東京メトロの全駅レコード。行先名/路線駅対応・参照解決に使用 | API HTTPS/auth/search形式=A相当(p. 8–9)、個別URL・Oの適用・全件性=C、全体C |
+| `metro.train-timetable.yurakucho` (`TrainTimetable_Yurakucho.json`) | U1 pp. 7–10はAPI一般仕様。列車時刻表の型はpp. 2–3 | `/api/v4/odpt:TrainTimetable`（現行検索形）、O+Y | 有楽町線の全列車時刻表。全方向・提供される全calendar、途中駅eventを保持 | API HTTPS/auth/search形式=A相当(pp. 8–9)、Metro個別URL・O/Yの適用・全件性=C、全体C |
+| `metro.train-timetable.fukutoshin` (`TrainTimetable_Fukutoshin.json`) | U1 pp. 7–10はAPI一般仕様。列車時刻表の型はpp. 2–3 | `/api/v4/odpt:TrainTimetable`（現行検索形）、O+F | 副都心線の全列車時刻表。同上 | API HTTPS/auth/search形式=A相当(pp. 8–9)、Metro個別URL・O/Fの適用・全件性=C、全体C |
+| `metro.station-timetable.yurakucho` (`StationTimetable_Yurakucho.json`) | U1 pp. 7–10はAPI一般仕様。駅時刻表の型はpp. 2–3 | `/api/v4/odpt:StationTimetable`（現行検索形）、O+Y | 有楽町線の全駅・全方向・提供される全calendarの駅時刻表 | API HTTPS/auth/search形式=A相当(pp. 8–9)、Metro個別URL・O/Yの適用・全件性=C、全体C |
+| `metro.station-timetable.fukutoshin` (`StationTimetable_Fukutoshin.json`) | U1 pp. 7–10はAPI一般仕様。駅時刻表の型はpp. 2–3 | `/api/v4/odpt:StationTimetable`（現行検索形）、O+F | 副都心線の全駅時刻表。同上 | API HTTPS/auth/search形式=A相当(pp. 8–9)、Metro個別URL・O/Fの適用・全件性=C、全体C |
+| `metro.gtfs` (`TokyoMetro-Train-GTFS.zip`) | U3画像に完全URLと認証query。U1 p. 8は一般query認証 | `/api/v4/files/TokyoMetro/data/TokyoMetro-Train-GTFS.zip`、operator/railway/dateのqueryなし | 東京メトロの配布ZIP全体。アプリの8目的地だけに切り出さない | URL・認証・形式=A(U3)、date省略時の版・MIME・転送先=C、総合A（取得版は別途要確認） |
+
+全source共通の認証・URI・形式・CLI適合は次の通り。
+
+| 項目 | 現行実装と照合結果 |
+|---|---|
+| 認証 | GET queryに`acl:consumerKey`を追加。U1 p. 8–9、U3画像と一致(A)。query parameterとして使用する。環境provider `env_credential()`は`ODPT_API_KEY`だけを読む設計だが、通常CLIへ未接続。今回は呼んでいない |
+| URIエンコード | U1 p. 8はquery parameter値をURI encodeするよう指定。現行`urlencode(...)`はquery名/値をencodeしており一般仕様と一致(A)。TokyoMetro固有filter値・応答動作はC。secretは今回読取・使用していない |
+| JSON 6件の形式 | W1はJSON掲載(A)。実装はHTTP 200、`application/json`または`application/ld+json`、UTF-8のobject配列を要求。HTTP MIME・配列形・個別fieldの公式照合はC。空配列も現行取得validatorを通る。`_parse_json()`はJSON key重複等を拒否するが、各rowの業務fieldをstrict Source契約で検証するわけではない |
+| GTFSの形式 | GTFS/GTFS-JPはA(U3/W1)。実装はHTTP 200、ZIP/octet-streamを許可し、ZIP安全検査、必須7メンバー、feed_info 1行とversion/期間を要求。これらは既存入力契約で、GTFS一般仕様の全配布物が必ず通る保証ではない。実MIME/ZIP構成への適合はC |
+| redirect | JSONは拒否。GTFSだけ初回302→`https://dataodpt.blob.core.windows.net:443`へ最大1回。既存実装の安全制約であり、U1〜U3による公式転送先の確認ではない(C)。転送先へAPI keyを付け直さない |
+| CLI対応 | 各行のURL/filter・query encode・形式検査・7 source順次取得は実装済み。通常CLI/native adapterはpolicy拒否のため**現在は7件とも実取得不可**。設定を表現できることと、公式適合・全件性・実疎通の成立は別 |
+
+現行filterには駅・方向・calendar・列車番号による追加制限がなく、意図する対象を狭めてはいない。ただし、指定プロパティ/値と複数filterの公式動作、提供される対象範囲、上限制限が未確認のため、必要範囲を取得できるという公式根拠にはまだならない。初回公開を理由に固定sourceの範囲や名称を縮小しない。
+
+### 検索上限と全件性
+
+現行6 JSONは`/api/v4/odpt:<種別>?<filter>`型の検索APIへ各1回requestする実装で、dump APIを呼んでいない。U1 p. 8は検索endpointと検索の上限動作、p. 10はdata dump API（`/api/v4/RDF_TYPE.json?`）を別endpoint形として説明する。dump APIが対象のTokyoMetro dataset・固定7 source範囲・権限で利用可能か、サイズ条件等はこの一般記述だけでは確定できず、次工程で選択・追加requestしない。`_all.json`という保存名もdump/全件取得を示さない。GTFS file配布経路へJSON検索上限を適用する根拠はない。
+
+| JSON | 全件取得に必要な集合と条件 |
+|---|---|
+| Railway_all | Oに一致する全Railway。公式のoperator filter・提供範囲を確認し、その全集合が今回の応答に含まれる根拠が必要 |
+| Station_all | Oに一致する全Station。同上。路線ごとの同名駅等を勝手に重複削除しない |
+| TrainTimetable_Yurakucho | OかつYの全TrainTimetable。全calendar/方向/便・eventが揃うこと。filterの公式動作と上限による未返却の不存在が必要 |
+| TrainTimetable_Fukutoshin | OかつFの全TrainTimetable。同上 |
+| StationTimetable_Yurakucho | OかつYの全StationTimetable。全駅×実際に提供される方向/calendarの組と各eventが揃うこと。存在しない組を推測で要求しない |
+| StationTimetable_Fukutoshin | OかつFの全StationTimetable。同上 |
+
+U1 p. 8では検索結果がシステム上限を超えると上限以下に絞られ、必要データをquery filterで再取得する必要がある。**HTTP 200、parse成功、正常なContent-Lengthでも検索部分集合となり得る。**検索上限の数値はPDFに示されていない。128 MiB等はローカルの転送/parse安全上限で別物。上限Nだけ判明しても、公式文言上`<=N`の件数が返るので`取得件数<N`だけでは全件の証明にならない。dataset別endpoint/期待集合または網羅的な追加filter集合の根拠が必要。p. 10にdump APIも説明されるが、これを東京メトロの固定7 sourceに使える、検索上限を回避する、必要範囲だけを返すとは断定しない。
+
+| 既存の検査・評価 | 検出できること | 検出できないこと／限界 |
+|---|---|---|
+| transport・inventory・Snapshot確定 | 転送長不一致、サイズ/形式/ZIP破損、保存hash/bytes/metadataの不一致、7 source不足、失敗/中断 | 正常配列として切り詰められた検索結果。取得時点で空配列/別種rowが混じっても現行のJSON構造検査だけでは停止しない。`complete`は固定7成功参照の充足だけ |
+| Source metadata・Phase 2A | JSONの実recordCount、dc:date/dct:issuedと欠損数、旧新件数/hash/metadata差 | 公式の期待総件数がなく、増減の原因を「上限」と特定できない。同件数で別recordが欠ける場合は件数だけでは不明。旧保存値も全件性の正解ではない |
+| Phase 2B | ID集合の追加/削除/変更、型/識別子/時刻/参照構造違反、残存recordからの内部参照未解決・曖昧さ（`odpt_train_semantic_diff.py`） | 正式改正による削除と取得欠落の自動識別、旧新共通の欠落、参照元/先が同時に消える欠落、既存集合にない新規record。外部事業者参照はinternal欠落と区別する |
+| Phase 2C matcher/診断 | GTFSから生成された評価対象tripについてODPT候補の欠落/曖昧さ等をraw status、率の分子/分母、UNKNOWN/WARNINGで観測。primary/alternative・第1/第2legを区別 | 全ODPT recordを母集団にしない。評価日・8目的地・生成/候補/最良alternativeの外の便、GTFSとJSON双方にない便。照合率100%も全件性を証明しない |
+| Phase 2C routeCoverage/表示/DOM | GTFSのactive路線trip数、池袋出発trip数、候補数/不足理由、候補消失や状態変化、画面内の意味整合 | scheduledTripCount等の分母は取得済みGTFSから作る。GTFS全体から便が消えると分母も縮む。小さな整合した集合でもcoverage/DOMが成立し得る。画面外の全列車・全駅・全日を保証しない |
+
+全件性確認の最小手順（設計上の判断、今回は未実施）:
+
+1. U1 pp. 8–10のsearch/dump/filter・上限記述に照らし、東京メトロ各datasetの公式endpointと正確なfilter条件、現行filterで対象全体をカバーする条件を確認する。上限値や部分結果の識別方法は公式資料に数値記載がない。必要なら人間による事務局照会で確認する（今回は問い合わせ送信なし）。
+2. 公式非切捨て保証、当該集合の公式期待ID/件数、または利用可能な全件dumpを得た場合、その適用範囲を確認し取得後に実件数/一意ID/対象範囲を照合する。追加filterを使う場合は分割が網羅的かつ重複を安全に処理できる公式根拠が必要。既存Phase 1B件数は比較材料に限り、ハードコードした期待値/上限にしない。JSON相互参照とGTFS照合は補助根拠とする。
+3. 根拠が得られなければ全件性は未確認のまま。明示許可した非公開の初回採取で応答を観測することと、「全件取得済み」と採用することを分ける。追加の分割照会が必要になれば、公式filter/分割の網羅性・結合/重複・証拠契約と追加通信範囲を別途レビュー・許可する。推測のpage/offset/limit、場当たり的な分割・ダンプへの自動切替は実装しない。
+
+### GTFS `date`省略案と取得後の版確認
+
+**暫定採用案:** 初回は現行`endpoint()`のとおり`date`を付けず、認証queryのみで配布ZIPを受け取る。U3のURLと一致するrequestであり、省略が必ずcurrentになるとの公式確認ではない。U2 p. 1/6の説明は会員ポータル経由で提供されたデータに適用される。東京メトロの既存GTFS file URLがその対象か、date省略時に返る版は資料から確定しない。JSON APIにdateを加える根拠もない。current/next/latestの詳細・next不在や切替時刻の解明は、初回にそのselectorを使わないため必須にしない。
+
+- 省略時に確定できること: requestにdateを送らない、取得成功時にはそのrequestで返されたbytes/hash/実取得成功日時を記録できる、という事実。現時点で返る版・更新日時・適用日を確定することはできない。
+- 確定できないこと: 現行/次期/最新のどれか、会員ポータル補足の適用、cache/版切替の時刻、JSONとの同一ダイヤ版性。取得成功日時はfeed版・適用開始日ではない。feed_versionが日付らしくても意味を補わない。
+- 取得後のfeed_info: 保存ZIPをread-onlyで読み、既存Source metadataの`feedVersion/validFrom/validThrough`と`feed_version/feed_start_date/feed_end_date`を照合する。欠損・逆転・既存契約外は失敗/保留とし、旧版やmtimeから補完しない。期間に取得日が含まれても、それだけで最新版・現行ダイヤを証明しない。
+- 適用日: `calendar.txt`のservice_id別期間/曜日に`calendar_dates.txt`の追加(1)/除外(2)を適用し、実際のactive service→trips→対象路線/駅eventを確認する。既存`ItineraryGenerator.active_service_ids()`を使える。feed期間全体に全便が毎日走ると解釈せず、平日・土曜・休日・改正境界/深夜の必要日を明示する。24時超は運行日内秒として保持する。
+- 公式改正情報: 人間が東京メトロの公式改正告知・対象路線の公式時刻表・ODPT Newsの対象記事を選び、URL/確認日/改正日/対象路線/対象便・時刻を非公開審査記録へ残す。取得日前後の改正と、calendar/例外・実時刻の対応を確認する。今回新たな改正告知の探索・採用はしていない。version文字列や告知日だけから適用を推定しない。
+- JSONとの整合: 各JSONのdc:date/dct:issuedの集合/欠損と、calendar・路線・方向・便番号・発着時刻・行先・停車列を比較する。既存matcherと2B/2Cを利用し、時刻表間のtrain+calendar参照も確認する。metadataの日付一致だけを同版の証明にせず、不一致だけで即別版とも決めない。既知の照合規則/crosswalkが新規版でも有効か確認する。公開に使う運行日と便の範囲に対する根拠が不足すれば保留。
+
+この審査は取得Snapshotとは別の判断記録とし、raw・既存Source/Snapshot schemaを書き換えない。`applicationPeriod=null`、`publicationApproved=false`、`crossSourceConsistency=not-evaluated`を取得・評価CLIが自動変更しない。公開期間の設定・承認は後の公開工程で行う。
+
+### 既存CLIの準備状態と次工程の変更分類
+
+開始時はbranch `main`、HEAD `05508995ce1fd6d14dad3b90c55563828141320c`、status clean。HEADのPhase 2D-3A commit（manual fetch/評価adapter/testと4文書の計7ファイル）を確認した。既存2D-2A/2D-2B/2D-3Aの契約詳細・テスト実績は各節を正本とし、以下は初回実取得に関わる差分だけを列挙する。今回テストは変更・再実行していない。
+
+| 分類 | ファイル・機能 | 次工程で必要な最小対応 |
+|---|---|---|
+| 必須 | `scripts/odpt_manual_fetch.py`: `_require_live_policy/_transport_mode/_https_exchange`とCLI fetch/retry | 公式照合と人間の取得許可後にだけ、コード上の無条件拒否をレビューして変更する。既定拒否を保ち、許可済みの固定経路に対する明示opt-inをfetch/retry両方で要求し、credential読取・batch作成より前に検査する。現在の`--enable-live-transport`は拒否専用でretryには存在しないため、既存flagの意味とretry入口の整合を直す。定数をTrueにするだけの解除やmock seam経由の実通信は不可 |
+| 必須 | 同file: `main()`と`env_credential()` | policy通過後の通常CLIに環境providerを接続する。現状`credential_provider=None`のままなので、policy解除だけでもdriverは`credential_provider_required`で止まる。`.env.local`読込やCLI key引数は追加しない。fetch/retryとも同じ規則にする |
+| 必須 | 同file: JSON受信から成功record作成まで | 取得契約の確認済み必須field/種別/operator/路線と0件を最低限検査し、明らかな別source・範囲外・想定外の空応答を成功にせず、そのsourceで停止する。現行はobject配列であれば業務field不足や0件でも7件成功→Snapshotへ進み得る。公式schema確認後に狭い検査を加え、補完・削除・再整形・自動filter修正はしない。全件性の証明や完全な意味評価はこの検査に担わせない |
+| 必須 | `tests/test_odpt_manual_fetch.py`、必要な場合だけ`tests/test_odpt_fetch_evaluate.py` | 次工程の変更箇所について、既定拒否/許可前provider・socket未到達、固定7範囲、fetch/retry opt-in、別種/範囲外/空配列停止、秘密非出力、mock/live分離を合成・完全mockで検証する。実APIをテストに使わない。取得・provenanceが変わる範囲の既存回帰を実施する |
+| 条件付き | `odpt_manual_fetch.py`: `endpoint/transport/evidence_for` | 個別公式仕様と実装の不一致が立証された場合に限りendpoint/filter/encode/MIME等を最小修正。GTFS転送先/statusが既存制約に合わなければ停止し、追加host/status許可は別レビュー・通信許可が必要。既存成功履歴に対する設定変更でevidenceの再計算内容が変わるため、途中batchを改造して続行しない |
+| 条件付き | `odpt_manual_fetch.py`、`odpt_source_inventory.py`と対応test | 実応答のZIP構成/必須metadata等が既存契約と異なるときだけ仕様根拠を確認し、入力対応の要否を別判断する。GTFS一般仕様上の任意項目と現行readerの必須条件の差を自動緩和しない。件数制限回避が必要なら取得/証拠契約への影響も別設計。初回から追加実装しない |
+| 不要 | `odpt_source_contract.py`、`odpt_source_store.py`、`odpt_evaluation_input.py` | strict Source/Snapshot、fingerprint、legacy reader、全retry/provenance検証の変更・原本コピー・新store形式の追加は不要。補助batch/evidence v2は既にlive-httpsを表現できる |
+| 不要 | manual fetchのHTTP基盤、履歴、`run_fetch/acquire/finalize` | TLS/timeout・既存制約、排他的private保存、attempt/retry親、失敗/中断停止、成功raw二巡照合とSnapshot markerを再利用する。driver再実装、自動retry、孤立raw/historyの自動修復は不要 |
+| 不要 | `odpt_fetch_evaluate.py`とPhase 2A〜2Cの既存評価engine | sealed fetch batchの読取専用adapterとstage別入口は存在する。比較/品質engineの新設、公開資格の自動付与は不要。新旧で同じ最終コード/context/runtimeを使い直す。異世代で比較可能日がなければ比較不能を残し、必要なcandidate単体QAは既存collectorで行う |
+| 不要 | 全般 | date=current/next/latest、推測ページング、定期更新・監視・通知、汎用policy/credential基盤、Cloudflare/公開builder/runtime/承認gateの変更は初回取得に追加しない |
+
+**次工程の最小実装範囲:** 原則`odpt_manual_fetch.py`の「既定拒否を保つ明示ライブ許可」「環境provider配線」「確認済みsource範囲の受信時停止検査」と、その必要な合成回帰だけ。endpoint等の変更は公式照合の結果が示した場合に限る。取得件数の上限値が不明という理由だけで取得方式を増築しない。inspectは現行では件数要約だけなので、retry理由は非公開のattempt/result/evidenceを人間が確認する。初回用の新しい履歴画面・レポート保存機能は不要。
+
+### 解決事項の期限と安全な初回実行計画（未許可・未実施）
+
+| 期限 | 必要な解決・判断 |
+|---|---|
+| 実取得開始前 | U1のJSON個別endpoint/filter/組合せ/応答schemaの照合とページ根拠。U3の初期URL・認証について共有記録の採用範囲を明示。保存先・実行環境・認証設定方法・通信host/path・GTFS redirectの許可範囲について人間の明示許可。上記必須実装・合成回帰・レビュー。全件性を確認する方法と未確認時の停止/採用保留を決める |
+| 取得後、全件取得済みとして採用する前 | 6 JSONごとの全件性の根拠と実件数/ID・範囲照合。具体的上限の解明だけを一律必須とはせず、公式非切捨て保証や独立期待集合で代替できる。根拠不足なら非公開の観測結果にとどめる |
+| 初回正式公開の承認前 | GTFS実版/運行日・公式改正情報・JSONとの版整合、必要な品質/表示QAと未評価の説明、適用期間と公開条件の審査。これらは実取得前に推測で埋めない |
+
+1. **準備・許可境界を固定する。** 次工程開始時にもbranch/HEAD/status、既存原本7件/storeをread-onlyにする方針を確認する。人間が、実装変更の範囲と、実取得の対象7 source・保存先・通信を明示的に許可する。実装の許可とネットワーク実行の許可を混同しない。許可内容は秘密を含まない記録にする。
+2. **通信範囲を限定する。** `api.odpt.org:443`の表にある4 JSON resource path（6 filter組）とGTFS file pathへのGETのみ。GTFSの既存302転送先を許可する場合は`dataodpt.blob.core.windows.net:443`へ1回という境界も明記する。承認しない場合は追従を無効にする変更が必要。追加のmetadata/照合API、HEAD疎通、別selector/追加filterの試行はこの7 source取得許可に含めない。通常は7 GET、許可したGTFS転送がある場合だけ追加1 GET。retryは別の明示操作とする。
+3. **新規の非公開保存先を用意する。** repository・公開/preview/QA経路・既存原本/storeとは別の、同期/公開対象でないローカルPOSIX領域を人間が選ぶ。候補は`~/Library/Application Support/dotchi-ikebukuro-odpt-acquisition/<new-batch-id>`の絶対path（現時点では未作成・権限/非同期性未検証）。親を事前に用意し、symlink/既存destinationを拒否、dir 0700/file 0600を維持する。sandbox許可が必要な保存先は次工程で許可を得る。`/private/tmp`は合成検証用であり正式な保存先に自動採用しない。`init`はoffline batchを作るためlive fetchの前に実行しない。live fetch自身に新規batchを作らせる。
+4. **認証を人間の実行環境に安全に設定する。** 認証providerは`ODPT_API_KEY`。人間がechoしない対話入力等で実行processの環境に設定する。キーをチャット、shell引数/履歴、repository、`.env.local`、ブラウザーURL、保存ログへ書かない。`env`/`printenv`等で検査表示しない。Codexが値を読み取る操作をこの文書で許可しない。実行後は当該環境から解除する。
+5. **一度だけ順次取得する。** 必須修正・mock検証後の確定CLIを、人間が許可済みのライブopt-inで実行する。順序は表の7 source。現行CLIは未対応なので本節を今すぐ実行できるコマンドとは扱わない。各attemptは開始時刻/IDを先に耐久保存し、HTTP安全要約、固定path/filter、selector不使用、transport、結果、metadata件数/期間、rawのSHA-256/bytesと実取得成功日時を既存形式に残す。rawは応答bytesそのまま、キー付きURL・生header/Location・署名URLは証拠へ残さない。
+6. **想定外なら停止する。** TLS/timeout/status/MIME/encoding/長さ/JSON/ZIP/範囲検査失敗・中断・保存失敗で後続sourceへ進まない。別のendpoint/filter/date/MIME/転送先への自動修正やfallbackはしない。取得後に判明した版/全件性/意味仕様の差も、その段階で評価・候補採用を停止/保留する。新規requestを重ねて解決しない。既存成功raw・開始/失敗証拠・孤立rawは消去/上書きしない。
+7. **retryは人間が理由を確認して明示する。** sourceId、attemptId、outcome、固定errorCode、statusを非公開記録で確認する。通信一過性と判断できる失敗/中断または最初の未試行sourceだけを、同じ承認済み設定の`retry --source`で指定する。成功sourceは再取得せず、親attemptを残し、過去rawを再照合して未試行分へ続く。仕様差・設定変更・孤立raw・壊れたhistoryならretryせず停止する。変更が必要なら別レビュー/許可後、新規batchで採取し、旧不完全batchを保存する。
+8. **Snapshotを確定する。** 7 sourceが同一batchで各1成功した時だけ、全retry/契約検査、raw全件二巡hash/bytes/形式/metadata照合、最後の完成markerである`snapshot.json`保存を既存`finalize()`で行う。現在のdriverは7件成功後に自動でこれを行うため、手動finalizeを重ねない。Snapshot完成は取得履歴の確定であり、全件性・同一版・公開承認の確定ではない。
+9. **read-onlyで版/全件性とPhase 2A〜2Cを評価する。** `odpt_fetch_evaluate.py`へbaseline store/rawとcandidate batchを明示し、`--stage 2a`→`2b`→`2c`で既存入口を使用する。2Cは共通に有効なservice dates、固定UTC観測1点、DOM対象8駅を明示し、同じ凍結engine/context/runtimeで旧新を再計算する。観測JST日と前後1日の3日closureを含め、平日/土曜/休日と必要な深夜/改正境界の確認を計画する。必要なら別観測点の評価を明示的に追加する。共通期間がなければ比較不能を保持し、candidate単体評価を旧世代比較の代用としない。CLI終了0やpartial/indeterminateを公開PASSへ読み替えない。詳細結果は既存APIのメモリ上で非公開審査し、CLIの状態要約だけで品質を判断しない。
+10. **公開承認を別工程にする。** 全件性、実feed/適用日、公式改正情報、JSONとの整合、評価で残った欠落・未知/未評価を秘密抜きの判断記録にまとめる。生データや詳細旅程をGit/公開経路へ複写しない。必要な公開QA/期間・条件の審査と人間の明示承認が揃うまで公開しない。今回もCommit/Push/Merge/Deploy、Cloudflare/公開経路の操作はない。

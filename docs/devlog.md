@@ -1087,3 +1087,22 @@
 - CLI/transport/native adapterの実通信は`_require_live_policy()`のコード停止を維持。定数変更・通常optionだけでは解除できず、通常CLIはprovider読込/保存先作成より前に拒否する。実APIキーの環境設定・読込・使用なし。許可されたendpoint/configと明示取得許可は別工程で必要。
 - 最終関連120件PASS（144.428秒）：manual fetch 33件（新規13＋既存20）、取得評価11件、Source/Snapshot契約・inventory/store/2A、統合semantics/GTFS loader、quality inputの回帰。正常7件、CLI接続、最初のHTTP/timeout/中断停止、retry/履歴保持、未完了・raw改変、offline/live区別・旧v1互換・不正provenance、秘密非出力、定数/option/通常CLIの通信拒否、承認状態不変を確認。TLS adapterテストもHTTPSConnectionをmock化し、外部通信なし。実generator→v2→board→DOMは合成既知0候補の範囲であり実ダイヤ品質は未評価。
 - README、project_state、research、本履歴とmanual fetch/評価adapter/既存manual fetch testの7ファイルを変更。help-offline/help、git diff --check PASS。既存実原本7件/storeは操作・コピーせず、合成fixtureだけを使用。実原本の前後hash計測は未実施。実アクセス・実取得・Cloudflare/公開builder/runtime/広告変更、Commit/Push/Merge/Deployなし。
+
+## 2026-11-07 — ODPT Phase 2D-3B 公式照合・初回実取得準備（文書のみ）
+
+- 開始main / `05508995ce1fd6d14dad3b90c55563828141320c`、status clean。HEADに2D-3AのCLI/履歴・評価adapter・合成テストと文書が反映されていることを確認した。
+- 指定のAPI仕様4.16（2026-09-03、全103ページ）/API補足（全6ページ）/GTFS公式カタログスクリーンショットは直接参照できず、ユーザーの2026-11-07確認記録として採用範囲を明記。該当ページ番号は未確認。公開Web閲覧は開発者サイト/API補足とカタログ等の文書ページに限定し、カタログ形式を確認。取得本文からURL/認証は再確認できず、実API/配布URLは開いていない。
+- 固定7 sourceのendpoint/認証/filter/encode/形式/範囲/CLI適合をresearchへ追記。GTFS初期URL/認証/形式は共有記録と一致するが、JSON個別仕様・全件性、GTFS省略版/転送条件等が残るため最終分類は全7件C。不一致Bを立証したわけではない。
+- 検索6 JSONの件数上限値は不明。200・Content-Length・hash/bytes・Snapshot completeと、全件性を区別。2Aの件数差、2Bの集合/残存参照、2Cの生成対象matcher/GTFS由来coverageで見える欠落と、旧新共通/評価範囲外/両source同時欠落を分けた。推測ページングは提案しない。
+- date省略を暫定案とし、feed_info/calendar/例外・公式改正情報・JSON整合による取得後審査を計画。current/next/latestの詳細解明は初回に使わない限り必須化しない。次工程の最小変更は既存manual fetchの明示ライブ許可、環境provider配線、source範囲/空応答の停止検査と合成回帰。retry/provenance/確定/2A〜2C入口は再利用する。許可・非公開保存・証拠・失敗停止・手動retry・公開承認分離の手順をresearchへ集約した。
+- 変更はresearch/project_state/本履歴だけ。コード・設定・テストを変更せず、テスト実行もなし。実APIアクセス・新規実取得・通信有効化・実キー読取/使用・既存原本/storeの読取/コピー/移動/変更・Cloudflare/公開経路操作・Commit/Push/Merge/Deployなし。原本/storeの前後hash計測はしていない。
+- 文書差分を確認し、`git diff --check` PASS。終了時もmain/同一HEAD、未コミット変更は上記3文書のみ。
+
+### 同日追補 — references内公式資料の直接確認
+
+- 作業再開時branch `main`、HEAD `05508995ce1fd6d14dad3b90c55563828141320c`。前回の文書変更3件は継続。新規 `references/` はユーザー指定の3資料のみ。内容はread-onlyで確認し、Git追加・資料変更・移動なし。
+- PDFKitでAPI仕様Version 4.16全103ページと補足全6ページを抽出。API仕様pp. 7–10からHTTPS REST/search/dump endpoint形式、`acl:consumerKey`、query URI encode、datasetごとのendpoint確認、filter、件数上限超過時の制限と追加filter再取得を確認。p. 10のdump endpointも記録し、固定TokyoMetro sourceでの利用可否は推測しない。API補足p. 1/6からdateの説明が会員ポータル経由データを対象とすること、およびcurrent/next/latestの意味を確認。
+- PNGを直接表示し、GTFS file URL、`acl:consumerKey` query、GTFS/GTFS-JP形式を確認。トークン部はplaceholder表示。実キー読取・使用なし。
+- researchの資料一覧・ページ根拠、JSON6件のC/GTFS設定A、件数上限/検索全件性、date適用範囲と初回取得前の残課題を補完。project_stateの直接未閲覧記述を訂正。
+- PDFはPoppler/pypdfが環境になかったためmacOS標準PDFKit経由で読取。調査に必要なページと全文抽出結果を確認。実API/ファイル配布URLへの通信なし。既存原本/store非操作、コード・設定・test変更なし、Commit等なし。文書差分のみ。
+- 先行する同日記録内の「資料を直接参照できず」「全7 source C」「終了時の未コミット変更は3文書のみ」は、資料配置後の作業再開前の状態であり、この追補で更新する。終了時の`git status`には許可された3文書変更に加え、ユーザー配置の未追跡`references/`が表示される。資料はそのまま保持し、stage/addしていない。

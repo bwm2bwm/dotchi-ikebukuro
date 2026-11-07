@@ -53,8 +53,8 @@ Phase 2C-3d-4では固定実source観測時刻4点（JST 10/29 23:59:59、10/30 
 
 - 保存sourceの取得成功日時、最新性、ODPTとGTFSの同一ダイヤ版性。
 - 実データの承認済み `applicationPeriod` と、GTFS feed期間との整合規則。
-- ODPT Newsの確認頻度と担当運用、東京メトロGTFSへの `date=current/next/latest` 適用可否。
-- 新規取得履歴生成、未知selector・補助参照の意味解明、candidate gateは未実装。ODPT-2F設計提案の実施順と閾値は未承認。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
+- JSON 6件の公式endpoint/filterと全件性。東京メトロGTFSのdate省略時の版とJSONとの整合は取得後に要審査。`date=current/next/latest`の解明・将来の通知運用は初回取得の必須条件にしない。
+- 手動取得履歴生成・評価接続は2D-3Aまで実装済みだが、実通信policyと環境providerのCLI接続は未対応。未知selector・補助参照の意味解明、candidate gateは未完。保存済みsourceの取得成功日時・最新性・適用期間は不明のまま。
 - 公開payloadの再構成リスク、表示・クレジット条件の実データ公開適用確認。
 - release-managedのrollback実地確認、旧タブ・cache境界QA。
 - 運行日境界を跨ぐ乗換探索は未実装。
@@ -63,9 +63,9 @@ ODPT事務局の2026-10-26回答で確認済みの範囲（説明した構成で
 
 ## 次の作業
 
-1. 未知selector・補助関係の評価範囲、世代別raw保管方式、画面表示モデル比較・未収集の検査metricsを後続Phaseで設計する。
-2. Source取得履歴とapplicationPeriod根拠の検証を、差分処理・公開判断から分離して設計する。
-3. 未解決のstaging QAを整理する。実データ公開の判断は根拠と検証結果が揃った後に別途行う。
+1. 初回正式公開を優先し、[Phase 2D-3B](odpt_research.md#phase-2d-3b)の未確認事項（JSON endpoint/filter・全件性、date省略版、初回取得の許可範囲/非公開保存先）を確定する。指定PDF/画像の一般API根拠は2026-11-07に直接確認し、該当ページをresearchへ記録した。
+2. 別途許可された次工程でのみ、既存manual fetchの明示ライブ許可・環境provider接続・source範囲の受信時停止検査と必要な合成回帰を最小実装する。今回の実装・実取得は行わない。
+3. 明示許可後の非公開7 source取得、版/全件性確認、既存2A〜2C評価へ進む。未解決QA・適用期間・公開条件を審査し、公開承認は別に行う。自動更新・監視設計は追加しない。
 
 この文書は状態の要約であり、履歴の数値や手順を重複管理しない。
 
@@ -74,3 +74,5 @@ Phase 2D-2A: 既存manual fetchに、TLS検証・接続/読取timeout・制限�
 Phase 2D-2B: 読取専用`odpt_evaluation_input.py`で確定済みfetch batchの全attempt/retry・成功選択・strict Snapshot参照/fingerprint・raw hash/bytes/形式を検証し、選択7件を既存2A/2B/2Cへ渡す。旧store reader/schemaと取得処理は維持。品質collectorの物理inventoryはattempt/証拠を含む可変数metadataへ対応。`odpt_fetch_evaluate.py`で評価stageと、2Cのservice dates/UTC観測1点/DOM対象駅を明示する。生成/QA stateは全8駅、scenario4種、同一凍結engine/context/runtimeを要求。原本コピー・レポート保存なし。公開承認/期間/版整合を変更しない。異世代実Snapshot・鮮度・公開資格・実ブラウザー描画は未評価。2D-3で実取得へ進むには公式経路/selector・期間/版整合根拠と明示的取得許可が必要。
 
 Phase 2D-3A: manual fetchの固定7 source driverをCLIへ接続。新規先必須、最初の失敗/中断で停止、対象明示retry＋未試行sourceの続行、7成功後だけraw再照合/Snapshot確定を実装。通常CLI/real adapterはコード上のpolicy停止で通信禁止（定数や通常flagだけでは解除不可）。mock注入はPythonテスト入口のみ。補助batch/evidence v2はmock/liveを区別し、旧v1 offlineを維持。評価adapterは共通のprovenance検証を使用し、Source/Snapshot strict schema・承認状態は維持する。live形式の検証は合成fixtureのみで、実取得した証明にはしない。公式取得経路/認証/filter/date省略/全件取得条件と、ライブ設定・保存先・通信範囲の明示許可は未成立。
+
+Phase 2D-3B: 2026-11-07に公式API仕様PDF pp. 7–10、API補足pp. 1/6、東京メトロGTFS公式catalog画像を直接確認。一般HTTPS/query認証/encode/filter/search upper-limit/dump endpoint根拠をresearchへ反映。JSON個別endpoint/filterと全件性は6件ともC。GTFS初期URL/認証/形式は画像に一致しA、省略版・転送先等は未確認。200/coverage/matcher/Snapshot completeは検索切捨てや共通欠落を証明しない。date省略案は会員ポータル補足の対象限定と東京メトロURLへの適用未確認を明記し、取得後にfeed/calendar・公式改正情報・JSON整合を審査。最小変更案と安全な実行計画をresearchへ集約。文書以外は変更なし。
