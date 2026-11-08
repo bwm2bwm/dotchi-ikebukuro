@@ -84,6 +84,16 @@ class SiteTests(unittest.TestCase):
         with self.assertRaises(ArtifactValidationError):
             validate_release_managed_artifact(self.output)
 
+    def test_full_site_keeps_test_publication_notice_visible(self):
+        self.build()
+        html = (self.output / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('【テスト公開中】', html)
+        self.assertIn('現在、動作確認のためテスト公開しています。', html)
+        self.assertIn('表示される時刻はリアルタイムの運行情報ではありません。', html)
+        self.assertIn('実際のご利用時は鉄道事業者の公式情報をご確認ください。', html)
+        self.assertIn('データの出典・適用期間とご利用上の注意', html)
+        self.assertIn('data-contact-url="https://example.invalid/contact?kind=synthetic&amp;lang=ja"', html)
+
     def test_each_asset_tamper_and_missing_are_rejected(self):
         self.build()
         for name in c.SITE_ASSETS:

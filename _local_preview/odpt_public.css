@@ -7,6 +7,17 @@
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+.test-publication-notice {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid #d9d7d1;
+  border-radius: 8px;
+  background: #f8f7f4;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.test-publication-notice p { margin: 2px 0 0; }
 .publication-information summary { cursor: pointer; font-weight: 600; }
 .publication-information dl { margin: 12px 0; }
 .publication-information dt { font-weight: 600; }
